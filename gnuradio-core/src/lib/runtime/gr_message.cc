@@ -43,10 +43,16 @@ gr_make_message_from_string(const std::string s, long type, double arg1, double 
   return m;
 }
 
+void gr_message::set_timestamp(uint64_t ps, double pfs) {
+	d_timestamp_valid=true;
+	d_preamble_sec=ps;
+	d_preamble_frac_sec=pfs;
+}
 
 gr_message::gr_message (long type, double arg1, double arg2, size_t length)
   : d_type(type), d_arg1(arg1), d_arg2(arg2)
 {
+	d_timestamp_valid=false;
   if (length == 0)
     d_buf_start = d_msg_start = d_msg_end = d_buf_end = 0;
   else {

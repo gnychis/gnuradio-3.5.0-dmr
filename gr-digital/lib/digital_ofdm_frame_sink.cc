@@ -40,6 +40,8 @@ using namespace arma;
 using namespace std;
 
 #define VERBOSE 0
+static const pmt::pmt_t SYNC_TIME = pmt::pmt_string_to_symbol("sync_time");
+int last_noutput_items;
 
 inline void
 digital_ofdm_frame_sink::enter_search()
@@ -395,6 +397,8 @@ digital_ofdm_frame_sink::work (int noutput_items,
 {
   gr_complex *in = (gr_complex *) input_items[0];
   const char *sig = (const char *) input_items[1];
+  
+  last_noutput_items=noutput_items;
 
   /* channel estimates if applicable */
   gr_complex *in_estimates = NULL;
@@ -1142,6 +1146,21 @@ digital_ofdm_frame_sink::demodulate(vector<gr_complex*> out_sym_vec)
 		
                   gr_message_sptr msg = gr_make_message(0, d_packet_whitener_offset, 0, packetlen_cnt);
                   memcpy(msg->msg(), packet, packetlen_cnt);
+
+                  // With a good header, let's now check for the preamble sync timestamp
+                  std::vector<gr_tag_t> rx_sync_tags;
+                  const uint64_t nread = this->nitems_read(0);
+                  this->get_tags_in_range(rx_sync_tags, 0, nread, nread+last_noutput_items, SYNC_TIME);
+                  if(rx_sync_tags.size()>0) {
+                    size_t t = rx_sync_tags.size()-1;
+                    const pmt::pmt_t &value = rx_sync_tags[t].value;
+                    uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+                    double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+                    msg->set_timestamp(sync_secs, sync_frac_of_secs);
+                  } else {
+                    //std::cerr << "---- Header received, with no sync timestamp?\n";
+                  }
+
                   d_target_queue->insert_tail(msg);               // send it
                   msg.reset();                            // free it up
               }

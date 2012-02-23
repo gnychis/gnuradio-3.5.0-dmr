@@ -54,6 +54,9 @@ public:
   void set_type(long type)   { d_type = type; }
   void set_arg1(double arg1) { d_arg1 = arg1; }
   void set_arg2(double arg2) { d_arg2 = arg2; }
+  long timestamp_valid() const { return (long)d_timestamp_valid; }
+  long preamble_sec() const { return (long)d_preamble_sec; }
+  double preamble_frac_sec() const { return d_preamble_frac_sec; }
 
   size_t length() const;
   std::string to_string() const;

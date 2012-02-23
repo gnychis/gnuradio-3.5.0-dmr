@@ -377,7 +377,7 @@ class _queue_watcher_thread(_threading.Thread):
 		print "here!"
                 ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string())                  
                 if self.callback:
-                   self.callback(ok, payload)
+                  self.callback(ok, payload, msg.timestamp_valid(), msg.preamble_sec(), msg.preamble_frac_sec())
 	    
 	    ######### for sending DATA/ACK ##########
 	    elif (msg.type() == 1 or msg.type() == 2):

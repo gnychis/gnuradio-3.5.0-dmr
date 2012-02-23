@@ -369,6 +369,10 @@ class gr_message {
   double	  d_arg1;	// optional arg1
   double 	  d_arg2;	// optional arg2
   char		  d_arg3;
+  
+  bool 			d_timestamp_valid;		// whether the timestamp is valid
+  uint64_t 	d_preamble_sec;				// the preamble sync time in seconds
+  double 		d_preamble_frac_sec;	// the preamble sync time's fractional seconds
 
   unsigned char	 *d_buf_start;	// start of allocated buffer
   unsigned char  *d_msg_start;	// where the msg starts
@@ -390,6 +394,7 @@ class gr_message {
 
 public:
   ~gr_message ();
+  void set_timestamp(uint64_t ps, double pfs);
 
   long type() const   { return d_type; }
   double arg1() const { return d_arg1; }
@@ -400,6 +405,10 @@ public:
   void set_arg1(double arg1) { d_arg1 = arg1; }
   void set_arg2(double arg2) { d_arg2 = arg2; }
   void set_arg3(double arg3) { d_arg3 = arg3; }
+
+  long timestamp_valid() const { return (long)d_timestamp_valid; }
+  long preamble_sec() const { return (long)d_preamble_sec; }
+  double preamble_frac_sec() const { return d_preamble_frac_sec; }
 
   unsigned char *msg() const { return d_msg_start; }
   size_t length() const      { return d_msg_end - d_msg_start; }

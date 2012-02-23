@@ -68,14 +68,14 @@ def main():
     n_rcvd = 0
     n_right = 0
 
-    def rx_callback(ok, payload): #, valid_timestamp, timestamp_sec, timestamp_frac_sec):
+    def rx_callback(ok, payload, valid_timestamp, timestamp_sec, timestamp_frac_sec):
         global n_rcvd, n_right
         n_rcvd += 1
         (pktno,) = struct.unpack('!H', payload[0:2])
         if ok:
             n_right += 1
         #print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t valid_ts: %d \t sec: %d \t frac_sec: %f" % (ok, pktno, n_rcvd, n_right, valid_timestamp, timestamp_sec, timestamp_frac_sec)
-	print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d" % (ok, pktno, n_rcvd, n_right)
+        print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t valid_ts: %d \t sec: %d \t frac_sec: %f" % (ok, pktno, n_rcvd, n_right, valid_timestamp, timestamp_sec, timestamp_frac_sec)
 
         if 0:
             printlst = list()
