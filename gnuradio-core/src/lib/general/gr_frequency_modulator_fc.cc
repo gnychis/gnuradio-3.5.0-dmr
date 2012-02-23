@@ -28,6 +28,7 @@
 #include <gr_io_signature.h>
 #include <gr_sincos.h>
 #include <math.h>
+#include <cstdio>
 #include <boost/math/special_functions/trunc.hpp>
 
 
@@ -52,6 +53,7 @@ gr_frequency_modulator_fc::work (int noutput_items,
   const float *in = (const float *) input_items[0];
   gr_complex *out = (gr_complex *) output_items[0];
 
+  //printf("noutput_items: %d\n", noutput_items); fflush(stdout);
   for (int i = 0; i < noutput_items; i++){
     d_phase = d_phase + d_sensitivity * in[i];
     float oi, oq;

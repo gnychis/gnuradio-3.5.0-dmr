@@ -34,7 +34,7 @@ from uhd_interface import uhd_receiver
 import struct, sys
 
 class my_top_block(gr.top_block):
-    def __init__(self, callback, options):
+    def __init__(self, callback, fwd_callback, options):
         gr.top_block.__init__(self)
 
         if(options.rx_freq is not None):
@@ -51,9 +51,10 @@ class my_top_block(gr.top_block):
         # Set up receive path
         # do this after for any adjustments to the options that may
         # occur in the sinks (specifically the UHD sink)
-        self.rxpath = receive_path(callback, options)
+        self.rxpath = receive_path(callback, fwd_callback, options)
 
         self.connect(self.source, self.rxpath)
+	#self.connect(self.rxpath)
         
 
 # /////////////////////////////////////////////////////////////////////////////
@@ -67,13 +68,14 @@ def main():
     n_rcvd = 0
     n_right = 0
 
-    def rx_callback(ok, payload):
+    def rx_callback(ok, payload): #, valid_timestamp, timestamp_sec, timestamp_frac_sec):
         global n_rcvd, n_right
         n_rcvd += 1
         (pktno,) = struct.unpack('!H', payload[0:2])
         if ok:
             n_right += 1
-        print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d" % (ok, pktno, n_rcvd, n_right)
+        #print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t valid_ts: %d \t sec: %d \t frac_sec: %f" % (ok, pktno, n_rcvd, n_right, valid_timestamp, timestamp_sec, timestamp_frac_sec)
+	print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d" % (ok, pktno, n_rcvd, n_right)
 
         if 0:
             printlst = list()
@@ -87,12 +89,17 @@ def main():
             print printable
             print "\n"
 
+    def fwd_callback():
+            print "fwd_callback (wrapper) invoked!"
+
     parser = OptionParser(option_class=eng_option, conflict_handler="resolve")
     expert_grp = parser.add_option_group("Expert")
     parser.add_option("","--discontinuous", action="store_true", default=False,
                       help="enable discontinuous")
     parser.add_option("","--from-file", default=None,
                       help="input file of samples to demod")
+
+    parser.add_option("", "--snr", type="eng_float", default=30, help="set the SNR of the channel in dB [default=%default]")
 
     receive_path.add_options(parser, expert_grp)
     uhd_receiver.add_options(parser)
@@ -107,7 +114,7 @@ def main():
             sys.exit(1)
 
     # build the graph
-    tb = my_top_block(rx_callback, options)
+    tb = my_top_block(rx_callback, fwd_callback, options)
 
     r = gr.enable_realtime_scheduling()
     if r != gr.RT_OK:

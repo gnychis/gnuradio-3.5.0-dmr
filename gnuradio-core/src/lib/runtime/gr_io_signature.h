@@ -23,7 +23,6 @@
 #ifndef INCLUDED_IO_SIGNATURE_H
 #define INCLUDED_IO_SIGNATURE_H
 
-#include <gr_core_api.h>
 #include <gr_runtime_types.h>
 
 /*!
@@ -34,7 +33,7 @@
  * \param max_streams  specify maximum number of streams (>= min_streams or -1 -> infinite)
  * \param sizeof_stream_item  specify the size of the items in each stream
  */
-GR_CORE_API gr_io_signature_sptr
+gr_io_signature_sptr
 gr_make_io_signature(int min_streams, int max_streams,
 		     int sizeof_stream_item);
 
@@ -46,7 +45,7 @@ gr_make_io_signature(int min_streams, int max_streams,
  * \param sizeof_stream_item1 specify the size of the items in the first stream
  * \param sizeof_stream_item2 specify the size of the items in the second and subsequent streams
  */
-GR_CORE_API gr_io_signature_sptr
+gr_io_signature_sptr
 gr_make_io_signature2(int min_streams, int max_streams,
 		      int sizeof_stream_item1,
 		      int sizeof_stream_item2
@@ -61,12 +60,20 @@ gr_make_io_signature2(int min_streams, int max_streams,
  * \param sizeof_stream_item2 specify the size of the items in the second stream
  * \param sizeof_stream_item3 specify the size of the items in the third and subsequent streams
  */
-GR_CORE_API gr_io_signature_sptr
+gr_io_signature_sptr
 gr_make_io_signature3(int min_streams, int max_streams, 
 		      int sizeof_stream_item1,
 		      int sizeof_stream_item2,
 		      int sizeof_stream_item3
 		      );
+
+gr_io_signature_sptr
+gr_make_io_signature4(int min_streams, int max_streams,
+                      int sizeof_stream_item1,
+                      int sizeof_stream_item2,
+                      int sizeof_stream_item3,
+		      int sizeof_stream_item4
+                      );
 
 /*!
  * \brief Create an i/o signature
@@ -79,7 +86,7 @@ gr_make_io_signature3(int min_streams, int max_streams,
  * value of the last entry in sizeof_stream_items is used for the missing values.
  * sizeof_stream_items must contain at least 1 entry.
  */
-GR_CORE_API gr_io_signature_sptr
+gr_io_signature_sptr
 gr_make_io_signaturev(int min_streams, int max_streams,
 		      const std::vector<int> &sizeof_stream_items);
 
@@ -88,7 +95,7 @@ gr_make_io_signaturev(int min_streams, int max_streams,
  * \brief i/o signature for input and output ports.
  * \brief misc
  */
-class GR_CORE_API gr_io_signature {
+class gr_io_signature {
   int			d_min_streams;
   int			d_max_streams;
   std::vector<int>	d_sizeof_stream_item;
@@ -96,7 +103,7 @@ class GR_CORE_API gr_io_signature {
   gr_io_signature(int min_streams, int max_streams,
 		  const std::vector<int> &sizeof_stream_items);
 
-  friend GR_CORE_API gr_io_signature_sptr 
+  friend gr_io_signature_sptr 
   gr_make_io_signaturev(int min_streams,
 			int max_streams,
 			const std::vector<int> &sizeof_stream_items);

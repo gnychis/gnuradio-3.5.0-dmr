@@ -27,6 +27,7 @@ typedef boost::shared_ptr<gr_io_signature>  gr_io_signature_sptr;
 %rename(io_signature)  gr_make_io_signature;
 %rename(io_signature2) gr_make_io_signature2;
 %rename(io_signature3) gr_make_io_signature3;
+%rename(io_signature4) gr_make_io_signature4;
 %rename(io_signaturev) gr_make_io_signaturev;
 
 
@@ -45,6 +46,13 @@ gr_make_io_signature3(int min_streams, int max_streams,
 		      int sizeof_stream_item2,
 		      int sizeof_stream_item3
 		      );
+gr_io_signature_sptr
+gr_make_io_signature4(int min_streams, int max_streams,
+                      int sizeof_stream_item1,
+                      int sizeof_stream_item2,
+                      int sizeof_stream_item3,
+                      int sizeof_stream_item4
+                      );
 gr_io_signature_sptr
 gr_make_io_signaturev(int min_streams, int max_streams,
 		      const std::vector<int> &sizeof_stream_items);

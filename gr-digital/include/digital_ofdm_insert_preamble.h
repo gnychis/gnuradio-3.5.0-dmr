@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright 2007,2011 Free Software Foundation, Inc.
+ * Copyright 2007 Free Software Foundation, Inc.
  * 
  * This file is part of GNU Radio
  * 
@@ -31,7 +31,7 @@ typedef boost::shared_ptr<digital_ofdm_insert_preamble> digital_ofdm_insert_prea
 
 DIGITAL_API digital_ofdm_insert_preamble_sptr
 digital_make_ofdm_insert_preamble(int fft_length,
-				  const std::vector<std::vector<gr_complex> > &preamble);
+			     const std::vector<std::vector<gr_complex> > &preamble);
 
 /*!
  * \brief insert "pre-modulated" preamble symbols before each payload.
@@ -67,11 +67,11 @@ class DIGITAL_API digital_ofdm_insert_preamble : public gr_block
 {
   friend DIGITAL_API digital_ofdm_insert_preamble_sptr
   digital_make_ofdm_insert_preamble(int fft_length,
-				    const std::vector<std::vector<gr_complex> > &preamble);
+			       const std::vector<std::vector<gr_complex> > &preamble);
 
 protected:
   digital_ofdm_insert_preamble(int fft_length,
-			       const std::vector<std::vector<gr_complex> > &preamble);
+			  const std::vector<std::vector<gr_complex> > &preamble);
 
 private:
   enum state_t {
@@ -102,4 +102,4 @@ public:
 		    gr_vector_void_star &output_items);
 };
 
-#endif /* INCLUDED_DIGITAL_OFDM_INSERT_PREAMBLE_H */
+#endif /* INCLUDED_GR_OFDM_INSERT_PREAMBLE_H */

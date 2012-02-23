@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright 2006,2007,2011 Free Software Foundation, Inc.
+ * Copyright 2006,2007 Free Software Foundation, Inc.
  * 
  * This file is part of GNU Radio
  * 
@@ -24,16 +24,70 @@
 #define INCLUDED_DIGITAL_OFDM_MAPPER_BCV_H
 
 #include <digital_api.h>
+#include <cstdio>
 #include <gr_sync_block.h>
 #include <gr_message.h>
 #include <gr_msg_queue.h>
+//#include <digital_ofdm_frame_sink.h> 
+
+/* apurv++ define header type */
+/*
+#define MAX_BATCH_SIZE  8 
+#define BATCH_SIZE      3 
+#define PADDING_SIZE    2 
+#define ACK_PADDING_SIZE 2 
+
+#define DATA_TYPE       0
+#define ACK_TYPE        1
+#define TRIGGER_TYPE    2
+
+#pragma pack(1)
+typedef struct multihop_hdr_type {
+
+  unsigned char src_id : 3;
+  unsigned char dst_id  : 3;
+  unsigned char flow_id : 2;
+
+  unsigned short packetlen: 12;
+  unsigned char batch_number : 8;
+  unsigned char nsenders : 2;
+
+  unsigned char pkt_type : 1;
+  unsigned char lead_sender: 1;
+  unsigned char prev_hop_id;                       // can be reduced to bit-field //
+
+  unsigned int pkt_num;
+  unsigned int coeffs[BATCH_SIZE];
+  unsigned int hdr_crc;
+  unsigned char pad[PADDING_SIZE];                 // to ensure size % (occupied_carriers-dc_carriers) = 0
+
+} MULTIHOP_HDR_TYPE;
+
+#pragma pack(1)
+typedef struct ack_multihop_hdr_type {
+
+  unsigned char pkt_type : 1;
+  unsigned char flow_id : 4;
+  unsigned char batch_number : 8;
+
+  unsigned char src_id : 4;
+  unsigned char dst_id  : 4;
+  unsigned char prev_hop_id: 3;                         // ACK's prev hop  
+
+  unsigned int hdr_crc;
+
+  unsigned char pad[ACK_PADDING_SIZE];                 // to ensure size % (occupied_carriers-dc_carriers) = 0
+
+} MULTIHOP_ACK_HDR_TYPE;
+*/
+/* apurv++ end header type */
 
 class digital_ofdm_mapper_bcv;
 typedef boost::shared_ptr<digital_ofdm_mapper_bcv> digital_ofdm_mapper_bcv_sptr;
 
 DIGITAL_API digital_ofdm_mapper_bcv_sptr 
 digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
-			      unsigned occupied_carriers, unsigned int fft_length);
+			 unsigned occupied_carriers, unsigned int fft_length);
 
 /*!
  * \brief take a stream of bytes in and map to a vector of complex
@@ -47,10 +101,10 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 {
   friend DIGITAL_API digital_ofdm_mapper_bcv_sptr
   digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
-				unsigned occupied_carriers, unsigned int fft_length);
-protected:
-  digital_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
 			   unsigned occupied_carriers, unsigned int fft_length);
+ protected:
+  digital_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
+		      unsigned occupied_carriers, unsigned int fft_length);
 
  private:
   std::vector<gr_complex> d_constellation;
@@ -83,6 +137,23 @@ protected:
 	   gr_vector_const_void_star &input_items,
 	   gr_vector_void_star &output_items);
 
+  
+  /* apurv++ starts */
+  bool d_ack;
+  bool d_data;
+  void generateOFDMSymbol(gr_complex* out, int len);
+  void copyOFDMSymbol(gr_complex *out, int len);
+
+  /* data */
+  static const int HEADERBYTELEN = sizeof(MULTIHOP_HDR_TYPE);
+  static const int HEADERDATALEN = HEADERBYTELEN-PADDING_SIZE-4;
+
+  /* ack */
+  static const int ACK_HEADERBYTELEN = sizeof(MULTIHOP_ACK_HDR_TYPE);
+  static const int ACK_HEADERDATALEN = ACK_HEADERBYTELEN - ACK_PADDING_SIZE-4;
+
+  unsigned int d_ofdm_index;
+  bool d_default;
 };
 
 #endif

@@ -125,6 +125,7 @@ def make_packet(payload, samples_per_symbol, bits_per_symbol,
     if L > MAXLEN:
         raise ValueError, "len(payload) must be in [0, %d]" % (MAXLEN,)
 
+    """ apurv--: take out the header, we have our own multihop hdr now (ref rainier sink) 
     pkt_hd = make_header(L, whitener_offset)
     pkt_dt = ''.join((payload_with_crc, '\x55'))
     packet_length = len(pkt_hd) + len(pkt_dt)
@@ -137,6 +138,16 @@ def make_packet(payload, samples_per_symbol, bits_per_symbol,
         pkt = pkt_hd + whiten(pkt_dt, whitener_offset)
     else:
         pkt = pkt_hd + pkt_dt
+    """
+
+    ### apurv++: replace above code by this one ###
+    pkt_dt = ''.join((payload_with_crc, '\x55'))
+    packet_length = len(pkt_dt)
+    if(whitening):
+        pkt = whiten(pkt_dt, whitener_offset)
+    else:
+        pkt = pkt_dt
+    ### apurv++: end replace ###
 
     #print "make_packet: len(pkt) =", len(pkt)
 
@@ -176,10 +187,35 @@ def unmake_packet(whitened_payload_with_crc, whitener_offset=0, dewhitening=1):
     @type  dewhitening:           bool
     """
 
+    if 1:
+	  print "whitened: "
+          printlst = list()
+          for x in whitened_payload_with_crc:
+                t = hex(ord(x)).replace('0x', '')
+                if(len(t) == 1):
+                    t = '0' + t
+                printlst.append(t)
+          printable = ''.join(printlst)
+
+          print printable
+
     if dewhitening:
         payload_with_crc = dewhiten(whitened_payload_with_crc, whitener_offset)
     else:
         payload_with_crc = whitened_payload_with_crc
+
+    if 1:
+	  print "dewhitened: "
+          printlst = list()
+          for x in payload_with_crc:
+                t = hex(ord(x)).replace('0x', '')
+                if(len(t) == 1):
+                    t = '0' + t
+                printlst.append(t)
+          printable = ''.join(printlst)
+
+          print printable
+          print "\n"
 
     ok, payload = crc.check_crc32(payload_with_crc)
 

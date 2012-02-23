@@ -23,25 +23,24 @@
 #ifndef INCLUDED_GR_THRESHOLD_FF_H
 #define INCLUDED_GR_THRESHOLD_FF_H
 
-#include <gr_core_api.h>
 #include <gr_sync_block.h>
 
 class gr_threshold_ff;
 typedef boost::shared_ptr<gr_threshold_ff> gr_threshold_ff_sptr;
 
-GR_CORE_API gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_state=0);
+gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_state=0, int fft_length=0);
 
 /*!
  * \brief Please fix my documentation
  * \ingroup misc_blk
  */
-class GR_CORE_API gr_threshold_ff : public gr_sync_block
+class gr_threshold_ff : public gr_sync_block
 {
-  friend GR_CORE_API gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_state);
+  friend gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_state, int fft_length);
 
   float	d_lo,d_hi;		// the constant
   float d_last_state;
-  gr_threshold_ff (float lo, float hi, float initial_state);
+  gr_threshold_ff (float lo, float hi, float initial_state, int fft_length);
 
  public:
   float lo () const { return d_lo; }
@@ -54,6 +53,10 @@ class GR_CORE_API gr_threshold_ff : public gr_sync_block
   int work (int noutput_items,
 	    gr_vector_const_void_star &input_items,
 	    gr_vector_void_star &output_items);
+
+  unsigned int d_index;
+  float d_prev_hi;
+  int d_fft_length;
 };
 
 #endif

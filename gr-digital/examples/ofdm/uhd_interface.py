@@ -25,7 +25,7 @@ from gnuradio import eng_notation
 from gnuradio.eng_option import eng_option
 from optparse import OptionParser
 
-import sys
+import sys, time
 
 def add_freq_option(parser):
     """
@@ -46,15 +46,24 @@ class uhd_interface:
                  gain=None, spec=None, antenna=None):
         
         if(istx):
-            self.u = uhd.usrp_sink(device_addr=args, stream_args=uhd.stream_args('fc32'))
+            #self.u = uhd.usrp_sink(device_addr=args, stream_args=uhd.stream_args('fc32'))
+            self.u = uhd.usrp_sink(device_addr=args,
+                                   io_type=uhd.io_type.COMPLEX_FLOAT32,
+                                   num_channels=1)
+
         else:
-            self.u = uhd.usrp_source(device_addr=args, stream_args=uhd.stream_args('fc32'))
+            #self.u = uhd.usrp_source(device_addr=args, stream_args=uhd.stream_args('fc32'))
+            self.u = uhd.usrp_source(device_addr=args,
+                                   io_type=uhd.io_type.COMPLEX_FLOAT32,
+                                   num_channels=1)
+
 
         self._args = args
         self._ant  = antenna
         self._spec = spec
         self._gain = self.set_gain(gain)
         self._freq = self.set_freq(freq)
+	time.sleep(1)
 
         self._rate = self.set_sample_rate(bandwidth)
 

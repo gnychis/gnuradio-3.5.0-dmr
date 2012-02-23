@@ -44,3 +44,11 @@ dist_nbdata_SCRIPTS =		\
 	narrowband/digital_bert_tx.py	\
 	narrowband/tunnel.py
 
+ofdmdatadir = $(dig_examples_prefix)/ofdm
+dist_nbdata_SCRIPTS =           \
+        ofdm/transmit_path.py     \
+        ofdm/receive_path.py      \
+        ofdm/uhd_interface.py     \
+        ofdm/benchmark_tx.py      \
+        ofdm/benchmark_rx.py      \
+        ofdm/tunnel.py

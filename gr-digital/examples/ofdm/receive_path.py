@@ -31,7 +31,7 @@ import sys
 # /////////////////////////////////////////////////////////////////////////////
 
 class receive_path(gr.hier_block2):
-    def __init__(self, rx_callback, options):
+    def __init__(self, rx_callback, fwd_callback, options):
 
 	gr.hier_block2.__init__(self, "receive_path",
 				gr.io_signature(1, 1, gr.sizeof_gr_complex),
@@ -43,10 +43,11 @@ class receive_path(gr.hier_block2):
         self._verbose     = options.verbose
         self._log         = options.log
         self._rx_callback = rx_callback      # this callback is fired when there's a packet available
+	self.fwd_callback = fwd_callback
 
         # receiver
         self.ofdm_rx = digital.ofdm_demod(options,
-                                          callback=self._rx_callback)
+                                          callback=self._rx_callback, fwd_callback = self.fwd_callback)
 
         # Carrier Sensing Blocks
         alpha = 0.001
@@ -103,3 +104,6 @@ class receive_path(gr.hier_block2):
         Prints information about the receive path
         """
         pass
+
+    def make_packet(self):
+        self.ofdm_rx.make_packet()

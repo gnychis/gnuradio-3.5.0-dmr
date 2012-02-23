@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright 2007,2011 Free Software Foundation, Inc.
+ * Copyright 2007 Free Software Foundation, Inc.
  * 
  * This file is part of GNU Radio
  * 
@@ -23,13 +23,13 @@
 GR_SWIG_BLOCK_MAGIC(digital,ofdm_sampler)
 
   digital_ofdm_sampler_sptr digital_make_ofdm_sampler (unsigned int fft_length, 
-						       unsigned int symbol_length,
-						       unsigned int timeout=1000);
+					     unsigned int symbol_length,
+					     unsigned int timeout=1000);
 
 class digital_ofdm_sampler : public gr_sync_block
 {
  private:
   digital_ofdm_sampler (unsigned int fft_length,
-			unsigned int symbol_length,
-			unsigned int timeout);
+		   unsigned int symbol_length,
+		   unsigned int timeout);
 };

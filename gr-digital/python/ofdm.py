@@ -22,9 +22,11 @@
 
 import math
 from gnuradio import gr
+from gnuradio import gr
 import digital_swig
 import ofdm_packet_utils
 from ofdm_receiver import ofdm_receiver
+
 import gnuradio.gr.gr_threading as _threading
 import psk, qam
 
@@ -88,7 +90,7 @@ class ofdm_mod(gr.hier_block2):
         rot = 1
         if self._modulation == "qpsk":
             rot = (0.707+0.707j)
-            
+        
         # FIXME: pass the constellation objects instead of just the points
         if(self._modulation.find("psk") >= 0):
             constel = psk.psk_constellation(arity)
@@ -96,23 +98,32 @@ class ofdm_mod(gr.hier_block2):
         elif(self._modulation.find("qam") >= 0):
             constel = qam.qam_constellation(arity)
             rotated_const = map(lambda pt: pt * rot, constel.points())
-        #print rotated_const
-        self._pkt_input = digital_swig.ofdm_mapper_bcv(rotated_const,
-                                                       msgq_limit,
-                                                       options.occupied_tones,
-                                                       options.fft_length)
+    
+        self._pkt_input = digital_swig.ofdm_mapper_bcv(rotated_const, msgq_limit,
+                                             options.occupied_tones, options.fft_length)
         
-        self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length,
-                                                           padded_preambles)
+        self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, padded_preambles)
         self.ifft = gr.fft_vcc(self._fft_length, False, win, True)
-        self.cp_adder = digital_swig.ofdm_cyclic_prefixer(self._fft_length,
-                                                          symbol_length)
+        self.cp_adder = digital_swig.ofdm_cyclic_prefixer(self._fft_length, symbol_length)
         self.scale = gr.multiply_const_cc(1.0 / math.sqrt(self._fft_length))
         
         self.connect((self._pkt_input, 0), (self.preambles, 0))
         self.connect((self._pkt_input, 1), (self.preambles, 1))
         self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
-        
+
+	self.connect((self.preambles, 1), gr.null_sink(gr.sizeof_char*options.fft_length))
+
+	"""
+	self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
+                                                      "symbols_src.dat"))
+	self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length,
+                                                      "timing_src.dat"))
+	"""
+
+	self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "tx_symbols_src.dat"))
+	self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "tx_timing_src.dat"))
+
+ 
         if options.verbose:
             self._print_verbage()
 
@@ -126,7 +137,7 @@ class ofdm_mod(gr.hier_block2):
             self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex,
                                                      "ofdm_cp_adder_c.dat"))
 
-    def send_pkt(self, payload='', eof=False):
+    def send_pkt(self, payload, eof=False):
         """
         Send the payload.
 
@@ -135,15 +146,18 @@ class ofdm_mod(gr.hier_block2):
         """
         if eof:
             msg = gr.message(1) # tell self._pkt_input we're not sending any more packets
+		
         else:
-            # print "original_payload =", string_to_hex_list(payload)
-            pkt = ofdm_packet_utils.make_packet(payload, 1, 1,
-                                                self._pad_for_usrp,
-                                                whitening=True)
+            ############# print "original_payload =", string_to_hex_list(payload)
+	    """
+            pkt = ofdm_packet_utils.make_packet(payload, 1, 1, self._pad_for_usrp, whitening=True)
             
             #print "pkt =", string_to_hex_list(pkt)
             msg = gr.message_from_string(pkt)
+	
         self._pkt_input.msgq().insert_tail(msg)
+	"""
+	self._pkt_input.msgq().insert_tail(payload)			# for forwarder!
 
     def add_options(normal, expert):
         """
@@ -181,7 +195,7 @@ class ofdm_demod(gr.hier_block2):
     app via the callback.
     """
 
-    def __init__(self, options, callback=None):
+    def __init__(self, options, callback=None, fwd_callback=None):
         """
 	Hierarchical block for demodulating and deframing packets.
 
@@ -199,11 +213,22 @@ class ofdm_demod(gr.hier_block2):
 
         self._rcvd_pktq = gr.msg_queue()          # holds packets from the PHY
 
+	# apurv++ queues # 
+	self._out_pktq = gr.msg_queue()
+	
+
         self._modulation = options.modulation
         self._fft_length = options.fft_length
         self._occupied_tones = options.occupied_tones
         self._cp_length = options.cp_length
         self._snr = options.snr
+
+        # apurv++ start #
+        self._batch_size = options.batch_size
+        self._decode_flag = options.decode_flag
+	self._id = options.id
+	self._threshold = options.threshold
+        # apurv++ end #
 
         # Use freq domain to get doubled-up known symbol for correlation in time domain
         zeros_on_left = int(math.ceil((self._fft_length - self._occupied_tones)/2.0))
@@ -214,17 +239,18 @@ class ofdm_demod(gr.hier_block2):
 
         # hard-coded known symbols
         preambles = (ksfreq,)
-
+        
         symbol_length = self._fft_length + self._cp_length
-        self.ofdm_recv = ofdm_receiver(self._fft_length,
-                                       self._cp_length,
-                                       self._occupied_tones,
-                                       self._snr, preambles,
+        self.ofdm_recv = ofdm_receiver(self._fft_length, self._cp_length,
+                                       self._occupied_tones, self._snr, preambles,
+				       self._threshold,
                                        options.log)
 
         mods = {"bpsk": 2, "qpsk": 4, "8psk": 8, "qam8": 8, "qam16": 16, "qam64": 64, "qam256": 256}
         arity = mods[self._modulation]
-        
+	print "arity: ", arity
+ 	print "mod: ", self._modulation       
+ 
         rot = 1
         if self._modulation == "qpsk":
             rot = (0.707+0.707j)
@@ -241,30 +267,46 @@ class ofdm_demod(gr.hier_block2):
         phgain = 0.25
         frgain = phgain*phgain / 4.0
         self.ofdm_demod = digital_swig.ofdm_frame_sink(rotated_const, range(arity),
-                                                       self._rcvd_pktq,
-                                                       self._occupied_tones,
-                                                       phgain, frgain)
+                                             self._rcvd_pktq, self._out_pktq,
+                                             self._occupied_tones, self._fft_length,
+                                             phgain, frgain,
+					     self._id,
+					     self._batch_size, self._decode_flag)
 
         self.connect(self, self.ofdm_recv)
-        self.connect((self.ofdm_recv, 0), (self.ofdm_demod, 0))
-        self.connect((self.ofdm_recv, 1), (self.ofdm_demod, 1))
+	
+	manual = 0									# apurv++: manual testing flag
+
+	if manual==0:
+           self.connect((self.ofdm_recv, 0), (self.ofdm_demod, 0))
+           self.connect((self.ofdm_recv, 1), (self.ofdm_demod, 1))
+   	   self.connect((self.ofdm_recv, 2), (self.ofdm_demod, 2))			# apurv++, hestimates #
+	   self.connect((self.ofdm_recv, 3), (self.ofdm_demod, 3))			# apurv++, for offline analysis (from sampler)
+
+	   ##self.connect((self.ofdm_recv, 3), gr.null_sink(gr.sizeof_gr_complex*self._fft_length))
+	else: 
+           self.connect(gr.file_source(gr.sizeof_gr_complex*self._occupied_tones, "out-tx.dat"), (self.ofdm_demod, 0))
+           self.connect(gr.file_source(gr.sizeof_char, "out-timing.dat"), (self.ofdm_demod, 1))
 
         # added output signature to work around bug, though it might not be a bad
         # thing to export, anyway
         self.connect(self.ofdm_recv.chan_filt, self)
 
+	# sink some stuff #
+	self.connect((self.ofdm_recv, 0), gr.null_sink(gr.sizeof_gr_complex*self._occupied_tones))
+	self.connect((self.ofdm_recv, 1), gr.null_sink(gr.sizeof_char))
+	self.connect((self.ofdm_recv, 2), gr.null_sink(gr.sizeof_gr_complex*self._occupied_tones))
+
         if options.log:
-            self.connect(self.ofdm_demod,
-                         gr.file_sink(gr.sizeof_gr_complex*self._occupied_tones,
-                                      "ofdm_frame_sink_c.dat"))
+            self.connect(self.ofdm_demod, gr.file_sink(gr.sizeof_gr_complex*self._occupied_tones, "ofdm_frame_sink_c.dat"))
         else:
-            self.connect(self.ofdm_demod,
-                         gr.null_sink(gr.sizeof_gr_complex*self._occupied_tones))
+            self.connect(self.ofdm_demod, gr.null_sink(gr.sizeof_gr_complex*self._occupied_tones))
 
         if options.verbose:
             self._print_verbage()
             
         self._watcher = _queue_watcher_thread(self._rcvd_pktq, callback)
+	self._watcher_fwd = _queue_watcher_thread(self._out_pktq, fwd_callback)			# apurv++
 
     def add_options(normal, expert):
         """
@@ -278,10 +320,26 @@ class ofdm_demod(gr.hier_block2):
                           help="set the number of occupied FFT bins [default=%default]")
         expert.add_option("", "--cp-length", type="intx", default=128,
                           help="set the number of bits in the cyclic prefix [default=%default]")
-        expert.add_option("", "--snr", type="float", default=30.0,
+	expert.add_option("", "--snr", type="float", default=30.0,
                           help="SNR estimate [default=%default]")
+        # apurv++ adding options #
+        expert.add_option("", "--batch-size", type="intx", default=1,
+                          help="sets the batch size [default=%default]")
+        expert.add_option("", "--decode-flag", type="intx", default=1,
+                          help="decodes the symbols (if true) [default=%default]")
+	expert.add_option("", "--id", type="intx", default=1,
+                          help="sets the node id [default=%default]")
+        expert.add_option("", "--threshold", type="float", default=1.0,
+                          help="cross correlation threshold [default=%default]")
+        # apurv++ end #
+
     # Make a static method to call before instantiation
     add_options = staticmethod(add_options)
+
+    def make_packet(self):
+	#print "ofdm.py  get_pkt_fwd"
+ 	self.ofdm_demod.makePacket()
+	print "ofdm.py make_packet return"
 
     def _print_verbage(self):
         """
@@ -292,9 +350,13 @@ class ofdm_demod(gr.hier_block2):
         print "FFT length:      %3d"   % (self._fft_length)
         print "Occupied Tones:  %3d"   % (self._occupied_tones)
         print "CP length:       %3d"   % (self._cp_length)
-
-
-
+	
+	print "Node Id:         %3d"   % (self._id)
+        print "Batch size:      %3d"   % (self._batch_size)
+        print "Decode symbols:  %3d"   % (self._decode_flag)
+	print "Correlation threshold: %f" % (self._threshold)
+	
+	
 class _queue_watcher_thread(_threading.Thread):
     def __init__(self, rcvd_pktq, callback):
         _threading.Thread.__init__(self)
@@ -306,11 +368,22 @@ class _queue_watcher_thread(_threading.Thread):
 
 
     def run(self):
+	prev_batch = -1
         while self.keep_running:
             msg = self.rcvd_pktq.delete_head()
-            ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string())
-            if self.callback:
-                self.callback(ok, payload)
+	    print "msg.type: ", msg.type(), "\n"
+	    ########## receiver sink #########
+	    if msg.type() == 0:
+		print "here!"
+                ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string())                  
+                if self.callback:
+                   self.callback(ok, payload)
+	    
+	    ######### for sending DATA/ACK ##########
+	    elif (msg.type() == 1 or msg.type() == 2):
+		print "fwd_callback fired!"
+		if self.callback:
+		   self.callback(msg)	
 
 # Generating known symbols with:
 # i = [2*random.randint(0,1)-1 for i in range(4512)]

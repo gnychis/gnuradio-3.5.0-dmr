@@ -22,12 +22,12 @@
 
 GR_SWIG_BLOCK_MAGIC(gr,threshold_ff);
 
-gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_state=0);
+gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_state=0, int fft_length=0);
 
 class gr_threshold_ff : public gr_sync_block
 {
  private:
-  gr_threshold_ff (float lo, float hi, float initial_state);
+  gr_threshold_ff (float lo, float hi, float initial_state, int fft_length);
 
  public:
   float lo () const { return d_lo; }

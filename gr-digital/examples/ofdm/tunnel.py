@@ -47,44 +47,12 @@ from uhd_interface import uhd_receiver
 import os, sys
 import random, time, struct
 
-#print os.getpid()
-#raw_input('Attach and press enter')
-
-
-# /////////////////////////////////////////////////////////////////////////////
-#
-#   Use the Universal TUN/TAP device driver to move packets to/from kernel
-#
-#   See /usr/src/linux/Documentation/networking/tuntap.txt
-#
-# /////////////////////////////////////////////////////////////////////////////
-
-# Linux specific...
-# TUNSETIFF ifr flags from <linux/tun_if.h>
-
-IFF_TUN		= 0x0001   # tunnel IP packets
-IFF_TAP		= 0x0002   # tunnel ethernet frames
-IFF_NO_PI	= 0x1000   # don't pass extra packet info
-IFF_ONE_QUEUE	= 0x2000   # beats me ;)
-
-def open_tun_interface(tun_device_filename):
-    from fcntl import ioctl
-    
-    mode = IFF_TAP | IFF_NO_PI
-    TUNSETIFF = 0x400454ca
-
-    tun = os.open(tun_device_filename, os.O_RDWR)
-    ifs = ioctl(tun, TUNSETIFF, struct.pack("16sH", "gr%d", mode))
-    ifname = ifs[:16].strip("\x00")
-    return (tun, ifname)
-    
-
 # /////////////////////////////////////////////////////////////////////////////
 #                             the flow graph
 # /////////////////////////////////////////////////////////////////////////////
 
 class my_top_block(gr.top_block):
-    def __init__(self, callback, options):
+    def __init__(self, callback, fwd_callback, options):
         gr.top_block.__init__(self)
 
         self.source = uhd_receiver(options.args,
@@ -100,10 +68,13 @@ class my_top_block(gr.top_block):
                                     options.verbose)
 
         self.txpath = transmit_path(options)
-        self.rxpath = receive_path(callback, options)
+        self.rxpath = receive_path(callback, fwd_callback, options)
 
         self.connect(self.txpath, self.sink)
         self.connect(self.source, self.rxpath)
+
+    def get_pkt_to_fwd(self):
+        self.rxpath.make_packet()
 
     def carrier_sensed(self):
         """
@@ -134,8 +105,7 @@ class cs_mac(object):
     Of course, we're not restricted to getting packets via TUN/TAP, this
     is just an example.
     """
-    def __init__(self, tun_fd, verbose=False):
-        self.tun_fd = tun_fd       # file descriptor for TUN/TAP interface
+    def __init__(self, verbose=False):
         self.verbose = verbose
         self.tb = None             # top block (access to PHY)
 
@@ -151,36 +121,83 @@ class cs_mac(object):
         """
         if self.verbose:
             print "Rx: ok = %r  len(payload) = %4d" % (ok, len(payload))
-        if ok:
-            os.write(self.tun_fd, payload)
+
+    def fwd_callback(self, packet):
+        """
+        Invoked by thread associated with the out queue. The resulting
+        packet needs to be sent out using the transmitter flowgraph. 
+        The packet could be either a DATA pkt or an ACK pkt. In both cases, 
+        only the pkt-hdr needs to be modulated
+
+        @param packet: the pkt to be forwarded through the transmitter chain    
+        """
+        print "fwd_callback invoked in tunnel.py"
+        if packet.type() == 1:
+           print "<tunnel.py> tx DATA!"
+           #time.sleep(0.02)                                               #IFS
+           #time.sleep(40)
+           self.tb.txpath.send_pkt(packet)
+        elif packet.type() == 2:
+           print "<tunnel.py> tx ACK!"
+           self.tb.txpath.send_pkt(packet)
+        else:
+           print "<tunnel.py> unknown pkt type:", packet.type()
 
     def main_loop(self):
         """
         Main loop for MAC.
         Only returns if we get an error reading from TUN.
-
-        FIXME: may want to check for EINTR and EAGAIN and reissue read
         """
-        min_delay = 0.001               # seconds
+
+        min_delay = 0.005               # seconds
+        difs_delay = 0.05
 
         while 1:
-            payload = os.read(self.tun_fd, 10*1024)
-            if not payload:
-                self.tb.txpath.send_pkt(eof=True)
-                break
 
-            if self.verbose:
-                print "Tx: len(payload) = %4d" % (len(payload),)
+            # emulate the CSMA loosely  
+            sent = 0
+            while sent == 0:
 
-            delay = min_delay
-            while self.tb.carrier_sensed():
-                sys.stderr.write('B')
-                time.sleep(delay)
-                if delay < 0.050:
-                    delay = delay * 2       # exponential back-off
+                # DIFS
+                sensed = 0
+                start_difs_time = time.clock()
+                #print "start DIFS"
 
-            self.tb.txpath.send_pkt(payload)
+                while (time.clock() - start_difs_time) < difs_delay:
+                   if self.tb.carrier_sensed():
+                      #print "DIFS broken"
+                      sensed = 1
+                   if sensed == 1:
+                      break
 
+                # DIFS failed, start all over again     
+                if sensed == 1:
+                   #print "restart DIFS"
+                   continue
+
+                # select a random slot
+                rand_slot = random.randint(0, 10)
+
+                # backoff
+                #print "rand slot : ", rand_slot
+                while rand_slot > 0:
+                    curr_backoff_time = time.clock()
+                    while(time.clock() - curr_backoff_time) < min_delay:
+                       if self.tb.carrier_sensed():
+                          curr_backoff_time = time.clock()                   #reset current slot                     
+                    #print "rand_slot count down"
+                    rand_slot = rand_slot - 1
+
+
+                """
+                get the packet to be forwarded (if available)
+                will poke the ofdm_frame_sink (ofdm.py), which inserts a packet into the fwd_queue, and 
+                triggers the fwd_callback 
+                """
+                #self.tb.get_pkt_to_fwd()               
+                sent = 1
+
+                """transmission happens instead in fwd_callback"""
 
 # /////////////////////////////////////////////////////////////////////////////
 #                                   main
@@ -198,8 +215,8 @@ def main():
     parser.add_option("-v","--verbose", action="store_true", default=False)
     expert_grp.add_option("-c", "--carrier-threshold", type="eng_float", default=30,
                           help="set carrier detect threshold (dB) [default=%default]")
-    expert_grp.add_option("","--tun-device-filename", default="/dev/net/tun",
-                          help="path to tun device file [default=%default]")
+    expert_grp.add_option("", "--snr", type="eng_float", default=30,
+                          help="set the SNR of the channel in dB [default=%default]")
 
     digital.ofdm_mod.add_options(parser, expert_grp)
     digital.ofdm_demod.add_options(parser, expert_grp)
@@ -218,9 +235,6 @@ def main():
         parser.print_help(sys.stderr)
         sys.exit(1)
 
-    # open the TUN/TAP interface
-    (tun_fd, tun_ifname) = open_tun_interface(options.tun_device_filename)
-
     # Attempt to enable realtime scheduling
     r = gr.enable_realtime_scheduling()
     if r == gr.RT_OK:
@@ -230,11 +244,11 @@ def main():
         print "Note: failed to enable realtime scheduling"
 
     # instantiate the MAC
-    mac = cs_mac(tun_fd, verbose=True)
+    mac = cs_mac(verbose=True)
 
 
     # build the graph (PHY)
-    tb = my_top_block(mac.phy_rx_callback, options)
+    tb = my_top_block(mac.phy_rx_callback, mac.fwd_callback, options)
 
     mac.set_flow_graph(tb)    # give the MAC a handle for the PHY
 
@@ -244,16 +258,6 @@ def main():
     tb.rxpath.set_carrier_threshold(options.carrier_threshold)
     print "Carrier sense threshold:", options.carrier_threshold, "dB"
     
-    print
-    print "Allocated virtual ethernet interface: %s" % (tun_ifname,)
-    print "You must now use ifconfig to set its IP address. E.g.,"
-    print
-    print "  $ sudo ifconfig %s 192.168.200.1" % (tun_ifname,)
-    print
-    print "Be sure to use a different address in the same subnet for each machine."
-    print
-
-
     tb.start()    # Start executing the flow graph (runs in separate threads)
 
     mac.main_loop()    # don't expect this to return...

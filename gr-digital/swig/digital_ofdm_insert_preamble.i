@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright 2007,2011 Free Software Foundation, Inc.
+ * Copyright 2007 Free Software Foundation, Inc.
  * 
  * This file is part of GNU Radio
  * 
@@ -24,12 +24,12 @@ GR_SWIG_BLOCK_MAGIC(digital,ofdm_insert_preamble);
 
 digital_ofdm_insert_preamble_sptr
 digital_make_ofdm_insert_preamble(int fft_length,
-				  const std::vector<std::vector<gr_complex> > &preamble);
+			     const std::vector<std::vector<gr_complex> > &preamble);
 
 
 class digital_ofdm_insert_preamble : public gr_block
 {
  protected:
   digital_ofdm_insert_preamble(int fft_length,
-			       const std::vector<std::vector<gr_complex> > &preamble);
+			  const std::vector<std::vector<gr_complex> > &preamble);
 };

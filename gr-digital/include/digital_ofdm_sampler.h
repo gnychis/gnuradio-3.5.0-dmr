@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright 2007,2011 Free Software Foundation, Inc.
+ * Copyright 2007 Free Software Foundation, Inc.
  * 
  * This file is part of GNU Radio
  * 
@@ -30,8 +30,8 @@ class digital_ofdm_sampler;
 typedef boost::shared_ptr<digital_ofdm_sampler> digital_ofdm_sampler_sptr;
 
 DIGITAL_API digital_ofdm_sampler_sptr digital_make_ofdm_sampler (unsigned int fft_length, 
-						     unsigned int symbol_length,
-						     unsigned int timeout=1000);
+					   unsigned int symbol_length,
+					   unsigned int timeout=1000);
 
 /*!
  * \brief does the rest of the OFDM stuff
@@ -40,12 +40,12 @@ DIGITAL_API digital_ofdm_sampler_sptr digital_make_ofdm_sampler (unsigned int ff
 class DIGITAL_API digital_ofdm_sampler : public gr_block
 {
   friend DIGITAL_API digital_ofdm_sampler_sptr digital_make_ofdm_sampler (unsigned int fft_length, 
-							      unsigned int symbol_length,
-							      unsigned int timeout);
+						    unsigned int symbol_length,
+						    unsigned int timeout);
 
   digital_ofdm_sampler (unsigned int fft_length, 
-			unsigned int symbol_length,
-			unsigned int timeout);
+		   unsigned int symbol_length,
+		   unsigned int timeout);
 
  private:
   enum state_t {STATE_NO_SIG, STATE_PREAMBLE, STATE_FRAME};
@@ -63,6 +63,15 @@ class DIGITAL_API digital_ofdm_sampler : public gr_block
 		    gr_vector_int &ninput_items,
 		    gr_vector_const_void_star &input_items,
 		    gr_vector_void_star &output_items);
+
+  // apurv++ for logging the preamble // 
+  FILE *d_fp; 
+  int d_fd;
+  bool d_file_opened;  
+
+  void log_preamble(gr_complex *, long);
+  bool open_log();
+  // apurv++ ends //
 };
 
 #endif

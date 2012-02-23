@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright 2006-2008,2010,2011 Free Software Foundation, Inc.
+ * Copyright 2006,2007,2008,2010 Free Software Foundation, Inc.
  * 
  * This file is part of GNU Radio
  * 
@@ -32,15 +32,15 @@
 
 digital_ofdm_mapper_bcv_sptr
 digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned int msgq_limit, 
-			      unsigned int occupied_carriers, unsigned int fft_length)
+			 unsigned int occupied_carriers, unsigned int fft_length)
 {
   return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (constellation, msgq_limit, 
-								 occupied_carriers, fft_length));
+							  occupied_carriers, fft_length));
 }
 
 // Consumes 1 packet and produces as many OFDM symbols of fft_length to hold the full packet
 digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned int msgq_limit, 
-						  unsigned int occupied_carriers, unsigned int fft_length)
+					unsigned int occupied_carriers, unsigned int fft_length)
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
 		   gr_make_io_signature2 (1, 2, sizeof(gr_complex)*fft_length, sizeof(char))),
@@ -59,7 +59,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   // this is not the final form of this solution since we still use the occupied_tones concept,
   // which would get us into trouble if the number of carriers we seek is greater than the occupied carriers.
   // Eventually, we will get rid of the occupied_carriers concept.
-  std::string carriers = "FE7F";
+  std::string carriers = "F00F"; //"FE7F";				// apurv++
 
   // A bit hacky to fill out carriers to occupied_carriers length
   int diff = (d_occupied_carriers - 4*carriers.length()); 
@@ -127,28 +127,47 @@ int digital_ofdm_mapper_bcv::randsym()
 
 int
 digital_ofdm_mapper_bcv::work(int noutput_items,
-			      gr_vector_const_void_star &input_items,
-			      gr_vector_void_star &output_items)
+			  gr_vector_const_void_star &input_items,
+			  gr_vector_void_star &output_items)
 {
   gr_complex *out = (gr_complex *)output_items[0];
   
-  unsigned int i=0;
-
-  //printf("OFDM BPSK Mapper:  ninput_items: %d   noutput_items: %d\n", ninput_items[0], noutput_items);
-
   if(d_eof) {
     return -1;
   }
   
   if(!d_msg) {
-    d_msg = d_msgq->delete_head();	   // block, waiting for a message
+    d_msg = d_msgq->delete_head();			   // block, waiting for a message
+    d_ofdm_index = 0;
     d_msg_offset = 0;
     d_bit_offset = 0;
-    d_pending_flag = 1;			   // new packet, write start of packet flag
+    d_pending_flag = 1;					   // new packet, write start of packet flag
     
     if((d_msg->length() == 0) && (d_msg->type() == 1)) {
+      assert(false);
       d_msg.reset();
-      return -1;		// We're done; no more messages coming.
+      return -1; 					   // We're done; no more messages coming.
+    }
+
+    /* apurv++: identify ACK or DATA */
+    if(d_msg->type() == ACK_TYPE) {
+      printf("ofdm_mapper: sending ACK, msglen: %d, ACK_HEADERBYTELEN: %d\n", d_msg->length(), ACK_HEADERBYTELEN); 
+      fflush(stdout);
+      d_ack = true;
+      d_data = false;
+      d_default = false;
+    }
+    else if(d_msg->type() == DATA_TYPE) {
+      printf("ofdm_mapper: sending DATA, type: %d, HEADERBYTELEN: %d, msglen: %d\n", d_msg->type(), HEADERBYTELEN, d_msg->length()); fflush(stdout);
+      d_ack = false;
+      d_data = true;
+      d_default = false;
+    }
+    else {
+      printf("ofdm mapper: send default tx\n"); fflush(stdout);
+      d_default = true;
+      d_ack = false;
+      d_data = false;
     }
   }
 
@@ -157,14 +176,64 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
     out_flag = (char *) output_items[1];
   
 
-  // Build a single symbol:
-  // Initialize all bins to 0 to set unused carriers
+  /* single OFDM symbol: Initialize all bins to 0 to set unused carriers */
   memset(out, 0, d_fft_length*sizeof(gr_complex));
-  
-  i = 0;
+  if(d_ack || d_default) {
+	/* ack */
+     generateOFDMSymbol(out, d_msg->length());  			// entire msg needs to be modulated for ACK
+  }
+  else {
+	/* data */
+     if(d_msg_offset < HEADERBYTELEN) {
+        generateOFDMSymbol(out, HEADERBYTELEN);				// only modulate the hdr for DATA
+	printf("hdr------ offset: %d\n", d_msg_offset); fflush(stdout);
+     } 
+     else {
+	/* header has already been modulated, just send the payload *symbols* as it is */
+ 	copyOFDMSymbol(out, d_msg->length());		
+	printf("data--------- offset: %d\n", d_msg_offset); fflush(stdout);
+     }  
+     d_ofdm_index+=1; 
+  }
+
+  /* complete message modulated */
+  if(d_msg_offset == d_msg->length()) {
+      d_msg.reset();
+      printf("num_ofdm_symbols: %d\n", d_ofdm_index); fflush(stdout); 
+  }
+
+  if (out_flag)
+    out_flag[0] = d_pending_flag;
+  d_pending_flag = 0;
+
+  return 1;  // produced symbol
+}
+
+void
+digital_ofdm_mapper_bcv::copyOFDMSymbol(gr_complex *out, int len)
+{
+  unsigned int i = 0;
+  while((d_msg_offset < len) && (i < d_subcarrier_map.size())) {
+     memcpy(&out[d_subcarrier_map[i]], d_msg->msg() + d_msg_offset, sizeof(gr_complex));
+     d_msg_offset += sizeof(gr_complex);
+     i++;
+  }
+
+  if(d_msg_offset == len) {
+    while(i < d_subcarrier_map.size()) {   // finish filling out the symbol
+      out[d_subcarrier_map[i]] = d_constellation[randsym()];
+      i++;
+    }
+  }
+}
+
+/* builds a single OFDM symbol */
+void
+digital_ofdm_mapper_bcv::generateOFDMSymbol(gr_complex* out, int len)
+{
+  unsigned int i = 0;
   unsigned char bits = 0;
-  //while((d_msg_offset < d_msg->length()) && (i < d_occupied_carriers)) {
-  while((d_msg_offset < d_msg->length()) && (i < d_subcarrier_map.size())) {
+  while((d_msg_offset < len) && (i < d_subcarrier_map.size())) {
 
     // need new data to process
     if(d_bit_offset == 0) {
@@ -183,28 +252,27 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
       d_bit_offset += d_nresid;
       d_nresid = 0;
       d_resid = 0;
-      //printf("mod bit(r): %x   resid: %x   nresid: %d    bit_offset: %d\n", 
       //     bits, d_resid, d_nresid, d_bit_offset);
     }
     else {
       if((8 - d_bit_offset) >= d_nbits) {  // test to make sure we can fit nbits
-	// take the nbits number of bits at a time from the byte to add to the symbol
-	bits = ((1 << d_nbits)-1) & (d_msgbytes >> d_bit_offset);
-	d_bit_offset += d_nbits;
-	
-	out[d_subcarrier_map[i]] = d_constellation[bits];
-	i++;
+        // take the nbits number of bits at a time from the byte to add to the symbol
+        bits = ((1 << d_nbits)-1) & (d_msgbytes >> d_bit_offset);
+        d_bit_offset += d_nbits;
+
+        out[d_subcarrier_map[i]] = d_constellation[bits];
+        i++;
       }
       else {  // if we can't fit nbits, store them for the next 
-	// saves d_nresid bits of this message where d_nresid < d_nbits
-	unsigned int extra = 8-d_bit_offset;
-	d_resid = ((1 << extra)-1) & (d_msgbytes >> d_bit_offset);
-	d_bit_offset += extra;
-	d_nresid = d_nbits - extra;
+        // saves d_nresid bits of this message where d_nresid < d_nbits
+        unsigned int extra = 8-d_bit_offset;
+        d_resid = ((1 << extra)-1) & (d_msgbytes >> d_bit_offset);
+        d_bit_offset += extra;
+        d_nresid = d_nbits - extra;
       }
-      
+
     }
-            
+
     if(d_bit_offset == 8) {
       d_bit_offset = 0;
       d_msg_offset++;
@@ -212,7 +280,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
   }
 
   // Ran out of data to put in symbol
-  if (d_msg_offset == d_msg->length()) {
+  if (d_msg_offset == len) {
     if(d_nresid > 0) {
       d_resid |= 0x00;
       bits = d_resid;
@@ -220,22 +288,12 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
       d_resid = 0;
     }
 
-    //while(i < d_occupied_carriers) {   // finish filling out the symbol
-    while(i < d_subcarrier_map.size()) {   // finish filling out the symbol
+    while(i < d_subcarrier_map.size() && (d_ack || d_default)) {   // finish filling out the symbol
       out[d_subcarrier_map[i]] = d_constellation[randsym()];
 
       i++;
     }
 
-    if (d_msg->type() == 1)	        // type == 1 sets EOF
-      d_eof = true;
-    d_msg.reset();   			// finished packet, free message
     assert(d_bit_offset == 0);
   }
-
-  if (out_flag)
-    out_flag[0] = d_pending_flag;
-  d_pending_flag = 0;
-
-  return 1;  // produced symbol
 }

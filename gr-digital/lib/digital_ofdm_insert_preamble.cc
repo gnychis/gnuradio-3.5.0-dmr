@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright 2007,2010,2011 Free Software Foundation, Inc.
+ * Copyright 2007,2010 Free Software Foundation, Inc.
  * 
  * This file is part of GNU Radio
  * 
@@ -31,10 +31,10 @@
 
 digital_ofdm_insert_preamble_sptr
 digital_make_ofdm_insert_preamble(int fft_length,
-				  const std::vector<std::vector<gr_complex> > &preamble)
+			     const std::vector<std::vector<gr_complex> > &preamble)
 {
   return gnuradio::get_initial_sptr(new digital_ofdm_insert_preamble(fft_length,
-								     preamble));
+								  preamble));
 }
 
 digital_ofdm_insert_preamble::digital_ofdm_insert_preamble
@@ -44,8 +44,9 @@ digital_ofdm_insert_preamble::digital_ofdm_insert_preamble
 	     gr_make_io_signature2(2, 2,
 				   sizeof(gr_complex)*fft_length,
 				   sizeof(char)),
-	     gr_make_io_signature2(1, 2,
+	     gr_make_io_signature3(1, 3,
 				   sizeof(gr_complex)*fft_length,
+				   sizeof(char)*fft_length,					// apurv++
 				   sizeof(char))),
     d_fft_length(fft_length),
     d_preamble(preamble),
@@ -69,9 +70,9 @@ digital_ofdm_insert_preamble::~digital_ofdm_insert_preamble()
 
 int
 digital_ofdm_insert_preamble::general_work (int noutput_items,
-					    gr_vector_int &ninput_items_v,
-					    gr_vector_const_void_star &input_items,
-					    gr_vector_void_star &output_items)
+				       gr_vector_int &ninput_items_v,
+				       gr_vector_const_void_star &input_items,
+				       gr_vector_void_star &output_items)
 {
   int ninput_items = std::min(ninput_items_v[0], ninput_items_v[1]);
   const gr_complex *in_sym = (const gr_complex *) input_items[0];
@@ -79,9 +80,17 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 
   gr_complex *out_sym = (gr_complex *) output_items[0];
   unsigned char *out_flag = 0;
-  if (output_items.size() == 2)
-    out_flag = (unsigned char *) output_items[1];
+  if (output_items.size() >= 3)
+    out_flag = (unsigned char *) output_items[2];
 
+  
+  /* apurv++ */
+  unsigned char *out_signal = NULL;
+  if (output_items.size() >= 2){
+    out_signal = (unsigned char*) output_items[1];
+    memset(out_signal, 0, sizeof(char) * d_fft_length);
+  }
+  /* apurv++ end */
 
   int no = 0;	// number items output
   int ni = 0;	// number items read from input
@@ -105,6 +114,7 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       
     case ST_PREAMBLE:
       assert(in_flag[ni] & 0x1);
+
       if (d_nsymbols_output >= (int) d_preamble.size()){
 	// we've output all the preamble
 	enter_first_payload();
@@ -115,6 +125,12 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	       d_fft_length*sizeof(gr_complex));
 
 	write_out_flag();
+
+        /* apurv++ start */
+        memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+        out_signal[no * d_fft_length] = 1;
+       /* apurv++ end */
+
 	no++;
 	d_nsymbols_output++;
       }
@@ -125,6 +141,11 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       memcpy(&out_sym[no * d_fft_length],
 	     &in_sym[ni * d_fft_length],
 	     d_fft_length * sizeof(gr_complex));
+
+
+      /* apurv++ start */
+      memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+      /* apurv++ end */
 
       write_out_flag();
       no++;
@@ -142,6 +163,10 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       memcpy(&out_sym[no * d_fft_length],
 	     &in_sym[ni * d_fft_length],
 	     d_fft_length * sizeof(gr_complex));
+
+      /* apurv++ start */
+      memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+      /* apurv++ end */
 
       write_out_flag();
       no++;

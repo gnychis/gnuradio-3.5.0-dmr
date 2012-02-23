@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright 2007,2008,2010,2011 Free Software Foundation, Inc.
+ * Copyright 2007,2008,2010 Free Software Foundation, Inc.
  * 
  * This file is part of GNU Radio
  * 
@@ -28,22 +28,48 @@
 #include <gr_io_signature.h>
 #include <gr_expj.h>
 #include <cstdio>
+#include <boost/math/special_functions/trunc.hpp>
+#include <math.h>
+
+// apurv for logging the preamble //
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdexcept>
+#include <stdio.h>
+
+#ifdef HAVE_IO_H
+#include <io.h>
+#endif
+#ifdef O_BINARY
+#define OUR_O_BINARY O_BINARY
+#else
+#define OUR_O_BINARY 0
+#endif
+
+#ifdef O_LARGEFILE
+#define OUR_O_LARGEFILE O_LARGEFILE
+#else
+#define OUR_O_LARGEFILE 0
+#endif
+// apurv for logging ends //
 
 digital_ofdm_sampler_sptr
 digital_make_ofdm_sampler (unsigned int fft_length, 
-			   unsigned int symbol_length,
-			   unsigned int timeout)
+		      unsigned int symbol_length,
+		      unsigned int timeout)
 {
   return gnuradio::get_initial_sptr(new digital_ofdm_sampler (fft_length, symbol_length, timeout));
 }
 
 digital_ofdm_sampler::digital_ofdm_sampler (unsigned int fft_length, 
-					    unsigned int symbol_length,
-					    unsigned int timeout)
+				  unsigned int symbol_length,
+				  unsigned int timeout)
   : gr_block ("ofdm_sampler",
-	      gr_make_io_signature2 (2, 2, sizeof (gr_complex), sizeof(char)),
-	      gr_make_io_signature2 (2, 2, sizeof (gr_complex)*fft_length, sizeof(char)*fft_length)),
-    d_state(STATE_NO_SIG), d_timeout_max(timeout), d_fft_length(fft_length), d_symbol_length(symbol_length)
+	      gr_make_io_signature3 (2, 3, sizeof (gr_complex), sizeof(char), sizeof(gr_complex)),
+	      gr_make_io_signature3 (2, 3, sizeof (gr_complex)*fft_length, sizeof(char)*fft_length, sizeof(gr_complex)*fft_length)),
+    d_state(STATE_NO_SIG), d_timeout_max(timeout), d_fft_length(fft_length), d_symbol_length(symbol_length),
+    d_fp(NULL), d_fd(0), d_file_opened(false) 
 {
   set_relative_rate(1.0/(double) fft_length);   // buffer allocator hint
 }
@@ -62,11 +88,11 @@ digital_ofdm_sampler::forecast (int noutput_items, gr_vector_int &ninput_items_r
 
 int
 digital_ofdm_sampler::general_work (int noutput_items,
-				    gr_vector_int &ninput_items,
-				    gr_vector_const_void_star &input_items,
-				    gr_vector_void_star &output_items)
+			       gr_vector_int &ninput_items,
+			       gr_vector_const_void_star &input_items,
+			       gr_vector_void_star &output_items)
 {
-  const gr_complex *iptr = (const gr_complex *) input_items[0];
+  gr_complex *iptr = (gr_complex *) input_items[0];
   const char *trigger = (const char *) input_items[1];
 
   gr_complex *optr = (gr_complex *) output_items[0];
@@ -88,7 +114,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
     else
       index++;
   }
-  
+
   unsigned int i, pos, ret;
   switch(d_state) {
   case(STATE_PREAMBLE):
@@ -96,9 +122,12 @@ digital_ofdm_sampler::general_work (int noutput_items,
     for(i = (index - d_fft_length + 1); i <= index; i++) {
       *optr++ = iptr[i];
     }
-    
+   
+    //log_preamble(iptr, (index-d_fft_length+1));
+ 
     d_timeout = d_timeout_max; // tell the system to expect at least this many symbols for a frame
     d_state = STATE_FRAME;
+ 
     consume_each(index - d_fft_length + 1); // consume up to one fft_length away to keep the history
     ret = 1;
     break;
@@ -130,4 +159,39 @@ digital_ofdm_sampler::general_work (int noutput_items,
   }
 
   return ret;
+}
+
+void
+digital_ofdm_sampler::log_preamble(gr_complex *iptr, long index) {
+  if(!d_file_opened)
+  {
+      d_file_opened = open_log();
+      assert(d_file_opened);
+      fprintf(stderr, "preambles file opened!\n");
+  }
+  assert(d_fp != NULL);
+  int count = ftell(d_fp);
+  count = fwrite_unlocked(iptr + index, sizeof(gr_complex), d_fft_length, d_fp);	// to log preamble
+  //count = fwrite_unlocked(iptr + index, sizeof(gr_complex), d_symbol_length, d_fp);	// log anything ;)
+}
+
+bool
+digital_ofdm_sampler::open_log()
+{
+  printf("open_log called\n"); fflush(stdout);
+
+  // open the preamble log file //
+  char *filename = "preamble.dat";
+  if ((d_fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
+     perror(filename);
+     return false;
+  }
+  else {
+      if((d_fp = fdopen (d_fd, true ? "wb" : "w")) == NULL) {
+            fprintf(stderr, "preambles file cannot be opened\n");
+            close(d_fd);
+            return false;
+      }
+  }
+  return true;
 }

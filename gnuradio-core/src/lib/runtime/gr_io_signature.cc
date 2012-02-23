@@ -68,6 +68,22 @@ gr_make_io_signature3(int min_streams, int max_streams,
   return gr_make_io_signaturev(min_streams, max_streams, sizeof_items);
 }
 
+/* apurv++ start */
+gr_io_signature_sptr
+gr_make_io_signature4(int min_streams, int max_streams,
+                      int sizeof_stream_item1,
+                      int sizeof_stream_item2,
+                      int sizeof_stream_item3,
+		      int sizeof_stream_item4)
+{
+  std::vector<int> sizeof_items(4);
+  sizeof_items[0] = sizeof_stream_item1;
+  sizeof_items[1] = sizeof_stream_item2;
+  sizeof_items[2] = sizeof_stream_item3;
+  sizeof_items[3] = sizeof_stream_item4;
+  return gr_make_io_signaturev(min_streams, max_streams, sizeof_items);
+}
+/* apurv++ end */
 // ------------------------------------------------------------------------
 
 

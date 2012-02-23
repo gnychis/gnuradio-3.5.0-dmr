@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright 2006,2007,2011 Free Software Foundation, Inc.
+ * Copyright 2006, 2007 Free Software Foundation, Inc.
  * 
  * This file is part of GNU Radio
  * 
@@ -30,8 +30,8 @@
 class digital_ofdm_frame_acquisition;
 typedef boost::shared_ptr<digital_ofdm_frame_acquisition> digital_ofdm_frame_acquisition_sptr;
 
-digital_ofdm_frame_acquisition_sptr 
-DIGITAL_API digital_make_ofdm_frame_acquisition (unsigned int occupied_carriers, unsigned int fft_length,
+DIGITAL_API digital_ofdm_frame_acquisition_sptr 
+digital_make_ofdm_frame_acquisition (unsigned int occupied_carriers, unsigned int fft_length,
 				unsigned int cplen,
 				const std::vector<gr_complex> &known_symbol, 
 				unsigned int max_fft_shift_len=10);
@@ -81,7 +81,7 @@ protected:
   unsigned char slicer(gr_complex x);
   void correlate(const gr_complex *symbol, int zeros_on_left);
   void calculate_equalizer(const gr_complex *symbol, int zeros_on_left);
-  gr_complex coarse_freq_comp(int freq_delta, int count);
+  gr_complex coarse_freq_comp(float freq_delta, int count);
   
   unsigned int d_occupied_carriers;  // !< \brief number of subcarriers with data
   unsigned int d_fft_length;         // !< \brief length of FFT vector
@@ -99,6 +99,16 @@ protected:
 
   void forecast(int noutput_items, gr_vector_int &ninput_items_required);
 
+  // apurv++ start //
+  void log_hestimate();
+  bool open_log();
+  int d_fd;
+  FILE *d_fp;
+  bool d_boot_up;
+  bool d_file_opened;
+  std::vector<gr_complex> d_hest_freq_prod;
+  // apurv++ end //
+
  public:
   /*!
    * \brief Return an estimate of the SNR of the channel
@@ -110,6 +120,7 @@ protected:
 		   gr_vector_int &ninput_items,
 		   gr_vector_const_void_star &input_items,
 		   gr_vector_void_star &output_items);
+  
 };
 
 
