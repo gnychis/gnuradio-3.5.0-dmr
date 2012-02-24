@@ -177,7 +177,7 @@ def _npadding_bytes(pkt_byte_len, samples_per_symbol, bits_per_symbol):
     return byte_modulus - r
     
 
-def unmake_packet(whitened_payload_with_crc, whitener_offset=0, dewhitening=1):
+def unmake_packet(whitened_payload_with_crc, fec_n, fec_k, bps, expectedLen, whitener_offset=0, dewhitening=1):
     """
     Return (ok, payload)
 
@@ -216,8 +216,13 @@ def unmake_packet(whitened_payload_with_crc, whitener_offset=0, dewhitening=1):
 
           print printable
           print "\n"
+  
+    if (fec_n > 0 and fec_k > 0):
+	pkt = crc.rx_wrapper(payload_with_crc, fec_n, fec_k, bps, expectedLen)
+    else:
+	pkt = payload_with_crc
 
-    ok, payload = crc.check_crc32(payload_with_crc)
+    ok, payload = crc.check_crc32(pkt)
 
     if 0:
         print "payload_with_crc =", string_to_hex_list(payload_with_crc)

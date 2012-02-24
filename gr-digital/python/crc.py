@@ -36,3 +36,8 @@ def check_crc32(s):
     (expected,) = struct.unpack(">I", s[-4:])
     # print "actual =", hex(actual), "expected =", hex(expected)
     return (actual == expected, msg)
+
+
+def rx_wrapper(payload_w_crc, fec_n, fec_k, bps, expectedLen):
+    decoded_payload = digital_swig.rx_wrapper(payload_w_crc, fec_n, fec_k, bps, expectedLen)
+    return decoded_payload

@@ -38,6 +38,7 @@
 #include <stdio.h>
 #include <deque>
 
+//#define USE_PILOT 0
 #ifdef HAVE_IO_H
 #include <io.h>
 #endif
@@ -444,7 +445,9 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   float d_freq_gain;
   float d_eq_gain;
 
-  std::vector<int> d_subcarrier_map;
+  std::vector<int> d_data_carriers;
+  std::vector<int> d_pilot_carriers;
+  std::vector<int> d_all_carriers;			// tracks which are data(0), pilot(1) or dc(2) 
 
  protected:
   digital_ofdm_frame_sink(const std::vector<gr_complex> &sym_position, 
@@ -626,9 +629,13 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void getSymOutBits_ILP(unsigned char *bits, int index);
   void demodulate_ILP(FlowInfo *flowInfo);
   unsigned int demapper_ILP(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec, 
-			    vector<vector<gr_complex*> > batched_sym_position, FlowInfo *flowInfo);
+			    vector<vector<gr_complex*> > batched_sym_position, FlowInfo *flowInfo, vector<gr_complex> *dfe_vec);
   void buildMap_ILP(cx_mat coeff, vector<gr_complex*> &batched_sym_position);
   void debugMap_ILP(vector<vector<gr_complex*> > batched_sym_position);
+
+  /* pilots */
+  void fill_all_carriers_map();
+  void equalize_interpolate_dfe(const gr_complex *in, gr_complex *out);
    
 };
 

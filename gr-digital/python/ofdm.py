@@ -146,10 +146,11 @@ class ofdm_mod(gr.hier_block2):
         """
         if eof:
             msg = gr.message(1) # tell self._pkt_input we're not sending any more packets
-		
+	
+	"""	
         else:
             ############# print "original_payload =", string_to_hex_list(payload)
-	    """
+	    
             pkt = ofdm_packet_utils.make_packet(payload, 1, 1, self._pad_for_usrp, whitening=True)
             
             #print "pkt =", string_to_hex_list(pkt)
@@ -224,10 +225,16 @@ class ofdm_demod(gr.hier_block2):
         self._snr = options.snr
 
         # apurv++ start #
+        self._fec_n = options.fec_n
+        self._fec_k = options.fec_k
         self._batch_size = options.batch_size
         self._decode_flag = options.decode_flag
 	self._id = options.id
 	self._threshold = options.threshold
+	self._size = options.size
+        if(self._fec_n < self._fec_k):
+            print "ERROR: K > N in FEC!\n"
+            exit(0);
         # apurv++ end #
 
         # Use freq domain to get doubled-up known symbol for correlation in time domain
@@ -248,6 +255,7 @@ class ofdm_demod(gr.hier_block2):
 
         mods = {"bpsk": 2, "qpsk": 4, "8psk": 8, "qam8": 8, "qam16": 16, "qam64": 64, "qam256": 256}
         arity = mods[self._modulation]
+	self._bits_per_symbol = int(math.log(mods[self._modulation], 2))
 	print "arity: ", arity
  	print "mod: ", self._modulation       
  
@@ -305,7 +313,7 @@ class ofdm_demod(gr.hier_block2):
         if options.verbose:
             self._print_verbage()
             
-        self._watcher = _queue_watcher_thread(self._rcvd_pktq, callback)
+        self._watcher = _queue_watcher_thread(self._rcvd_pktq, callback, self._fec_n, self._fec_k, self._bits_per_symbol, self._size)
 	self._watcher_fwd = _queue_watcher_thread(self._out_pktq, fwd_callback)			# apurv++
 
     def add_options(normal, expert):
@@ -322,7 +330,14 @@ class ofdm_demod(gr.hier_block2):
                           help="set the number of bits in the cyclic prefix [default=%default]")
 	expert.add_option("", "--snr", type="float", default=30.0,
                           help="SNR estimate [default=%default]")
+
         # apurv++ adding options #
+       expert.add_option("", "--fec-n", type="intx", default=0,
+                          help="set the 'n' parameter in (n,k) for FEC encoding [default=0(no fec)]")
+        expert.add_option("", "--fec-k", type="intx", default=0,
+                          help="set the 'k' parameter in (n,k) for FEC encoding [default=0(no fec)]")
+        expert.add_option("-s", "--size", type="intx", default=400,
+                          help="expected size (in bytes) of the rx packet [default=400]")
         expert.add_option("", "--batch-size", type="intx", default=1,
                           help="sets the batch size [default=%default]")
         expert.add_option("", "--decode-flag", type="intx", default=1,
@@ -355,14 +370,18 @@ class ofdm_demod(gr.hier_block2):
         print "Batch size:      %3d"   % (self._batch_size)
         print "Decode symbols:  %3d"   % (self._decode_flag)
 	print "Correlation threshold: %f" % (self._threshold)
-	
+        print "FEC: (",self._fec_n,",",self._fec_k,")"	
 	
 class _queue_watcher_thread(_threading.Thread):
-    def __init__(self, rcvd_pktq, callback):
+    def __init__(self, rcvd_pktq, callback, fec_n=0, fec_k=0, bits_per_symbol=0, size=0):
         _threading.Thread.__init__(self)
         self.setDaemon(1)
         self.rcvd_pktq = rcvd_pktq
         self.callback = callback
+        self._fec_n = fec_n
+        self._fec_k = fec_k
+        self._bits_per_symbol = bits_per_symbol
+	self._pktLen = size
         self.keep_running = True
         self.start()
 
@@ -375,7 +394,8 @@ class _queue_watcher_thread(_threading.Thread):
 	    ########## receiver sink #########
 	    if msg.type() == 0:
 		print "here!"
-                ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string())                  
+                #ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string())
+		ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string(), self._fec_n, self._fec_k, self._bits_per_symbol, self._pktLen)                  
                 if self.callback:
                   self.callback(ok, payload, msg.timestamp_valid(), msg.preamble_sec(), msg.preamble_frac_sec())
 	    

@@ -27,6 +27,68 @@
 #include <string>
 #include <gr_types.h>
 
+
+/************************************** FEC related ********************************************/
+#define DTYPE unsigned char
+/* Reed-Solomon codec control block */
+struct rs {
+  unsigned int mm;              /* Bits per symbol */
+  unsigned int nn;              /* Symbols per block (= (1<<mm)-1) */
+  unsigned char *alpha_to;      /* log lookup table */
+  unsigned char *index_of;      /* Antilog lookup table */
+  unsigned char *genpoly;       /* Generator polynomial */
+  unsigned int nroots;     /* Number of generator roots = number of parity symbols */
+  unsigned char fcr;        /* First consecutive root, index form */
+  unsigned char prim;       /* Primitive element, index form */
+  unsigned char iprim;      /* prim-th root of 1, index form */
+};
+
+static inline int modnn(struct rs *rs,int x){
+  while (x >= rs->nn) {
+    x -= rs->nn;
+    x = (x >> rs->mm) + (x & rs->nn);
+  }
+  return x;
+}
+
+#define MODNN(x) modnn(rs,x)
+
+#define MM (rs->mm)
+#define NN (rs->nn)
+#define ALPHA_TO (rs->alpha_to)
+#define INDEX_OF (rs->index_of)
+#define GENPOLY (rs->genpoly)
+#define NROOTS (rs->nroots)
+#define FCR (rs->fcr)
+#define PRIM (rs->prim)
+#define IPRIM (rs->iprim)
+#define A0 (NN)
+
+static struct rs*
+digital_init_rs(unsigned int symsize,unsigned int gfpoly,unsigned int fcr,
+	       unsigned int prim,unsigned int nroots);
+void
+digital_free_rs(void *p);
+
+std::string
+digital_rx_wrapper(std::string buf, int fec_N, int fec_K, int bits_per_symbol, int expectedDataLen);
+
+std::string
+digital_decode_rs_fec(std::string buf, int n, int k, int dataLen);
+
+int
+convertToSymbols(unsigned char *symbols, int symSize, std::string s_bits);
+
+int
+digital_decode_rs(struct rs *rs, unsigned char *data);
+
+std::string
+getBits(const unsigned char *data, int len, const int symSize);
+
+struct rs*
+find_rs_handle(std::vector<struct rs*> rs_vec, int n, int k);
+
+
 /*!
  * \brief update running CRC-32
  * \ingroup digital

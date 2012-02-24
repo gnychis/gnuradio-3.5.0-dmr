@@ -141,7 +141,7 @@ class ofdm_sync_pn(gr.hier_block2):
 
 	   # some debug dump #
 	   #self.connect(self.moving_average, gr.file_sink(gr.sizeof_float, "ofdm_moving_avg_f.dat"))
-	   self.connect(self.corrmag, gr.file_sink(gr.sizeof_float, "/tmp/ramdisk/ofdm_corrmag.dat"))
+	   self.connect(self.corrmag, gr.file_sink(gr.sizeof_float, "ofdm_corrmag.dat"))
 	   #self.connect(self.slice, gr.file_sink(gr.sizeof_float, "ofdm_slice.dat"))
 	   #self.connect(self.f2b, gr.file_sink(gr.sizeof_char, "ofdm_f2b.dat"))
 	   
