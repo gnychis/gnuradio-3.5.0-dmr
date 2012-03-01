@@ -68,6 +68,11 @@ digital_ofdm_insert_preamble::~digital_ofdm_insert_preamble()
 {
 }
 
+// First input: complex samples
+// Second input: the current sample with the preamble
+// First output: the complex samples
+// Second output: output one value the size of the FFT size
+// Third output: is the current OFDM symbol the preamble
 int
 digital_ofdm_insert_preamble::general_work (int noutput_items,
 				       gr_vector_int &ninput_items_v,
