@@ -129,9 +129,9 @@ class uhd_transmitter(uhd_interface, gr.hier_block2):
                                freq, gain, spec, antenna)
 
         #self.connect(self, self.u)
-        self.connect(self, (self.gr_burst_tagger_0, 0))
-        self.connect((self.gr_burst_tagger_0, 0), (self.u))
-        self.connect((self.gr_burst_tagger_0, 1))
+        self.connect((self,0), (self.gr_burst_tagger_0, 0))   # Connect the incoming sample stream
+        self.connect(self,1), (self.gr_burst_tagger_0, 1))    # Connect the incoming trigger
+        self.connect((self.gr_burst_tagger_0, 0), (self.u))   # Connect the sample stream to USRP
 
         if(verbose):
             self._print_verbage()
