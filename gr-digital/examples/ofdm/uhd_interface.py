@@ -63,6 +63,9 @@ class uhd_interface:
         self._spec = spec
         self._gain = self.set_gain(gain)
         self._freq = self.set_freq(freq)
+        self.gr_burst_tagger_0 = gr.burst_tagger(gr.sizeof_gr_complex)
+        self.gr_burst_tagger_0.set_true_tag("tx_eob",True)
+        self.gr_burst_tagger_0.set_false_tag("tx_sob",True)
 	time.sleep(1)
 
         self._rate = self.set_sample_rate(bandwidth)
@@ -118,14 +121,17 @@ class uhd_transmitter(uhd_interface, gr.hier_block2):
     def __init__(self, args, bandwidth, freq=None, gain=None,
                  spec=None, antenna=None, verbose=False):
         gr.hier_block2.__init__(self, "uhd_transmitter",
-                                gr.io_signature(1,1,gr.sizeof_gr_complex),
+                                gr.io_signature(2,2,gr.sizeof_gr_complex),
                                 gr.io_signature(0,0,0))
 
         # Set up the UHD interface as a transmitter
         uhd_interface.__init__(self, True, args, bandwidth,
                                freq, gain, spec, antenna)
 
-        self.connect(self, self.u)
+        #self.connect(self, self.u)
+        self.connect(self, (self.gr_burst_tagger_0, 0))
+        self.connect((self.gr_burst_tagger_0, 0), (self.u))
+        self.connect((self.gr_burst_tagger_0, 1))
 
         if(verbose):
             self._print_verbage()
