@@ -70,7 +70,8 @@ class my_top_block(gr.top_block):
         self.txpath = transmit_path(options)
         self.rxpath = receive_path(callback, fwd_callback, options)
 
-        self.connect(self.txpath, self.sink)
+        self.connect((self.txpath,0), (self.sink,0))  # the data path
+        self.connect((self.txpath,1), (self.sink,1))  # the trigger
         self.connect(self.source, self.rxpath)
 
     def get_pkt_to_fwd(self):
