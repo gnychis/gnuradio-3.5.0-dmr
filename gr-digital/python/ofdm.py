@@ -56,7 +56,7 @@ class ofdm_mod(gr.hier_block2):
 
 	gr.hier_block2.__init__(self, "ofdm_mod",
 				gr.io_signature(0, 0, 0),       # Input signature
-				gr.io_signature(1, 1, gr.sizeof_gr_complex)) # Output signature
+				gr.io_signature(2, 2, gr.sizeof_gr_complex)) # Output signature
 
         self._pad_for_usrp = pad_for_usrp
         self._modulation = options.modulation
@@ -109,7 +109,7 @@ class ofdm_mod(gr.hier_block2):
         
         self.connect((self._pkt_input, 0), (self.preambles, 0))
         self.connect((self._pkt_input, 1), (self.preambles, 1))
-        self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
+        self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, (self,0))
 
 	self.connect((self.preambles, 1), gr.null_sink(gr.sizeof_char*options.fft_length))
 
