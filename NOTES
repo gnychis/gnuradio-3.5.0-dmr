@@ -1,0 +1,9 @@
+
+- basically, what I've done in UHD transmitter is changed the number of inputs from 1 to 2, to include not just the complex sample stream but also a trigger
+- now, trying to find the right place to generate this trigger
+- need to understand what connects to uhd_transmitter:
+  * in tunnel.py self.sink is uhd_transmitter, and it connects transmit_path() to it (self.txpath)
+- so then backtrack it to transmit_path, expand its number of outputs
+  * expanded its number of outputs
+- then, in ofdm.py and the hire block "ofdm_mod" … I think this is where the trigger needs to be generated
+  * expand its outputs to 2 also
