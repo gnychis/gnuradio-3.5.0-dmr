@@ -1,4 +1,4 @@
-
+- testing remote change
 - basically, what I've done in UHD transmitter is changed the number of inputs from 1 to 2, to include not just the complex sample stream but also a trigger
 - now, trying to find the right place to generate this trigger
 - need to understand what connects to uhd_transmitter:
