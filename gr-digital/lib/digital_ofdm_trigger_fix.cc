@@ -36,7 +36,7 @@ digital_make_ofdm_trigger_fix (size_t input_size, size_t output_size)
 
 digital_ofdm_trigger_fix::digital_ofdm_trigger_fix (size_t input_size,
 							    size_t output_size)
-  : gr_sync_interpolator ("ofdm_cyclic_prefixer",
+  : gr_sync_interpolator ("ofdm_trigger_fix",
 			  gr_make_io_signature (1, 1, input_size*sizeof(gr_complex)),
 			  gr_make_io_signature (1, 1, sizeof(gr_complex)),
 			  output_size), 
@@ -54,16 +54,11 @@ digital_ofdm_trigger_fix::work (int noutput_items,
   gr_complex *in = (gr_complex *) input_items[0];
   gr_complex *out = (gr_complex *) output_items[0];
   size_t cp_size = d_output_size - d_input_size;
-  unsigned int i=0, j=0;
+  unsigned int i=0;
 
-  j = cp_size;
-  for(i=0; i < d_input_size; i++,j++) {
-    out[j] = in[i];
-  }
-
-  j = d_input_size - cp_size;
-  for(i=0; i < cp_size; i++, j++) {
-    out[i] = in[j];
+  out[i] = in[0];
+  for(i=1; i < d_output_size; i++) {
+    out[i] = gr_complex(0,0);
   }
 
   return d_output_size;
