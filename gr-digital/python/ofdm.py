@@ -110,8 +110,8 @@ class ofdm_mod(gr.hier_block2):
         self.connect((self._pkt_input, 0), (self.preambles, 0))
         self.connect((self._pkt_input, 1), (self.preambles, 1))
         self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
+        self.connect((self.preambles,1), (self,1))
 
-	self.connect((self.preambles, 1), gr.null_sink(gr.sizeof_char*options.fft_length))
 
 	"""
 	self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
