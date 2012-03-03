@@ -136,10 +136,10 @@ class cs_mac(object):
            print "<tunnel.py> tx DATA!"
            #time.sleep(0.02)                                               #IFS
            #time.sleep(40)
-           self.tb.txpath.send_pkt(packet)
+           self.tb.txpath.send_pkt(packet, 1, False)
         elif packet.type() == 2:
            print "<tunnel.py> tx ACK!"
-           self.tb.txpath.send_pkt(packet)
+           self.tb.txpath.send_pkt(packet, 1, False)
         else:
            print "<tunnel.py> unknown pkt type:", packet.type()
 
