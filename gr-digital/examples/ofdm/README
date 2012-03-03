@@ -1,0 +1,39 @@
+author: Apurv Bhartia
+
+
+To run as a receiver:
+--------------------
+./benchmark_rx.py -f 2489.9996M --fft-length=96 --cp-length=24 --occupied-tones=80 --rx-gain=25 -W 390625 --batch-size=2 --decode-flag=1 --threshold=4e-5
+
+Additional options/notes: 
+------------------
+1. --fec-n
+2. --fec-k
+* If using FEC, then at the receiver, we need to specify the 'expected data len', i.e '-s' parameter. If the transmitter is sending 400 bytes of data with FEC, then receiver:
+  ./benchmark_rx.py -f 2489.9996M --fft-length=96 --cp-length=24 --occupied-tones=80 --rx-gain=25 -W 390625 --batch-size=2 --decode-flag=1 --threshold=4e-5 --fec-n=255 --fec-k=223 -s 404
+
+-s option: Only needs to be used at the receiver, when FEC is being used. The value for '-s' is payload+4
+
+
+3. rx-gain, threshold, -f: will depend on the nodes being used. Threshold tuning can be done by plotting the ofdm_corrmag.dat file, which contains the preamble correlation magnitude. Need to fix it in the later versions. 
+
+Additional files:
+----------------
+compositeLink_info.txt: contains the composite links information
+format: link-id   #of-src     src1   src2   src3    #of-dst   dst1   dst2    dst3
+
+credit_info.txt: contains the credit info on the composite links
+format: flowId   credit   previousLink-id   nextLink-id
+
+
+To run as a transmitter:
+-----------------------
+./benchmark_tx.py -f 2489.9996M --fft-length=96 --cp-length=24 --occupied-tones=80 --tx-gain=25 --tx-amplitude=0.5 -W 390625 --batch-size=2 --encode-flag=1 -s 400 --fec-n=255 --fec-k=223
+
+Additional options/notes:
+-------------------------
+1. FEC optional as before. 
+2. -s: parameter specifies the data size
+3. batch_size: maximum 3, minimum: 1
+
+4. tx-gain, tx-amplitude, -f: depends on the nodes
