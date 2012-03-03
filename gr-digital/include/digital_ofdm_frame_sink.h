@@ -90,7 +90,10 @@ typedef struct innovative_pkt_str {
   vector<unsigned char> senders;
   vector<gr_complex*> coeffs;
   vector<gr_complex*> hestimates;		
+  vector<float> phase_eq_vec;                   // PLL
+  vector<float> freq_eq_vec;                    // PLL
   gr_complex* symbols;
+  unsigned int prevLinkId;
 } PktInfo;
 
 typedef vector<PktInfo*> InnovativePktInfoVector;
@@ -115,8 +118,8 @@ typedef vector<FlowInfo*> FlowInfoVector;
 /* composite links */
 typedef struct composite_link_str {
   unsigned char linkId;
-  vector<unsigned char> srcIds;
-  vector<unsigned char> dstIds;
+  vector<unsigned int> srcIds;
+  vector<unsigned int> dstIds;
 } CompositeLink;
 typedef vector<CompositeLink*> CompositeLinkVector;
 
@@ -492,6 +495,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   bool d_save_flag;
   unsigned int d_curr_ofdm_symbol_index;
   unsigned int d_num_ofdm_symbols;
+  unsigned int d_num_hdr_ofdm_symbols;
 
   gr_complex *d_curr_rx_symbols;
   unsigned int d_batch_size;
@@ -509,6 +513,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   unsigned int d_pkt_num;
   unsigned char d_flow;
   unsigned int d_pkt_type;
+  unsigned int d_prevLinkId;
 
   gr_complex *d_in_estimates;		// will be updated only if preamble is not detected in between a pkt! //
 
@@ -528,11 +533,11 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   /* encoding the signal */
   void encodeSignal(gr_complex *symbols, gr_complex coeff);
   void combineSignal(gr_complex *out, gr_complex* symbols);
-  void normalizeSignal(gr_complex* out);
+  void normalizeSignal(gr_complex* out, int k);
   void generateCodeVector(MULTIHOP_HDR_TYPE &header);
 
   /* make header and packet */
-  void makeHeader(MULTIHOP_HDR_TYPE &header, unsigned char *header_bytes, FlowInfo *flowInfo);
+  void makeHeader(MULTIHOP_HDR_TYPE &header, unsigned char *header_bytes, FlowInfo *flowInfo, unsigned int nextLinkId);
 
   /* decoding/demodulating */
   void demodulate(vector<gr_complex*> out_sym_vec);
@@ -563,6 +568,9 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void debugHeader(unsigned char *header_bytes);
   gr_complex ToPhase_c(float phase_deg);
   float ToPhase_f(gr_complex phase_c);
+  float ToPhase_f(COEFF coeff);
+  gr_complex ToPhase_c(COEFF coeff);
+ 
   void decodeSignal(gr_complex* symbols, gr_complex coeff);
 
   /* for offline analysis/logging */
@@ -586,15 +594,18 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   /* fwder operations */
   void makePacket(); 		
   bool isLeadSender();
-  void encodePktToFwd(unsigned char flowId);
+  void encodePktToFwd(CreditInfo *creditInfo);
   
 
   /* credits */
   unsigned int num_data_fwd;
+  CompositeLinkVector d_compositeLinkVector;
   CreditInfoVector d_creditInfoVector;								// per flow
+  CompositeLink* getCompositeLink(int id);
   CreditInfo* findCreditInfo(unsigned char flowId);
+  void populateCompositeLinkInfo();
   void populateCreditInfo();
-  float updateCredit();
+  void updateCredit();
 
   /* ACKs */
   unsigned int num_acks_sent;
@@ -625,7 +636,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
 
   /* ILP */
-  void slicer_ILP(gr_complex *x, gr_complex *closest_sym, unsigned char *bits, vector<gr_complex*> batched_sym_position);
+  void slicer_ILP(gr_complex *x, gr_complex *closest_sym, unsigned char *bits, vector<gr_complex*> batched_sym_position,
+		  unsigned int ofdm_symbol_index, unsigned int subcarrier_index, gr_complex** sym_vec);
   void getSymOutBits_ILP(unsigned char *bits, int index);
   void demodulate_ILP(FlowInfo *flowInfo);
   unsigned int demapper_ILP(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec, 
@@ -633,10 +645,23 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void buildMap_ILP(cx_mat coeff, vector<gr_complex*> &batched_sym_position);
   void debugMap_ILP(vector<vector<gr_complex*> > batched_sym_position);
 
+  void slicer_ILP_opt(gr_complex *x, gr_complex *closest_sym, unsigned char *bits, vector<gr_complex*> batched_sym_position, 
+                  unsigned int ofdm_index, unsigned int subcarrier_index, gr_complex** sym_vec);
+  void getCandidateSymbols(gr_complex *x, vector<gr_complex*> batched_sym_position, vector<int> &filtered_batches);
+
   /* pilots */
   void fill_all_carriers_map();
   void equalize_interpolate_dfe(const gr_complex *in, gr_complex *out);
-   
+
+  /* fwd packet error check */
+  bool checkPacketError(FlowInfo *flow_info);
+  bool isFECGroupCorrect(int mod_symbols_group, gr_complex *rx_symbols, vector<comp_d> ideal_pos_map);
+  bool isSymbolError(gr_complex& x, vector<comp_d> ideal_pos_map);
+  void buildIdealPosMap(FlowInfo *flowInfo, vector<comp_d> &ideal_map);
+
+
+  void packCoefficientsInHeader(MULTIHOP_HDR_TYPE& header, gr_complex* coeffs, FlowInfo *flowInfo);
+  void interpolate_coeffs(gr_complex* in_coeffs, gr_complex *out_coeffs);   
 };
 
 

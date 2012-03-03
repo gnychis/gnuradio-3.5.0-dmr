@@ -41,3 +41,7 @@ def check_crc32(s):
 def rx_wrapper(payload_w_crc, fec_n, fec_k, bps, expectedLen):
     decoded_payload = digital_swig.rx_wrapper(payload_w_crc, fec_n, fec_k, bps, expectedLen)
     return decoded_payload
+
+def tx_wrapper(s, fec_n, fec_k, bps):
+    payload_w_fec = digital_swig.tx_wrapper(s, fec_n, fec_k, bps)
+    return payload_w_fec

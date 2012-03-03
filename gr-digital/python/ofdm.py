@@ -22,11 +22,9 @@
 
 import math
 from gnuradio import gr
-from gnuradio import gr
 import digital_swig
 import ofdm_packet_utils
 from ofdm_receiver import ofdm_receiver
-
 import gnuradio.gr.gr_threading as _threading
 import psk, qam
 
@@ -64,6 +62,18 @@ class ofdm_mod(gr.hier_block2):
         self._occupied_tones = options.occupied_tones
         self._cp_length = options.cp_length
 
+	# apurv++ start #
+	self._id = options.id
+        self._fec_n = options.fec_n
+        self._fec_k = options.fec_k
+	self._batch_size = options.batch_size
+ 	self._encode_flag = options.encode_flag
+
+        if(self._fec_n < self._fec_k):
+            print "ERROR: K > N in FEC!\n"
+            exit(0);
+	# apurv++ end #
+
         win = [] #[1 for i in range(self._fft_length)]
 
         # Use freq domain to get doubled-up known symbol for correlation in time domain
@@ -86,8 +96,9 @@ class ofdm_mod(gr.hier_block2):
         
         mods = {"bpsk": 2, "qpsk": 4, "8psk": 8, "qam8": 8, "qam16": 16, "qam64": 64, "qam256": 256}
         arity = mods[self._modulation]
-        
+        self._bits_per_symbol = int(math.log(mods[self._modulation], 2)) 
         rot = 1
+
         if self._modulation == "qpsk":
             rot = (0.707+0.707j)
         
@@ -98,30 +109,34 @@ class ofdm_mod(gr.hier_block2):
         elif(self._modulation.find("qam") >= 0):
             constel = qam.qam_constellation(arity)
             rotated_const = map(lambda pt: pt * rot, constel.points())
-    
+   
+	#print rotated_const 
         self._pkt_input = digital_swig.ofdm_mapper_bcv(rotated_const, msgq_limit,
-                                             options.occupied_tones, options.fft_length)
+                                             options.occupied_tones, options.fft_length, 
+		  			     options.id, options.src,
+					     options.batch_size, options.encode_flag)
         
+
         self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, padded_preambles)
         self.ifft = gr.fft_vcc(self._fft_length, False, win, True)
+
         self.cp_adder = digital_swig.ofdm_cyclic_prefixer(self._fft_length, symbol_length)
         self.scale = gr.multiply_const_cc(1.0 / math.sqrt(self._fft_length))
         
         self.connect((self._pkt_input, 0), (self.preambles, 0))
         self.connect((self._pkt_input, 1), (self.preambles, 1))
+
         self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
 
-	self.connect((self.preambles, 1), gr.null_sink(gr.sizeof_char*options.fft_length))
-
-	"""
+	# apurv++: log the transmitted data in the time domain #
 	self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
                                                       "symbols_src.dat"))
-	self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length,
-                                                      "timing_src.dat"))
-	"""
-
-	self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "tx_symbols_src.dat"))
-	self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "tx_timing_src.dat"))
+        self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length,
+                                                      "tx_timing_src.dat"))
+        self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
+                                                 "ofdm_ifft_c.dat"))
+	
+        # apurv++ end log #
 
  
         if options.verbose:
@@ -137,7 +152,7 @@ class ofdm_mod(gr.hier_block2):
             self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex,
                                                      "ofdm_cp_adder_c.dat"))
 
-    def send_pkt(self, payload, eof=False):
+    def send_pkt(self, payload, type=0, eof=False):
         """
         Send the payload.
 
@@ -147,18 +162,19 @@ class ofdm_mod(gr.hier_block2):
         if eof:
             msg = gr.message(1) # tell self._pkt_input we're not sending any more packets
 	
-	"""	
-        else:
-            ############# print "original_payload =", string_to_hex_list(payload)
-	    
-            pkt = ofdm_packet_utils.make_packet(payload, 1, 1, self._pad_for_usrp, whitening=True)
+		
+        elif (type == 0):
+	    ############# print "original_payload =", string_to_hex_list(payload)
+            #pkt = ofdm_packet_utils.make_packet(payload, 1, 1, self._pad_for_usrp, whitening=True)
+	    pkt = ofdm_packet_utils.make_packet(payload, 1, self._bits_per_symbol, self._fec_n, self._fec_k, self._pad_for_usrp, whitening=True)
             
             #print "pkt =", string_to_hex_list(pkt)
             msg = gr.message_from_string(pkt)
 	
-        self._pkt_input.msgq().insert_tail(msg)
-	"""
-	self._pkt_input.msgq().insert_tail(payload)			# for forwarder!
+	if type == 0:
+             self._pkt_input.msgq().insert_tail(msg)				# for source! 	(msg needs to be modulated in mapper)
+	else:
+   	     self._pkt_input.msgq().insert_tail(payload)			# for forwarder! (payload is already modulated)
 
     def add_options(normal, expert):
         """
@@ -172,6 +188,22 @@ class ofdm_mod(gr.hier_block2):
                           help="set the number of occupied FFT bins [default=%default]")
         expert.add_option("", "--cp-length", type="intx", default=128,
                           help="set the number of bits in the cyclic prefix [default=%default]")
+
+	# apurv++ adding options #
+        expert.add_option("", "--fec-n", type="intx", default=0,
+                          help="set the 'n' parameter in (n,k) for FEC encoding [default=0(no fec)]")
+        expert.add_option("", "--fec-k", type="intx", default=0,
+                          help="set the 'k' parameter in (n,k) for FEC encoding [default=0(no fec)]")
+        expert.add_option("", "--src", type="intx", default=0,
+                          help="puts the node in SRC mode if 1 [default=%default]")
+	expert.add_option("", "--batch-size", type="intx", default=1,
+                          help="sets the batch size [default=%default]")
+	expert.add_option("", "--encode-flag", type="intx", default=1,
+                          help="encodes the symbols (if true) [default=%default]")
+	expert.add_option("", "--id", type="intx", default=1,
+                          help="set the nodeId [default=%default]")
+	# apurv++ end #
+
     # Make a static method to call before instantiation
     add_options = staticmethod(add_options)
 
@@ -185,6 +217,10 @@ class ofdm_mod(gr.hier_block2):
         print "Occupied Tones:  %3d"   % (self._occupied_tones)
         print "CP length:       %3d"   % (self._cp_length)
 
+        print "Batch size:      %3d"   % (self._batch_size)
+        print "Encode symbols:  %3d"   % (self._encode_flag)
+	print "Node Id: 	%3d"   % (self._id)
+	print "FEC: (",self._fec_n,",",self._fec_k,")"
 
 class ofdm_demod(gr.hier_block2):
     """
@@ -217,7 +253,6 @@ class ofdm_demod(gr.hier_block2):
 	# apurv++ queues # 
 	self._out_pktq = gr.msg_queue()
 	
-
         self._modulation = options.modulation
         self._fft_length = options.fft_length
         self._occupied_tones = options.occupied_tones
@@ -225,11 +260,11 @@ class ofdm_demod(gr.hier_block2):
         self._snr = options.snr
 
         # apurv++ start #
+	self._id = options.id
         self._fec_n = options.fec_n
         self._fec_k = options.fec_k
         self._batch_size = options.batch_size
         self._decode_flag = options.decode_flag
-	self._id = options.id
 	self._threshold = options.threshold
 	self._size = options.size
         if(self._fec_n < self._fec_k):
@@ -332,7 +367,7 @@ class ofdm_demod(gr.hier_block2):
                           help="SNR estimate [default=%default]")
 
         # apurv++ adding options #
-       expert.add_option("", "--fec-n", type="intx", default=0,
+        expert.add_option("", "--fec-n", type="intx", default=0,
                           help="set the 'n' parameter in (n,k) for FEC encoding [default=0(no fec)]")
         expert.add_option("", "--fec-k", type="intx", default=0,
                           help="set the 'k' parameter in (n,k) for FEC encoding [default=0(no fec)]")
@@ -394,10 +429,11 @@ class _queue_watcher_thread(_threading.Thread):
 	    ########## receiver sink #########
 	    if msg.type() == 0:
 		print "here!"
-                #ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string())
-		ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string(), self._fec_n, self._fec_k, self._bits_per_symbol, self._pktLen)                  
+                #ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string())                  
+		ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string(), self._fec_n, self._fec_k, self._bits_per_symbol, self._pktLen)
                 if self.callback:
-                  self.callback(ok, payload, msg.timestamp_valid(), msg.preamble_sec(), msg.preamble_frac_sec())
+                   #self.callback(ok, payload)
+		   self.callback(ok, payload, msg.timestamp_valid(), msg.preamble_sec(), msg.preamble_frac_sec())
 	    
 	    ######### for sending DATA/ACK ##########
 	    elif (msg.type() == 1 or msg.type() == 2):

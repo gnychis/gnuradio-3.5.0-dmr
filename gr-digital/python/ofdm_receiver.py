@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 #
 # Copyright 2006, 2007, 2008 Free Software Foundation, Inc.
 # 
@@ -168,14 +169,14 @@ class ofdm_receiver(gr.hier_block2):
  		    ##### chan_filt -> SYNC, chan_filt -> SIGMIX ####
 		    self.connect(self.chan_filt, self.ofdm_sync)
 		    self.connect(self.chan_filt, gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))        # apurv++ follow freq offset
-		    self.connect(self.chan_filt, gr.file_sink(gr.sizeof_gr_complex, "ofdm_receiver-chan_filt_c.dat"))
+		    #self.connect(self.chan_filt, gr.file_sink(gr.sizeof_gr_complex, "ofdm_receiver-chan_filt_c.dat"))
 		else: 
 		    #### alternatve: chan_filt-> NULL, file_source -> SYNC, file_source -> SIGMIX ####
 		    self.connect(self.chan_filt, gr.null_sink(gr.sizeof_gr_complex))
 		    self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), self.ofdm_sync)
 		    self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))
 		
-		method = 0
+		method = -1
 
 	        if method == -1:
 		    ################## for offline analysis, dump sampler input till the frame_sink, using io_signature4 #################
@@ -244,6 +245,7 @@ class ofdm_receiver(gr.hier_block2):
 		    self.connect((self.sampler, 1), gr.null_sink(gr.sizeof_char*fft_length))
 		
                     self.connect(gr.file_source(gr.sizeof_gr_complex*fft_length, "symbols_src.dat"), self.fft_demod)
+		    self.connect(self.fft_demod, gr.file_sink(gr.sizeof_gr_complex*fft_length, "dump_fft_out.dat"))
                     self.connect(gr.file_source(gr.sizeof_char*fft_length, "timing_src.dat"), (self.ofdm_frame_acq,1))
 		elif use_default == 1:		#(set method == -1)
 			# normal functioning! #
@@ -275,6 +277,8 @@ class ofdm_receiver(gr.hier_block2):
 	    self.connect(gr.file_source(gr.sizeof_char*fft_length, "timing1"), (self.ofdm_frame_acq,1))
             self.connect((self.ofdm_frame_acq,0), (self,0))               # finished with fine/coarse freq correction,
             self.connect((self.ofdm_frame_acq,1), (self,1))               # frame and symbol timing, and equalization
+	    self.connect((self.ofdm_frame_acq,2), (self,2))
+	    self.connect((self.ofdm_frame_acq,3), (self,3))               # ref: method=-1
 
 	elif block_fft_demod == 2:
 		# for normal functioning! #

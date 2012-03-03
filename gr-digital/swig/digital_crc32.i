@@ -23,7 +23,9 @@
 %rename(update_crc32) digital_update_crc32;
 %rename(crc32) digital_crc32;
 %rename(rx_wrapper) digital_rx_wrapper;
+%rename(tx_wrapper) digital_tx_wrapper;
 
 unsigned int digital_update_crc32(unsigned int crc, const std::string buf);
 unsigned int digital_crc32(const std::string buf);
 std::string digital_rx_wrapper(std::string buf, int fec_N, int fec_K, int bits_per_symbol, int expectedDataLen);
+std::string digital_tx_wrapper(std::string buf, int fec_N, int fec_K, int bits_per_symbol);

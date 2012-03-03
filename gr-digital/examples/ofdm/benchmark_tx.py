@@ -60,7 +60,7 @@ class my_top_block(gr.top_block):
 def main():
 
     def send_pkt(payload='', eof=False):
-        return tb.txpath.send_pkt(payload, eof)
+        return tb.txpath.send_pkt(payload, 0, eof)
 
     parser = OptionParser(option_class=eng_option, conflict_handler="resolve")
     expert_grp = parser.add_option_group("Expert")

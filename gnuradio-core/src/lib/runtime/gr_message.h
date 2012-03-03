@@ -26,13 +26,18 @@
 #include <string>
 
 /* apurv++ define header type */
-#define MAX_BATCH_SIZE      3
-#define PADDING_SIZE    1 
+#define MAX_BATCH_SIZE     2 
+#define PADDING_SIZE    6
 #define ACK_PADDING_SIZE 2 
 
 #define DATA_TYPE       1 //0
 #define ACK_TYPE        2 //1
 #define TRIGGER_TYPE    3
+
+typedef struct coeff_str {
+  unsigned short phase;				// scaled
+  unsigned short amplitude;			// scaled	
+} COEFF; 
 
 #pragma pack(1)
 typedef struct multihop_hdr_type {
@@ -42,26 +47,33 @@ typedef struct multihop_hdr_type {
   unsigned char dst_id  : 3;
   unsigned char flow_id : 2;
 
-  // 2 
-  unsigned short batch_number: 13;
+  // 2: 18 bits 
+  unsigned char inno_pkts: 3;
+  unsigned short batch_number: 12;
   unsigned char prev_hop_id : 3;
 
-  // 2
-  unsigned short packetlen: 12;
+  // 2: 15 bits
+  unsigned short packetlen: 11;
   unsigned char nsenders : 2;
   unsigned char pkt_type : 1;
   unsigned char lead_sender: 1;
-  
-  // 2
-  unsigned short pkt_num;
+
+  // 2: 15 bits
+  unsigned short pkt_num: 15;
 
   // 8*3=24
-  gr_complex coeffs[MAX_BATCH_SIZE];
+  //gr_complex coeffs[MAX_BATCH_SIZE];
+  //COEFF coeffs[MAX_BATCH_SIZE*2];
+  // 36 * 2 * 4 =  288
+  COEFF coeffs[MAX_BATCH_SIZE * 36];
+
+  // 1
+  unsigned char link_id;                             // composite link id
 
   // 4
   unsigned int hdr_crc;
 
-  // 1
+  // 6
   unsigned char pad[PADDING_SIZE];                 // to ensure size % (occupied_carriers-dc_carriers) = 0
 
 } MULTIHOP_HDR_TYPE;

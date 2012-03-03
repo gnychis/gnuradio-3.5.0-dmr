@@ -19,7 +19,7 @@
 # Boston, MA 02110-1301, USA.
 # 
 
-import struct
+import struct, sys
 import numpy
 from gnuradio import gru
 import crc
@@ -96,8 +96,9 @@ def make_header(payload_len, whitener_offset=0):
     #print "offset =", whitener_offset, " len =", payload_len, " val=", val
     return struct.pack('!HH', val, val)
 
-def make_packet(payload, samples_per_symbol, bits_per_symbol,
-                pad_for_usrp=True, whitener_offset=0, whitening=True):
+#def make_packet(payload, samples_per_symbol, bits_per_symbol, pad_for_usrp=True, whitener_offset=0, whitening=True):
+def make_packet(payload, samples_per_symbol, bps, fec_n, fec_k, pad_for_usrp=True, whitener_offset=0, whitening=True):
+
     """
     Build a packet, given access code, payload, and whitener offset
 
@@ -120,14 +121,19 @@ def make_packet(payload, samples_per_symbol, bits_per_symbol,
     payload_with_crc = crc.gen_and_append_crc32(payload)
     #print "outbound crc =", string_to_hex_list(payload_with_crc[-4:])
 
-    L = len(payload_with_crc)
+    if (fec_n > 0 and fec_k > 0):
+        enc_payload_with_crc = crc.tx_wrapper(payload_with_crc, fec_n, fec_k, bps)
+    else:
+	enc_payload_with_crc = payload_with_crc
+ 
+    L = len(enc_payload_with_crc)
     MAXLEN = len(random_mask_tuple)
     if L > MAXLEN:
         raise ValueError, "len(payload) must be in [0, %d]" % (MAXLEN,)
 
     """ apurv--: take out the header, we have our own multihop hdr now (ref rainier sink) 
     pkt_hd = make_header(L, whitener_offset)
-    pkt_dt = ''.join((payload_with_crc, '\x55'))
+    pkt_dt = ''.join((enc_payload_with_crc, '\x55'))
     packet_length = len(pkt_hd) + len(pkt_dt)
 
     if pad_for_usrp:
@@ -141,13 +147,39 @@ def make_packet(payload, samples_per_symbol, bits_per_symbol,
     """
 
     ### apurv++: replace above code by this one ###
-    pkt_dt = ''.join((payload_with_crc, '\x55'))
+    pkt_dt = ''.join((enc_payload_with_crc, '\x55'))
+
+    if 1:
+          print "original: "
+          printlst = list()
+          for x in enc_payload_with_crc:
+                t = hex(ord(x)).replace('0x', '')
+                if(len(t) == 1):
+                    t = '0' + t
+                printlst.append(t)
+          printable = ''.join(printlst)
+
+          print printable
+
     packet_length = len(pkt_dt)
     if(whitening):
         pkt = whiten(pkt_dt, whitener_offset)
     else:
         pkt = pkt_dt
     ### apurv++: end replace ###
+
+    if 1:
+	  print "whitened: "
+          printlst = list()
+          for x in pkt:
+          	t = hex(ord(x)).replace('0x', '')
+	        if(len(t) == 1):
+        	    t = '0' + t
+                printlst.append(t)
+          printable = ''.join(printlst)
+
+	  print printable
+	  sys.stdout.flush()
 
     #print "make_packet: len(pkt) =", len(pkt)
 
@@ -188,7 +220,6 @@ def unmake_packet(whitened_payload_with_crc, fec_n, fec_k, bps, expectedLen, whi
     """
 
     if 1:
-	  print "whitened: "
           printlst = list()
           for x in whitened_payload_with_crc:
                 t = hex(ord(x)).replace('0x', '')
@@ -197,7 +228,10 @@ def unmake_packet(whitened_payload_with_crc, fec_n, fec_k, bps, expectedLen, whi
                 printlst.append(t)
           printable = ''.join(printlst)
 
+	  print "whitened: "
           print printable
+	  print "\n"
+	  sys.stdout.flush()
 
     if dewhitening:
         payload_with_crc = dewhiten(whitened_payload_with_crc, whitener_offset)
@@ -214,8 +248,10 @@ def unmake_packet(whitened_payload_with_crc, fec_n, fec_k, bps, expectedLen, whi
                 printlst.append(t)
           printable = ''.join(printlst)
 
+	  print "dewhitened: "
           print printable
           print "\n"
+	  sys.stdout.flush()
   
     if (fec_n > 0 and fec_k > 0):
 	pkt = crc.rx_wrapper(payload_with_crc, fec_n, fec_k, bps, expectedLen)

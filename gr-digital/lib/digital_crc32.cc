@@ -655,3 +655,228 @@ digital_init_rs(unsigned int symsize,unsigned int gfpoly,unsigned fcr,unsigned p
 
   return rs;
 }
+
+
+/***************************************** FEC related code ****************************************/
+void digital_encode_rs(void *p, DTYPE *data, DTYPE *bb){
+
+  struct rs *rs = (struct rs *)p;
+  int i, j;
+  DTYPE feedback;
+
+  memset(bb,0,NROOTS*sizeof(DTYPE));
+
+  for(i=0;i<NN-NROOTS;i++){
+    feedback = INDEX_OF[data[i] ^ bb[0]];
+    if(feedback != A0){      /* feedback term is non-zero */
+#ifdef UNNORMALIZED
+      /* This line is unnecessary when GENPOLY[NROOTS] is unity, as it must
+       * always be for the polynomials constructed by init_rs()
+       */
+      feedback = MODNN(NN - GENPOLY[NROOTS] + feedback);
+#endif
+      for(j=1;j<NROOTS;j++)
+        bb[j] ^= ALPHA_TO[MODNN(feedback + GENPOLY[NROOTS-j])];
+    }
+    /* Shift */
+    memmove(&bb[0],&bb[1],sizeof(DTYPE)*(NROOTS-1));
+    if(feedback != A0)
+      bb[NROOTS-1] = ALPHA_TO[MODNN(feedback + GENPOLY[0])];
+    else
+      bb[NROOTS-1] = 0;
+  }
+}
+
+/* reed-solomon encoding wrapper */
+std::string digital_encode_rs_fec(std::string s_bits, int n, int k)
+{
+    //fflush(stdout);
+
+    static std::vector<struct rs*> rs_vec;
+    struct rs *rs = find_rs_handle(rs_vec, n, k);
+    assert(rs);
+    int syms = rs->mm;
+
+    //printf("syms: %d, nn: %d, nroots: %d\n", syms, NN, NROOTS); 
+    int num_bits = s_bits.size();
+
+    unsigned char *data = (unsigned char*) malloc(sizeof(unsigned char) * ceil((float)num_bits/syms));
+    memset(data, 0, sizeof(unsigned char) * ceil((float)num_bits/syms));
+
+    //printf("s_bits size: %d\n", num_bits); fflush(stdout);
+    int len = convertToSymbols(data, syms, s_bits);
+
+#ifdef DEBUG_FEC
+    printf("raw buf -\n");
+    for(int k = 0; k < len; k++)
+        printf("%d ", (unsigned char) data[k]);
+    printf("\n");
+#endif
+
+    int num_blocks = ceil(((float)len/(rs->nn-rs->nroots)));
+    int len_w_fec = (num_blocks) * NN;
+    int rem = len % (NN-NROOTS);
+    if(rem > 0)
+        len_w_fec = (num_blocks-1) * NN + rem + NROOTS;
+
+    /* encoded_data: the data that now contains the FEC as well */
+    unsigned char *encoded_data = (unsigned char *) malloc(sizeof(unsigned char) * len_w_fec);
+    memset(encoded_data, 0, sizeof(unsigned char) * len_w_fec);
+
+#ifdef DEBUG_FEC
+    printf("len_w_fec%d, num_blocks%d NN%d NROOTS%d\n", len_w_fec, num_blocks, NN, NROOTS); fflush(stdout);
+#endif
+    int dataLen = NN-NROOTS;
+    int processedDataLen = 0;
+
+    int pad_zeros = 0;
+    unsigned char data_block[NN];       //temporary block of data//
+    for (int i=0; i<num_blocks; i++)
+    {
+        memset(data_block, 0, NN);
+        int num_bytes_to_encode = 0;
+
+        if(processedDataLen + dataLen > len)
+        {
+             num_bytes_to_encode = len - processedDataLen;
+             pad_zeros = dataLen - num_bytes_to_encode;
+        }
+        else
+        {
+             num_bytes_to_encode = dataLen;
+        }
+        processedDataLen += num_bytes_to_encode;
+
+        // copy the data portion of this block into the encoded_data //
+        memcpy(data_block, data, num_bytes_to_encode);
+
+        data = data + num_bytes_to_encode;
+
+        // use the shortened RS code if necessary, ie pad with 0s //
+        memset(data_block + num_bytes_to_encode, 0, pad_zeros);
+
+#ifdef DEBUG_FEC
+       printf("raw data_block - num_bytes_to_encode: %d, len: %d, dataLen: %d\n", num_bytes_to_encode, len, dataLen);
+       for(int k = 0; k < NN; k++)
+           printf("%d ", (unsigned char) data_block[k]);
+       printf("\n\n"); fflush(stdout);
+#endif
+        // encode this block using FEC //
+        digital_encode_rs(rs, &data_block[0], &data_block[NN-NROOTS]);
+
+#ifdef DEBUG_FEC
+       printf("encoded data_block - \n");
+       for(int k = 0; k < NN; k++)
+           printf("%d ", (unsigned char) data_block[k]);
+       printf("\n\n"); fflush(stdout);
+#endif
+       // copy the data part //
+       memcpy(encoded_data + i * NN, data_block, num_bytes_to_encode);
+
+       // copy the parity part //
+       memcpy(encoded_data + i * NN + num_bytes_to_encode, data_block + (NN-NROOTS), NROOTS);
+    }
+
+#ifdef DEBUG_FEC
+    printf("encoded data (in fec code) - \n");
+    for(int i = 0; i < len_w_fec; i++)
+        printf("%d ", (unsigned char) encoded_data[i]);
+    printf("\n\n"); fflush(stdout);
+#endif
+    std::string s1((const char*) encoded_data, len_w_fec);
+
+    return s1;
+}
+
+std::string
+digital_tx_wrapper(std::string buf, int fec_N, int fec_K, int bits_per_symbol)
+{
+  assert(fec_N > 0);
+
+  std::string buf_bits = getBitString((const unsigned char*) buf.data(), buf.size());
+  std::string encoded_str = digital_encode_rs_fec(buf_bits, fec_N, fec_K);
+
+  // if phy-symSize != 8, then convert into bits, and then back into bytes //
+  if(fec_N != 255)
+  {
+      int _symSize = getSymSizeFromN_Syms(fec_N);
+      std::string encoded_bits_str = getBits(((const unsigned char*) encoded_str.data()), encoded_str.size(), _symSize);
+      int num_bits = encoded_bits_str.size();
+
+      unsigned char* bytes = (unsigned char*) malloc(sizeof(unsigned char) * num_bits/8);
+      memset(bytes, 0, sizeof(unsigned char) * num_bits/8);
+
+      std::string bytes_str = getMsg(encoded_bits_str, bytes);
+      encoded_str = bytes_str;
+  }
+
+  return encoded_str;
+}
+
+int
+getSymSizeFromN_Syms(int n)
+{
+   int symSize = 0;
+   switch(n)
+   {
+        case 3:     symSize = 2; break;
+        case 7:    symSize = 3; break;
+        case 15:    symSize = 4; break;
+        case 31:   symSize = 5; break;
+        case 63:   symSize = 6; break;
+        case 127:   symSize = 7; break;
+        case 255:  symSize = 8; break;
+   }
+   return symSize;
+}
+
+// converts a bitstring back into a proper msg //
+std::string
+getMsg(std::string str, unsigned char *data)
+{
+  if(str.size() % 8 != 0)
+  {
+        printf("%d ", str.size()); fflush(stdout);
+  }
+  assert(str.size() % 8 == 0);
+
+#ifdef DEBUG
+  for(int i = 0; i < str.size(); i++)
+        printf("%d", str[i]);
+  printf("\n");
+#endif
+  int s_len = str.length();
+  int k = 0;
+  for(int i = 0; i < s_len; i=i+8)
+  {
+      std::bitset<sizeof(unsigned char)*8> s_bits(str.substr(i, 8));
+      data[k] = (unsigned char) s_bits.to_ulong();
+      k++;
+  }
+
+#ifdef DEBUG
+     printf("Final Msg: \n");
+     for(int i = 0; i < k; i++)
+     {
+        printf("%d ", data[i]);
+     }
+     printf("\n");
+#endif
+
+  std::string ret_s((const char*) data, k);
+  return ret_s;
+}
+
+// convert the entire data into bits //
+std::string
+getBitString(const unsigned char *data, int len)
+{
+  std::string orig_s;
+  for(int i = 0; i < len; i++)
+  {
+      std::bitset<sizeof(unsigned char) * 8> s_bits(data[i]);
+      std::string tmp_string = s_bits.to_string<char,std::char_traits<char>,std::allocator<char> >();
+      orig_s.append(tmp_string);
+  }
+  return orig_s;
+}

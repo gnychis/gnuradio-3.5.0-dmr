@@ -88,6 +88,20 @@ getBits(const unsigned char *data, int len, const int symSize);
 struct rs*
 find_rs_handle(std::vector<struct rs*> rs_vec, int n, int k);
 
+std::string
+digital_encode_rs_fec(std::string buf, int N, int K);
+
+std::string
+getMsg(std::string str, unsigned char *data);
+
+int
+getSymSizeFromN_Syms(int n);
+
+std::string
+getBitString(const unsigned char *data, int len);
+
+std::string
+digital_tx_wrapper(std::string buf, int fec_N, int fec_K, int bits_per_symbol);
 
 /*!
  * \brief update running CRC-32
