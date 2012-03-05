@@ -282,7 +282,11 @@ class ofdm_receiver(gr.hier_block2):
 
 	elif block_fft_demod == 2:
 		# for normal functioning! #
-	    self.connect(self.fft_demod, (self.ofdm_frame_acq,0)) 		
+	    self.ss2v = gr.stream_to_vector(gr.sizeof_gr_complex, fft_length)
+	    self.sv2s = gr.vector_to_stream(gr.sizeof_gr_complex, fft_length)	 
+	    self.scale1 = gr.multiply_const_cc(1.0 / fft_length)
+	    #self.connect(self.fft_demod, self.sv2s, self.scale1, self.ss2v, (self.ofdm_frame_acq,0)) 		
+	    self.connect(self.fft_demod, (self.ofdm_frame_acq,0))
             self.connect((self.ofdm_frame_acq,0), (self,0))               # finished with fine/coarse freq correction,
 	    self.connect((self.ofdm_frame_acq,1), (self,1))               # frame and symbol timing, and equalization
 	    self.connect((self.ofdm_frame_acq,2), (self,2))		  # equalizer: hestimates #

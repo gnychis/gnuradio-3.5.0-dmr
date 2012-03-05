@@ -944,7 +944,7 @@ digital_ofdm_mapper_bcv::normalizeSignal(gr_complex* out, int k)
 #else
      out[d_data_carriers[i]] /= gr_complex(k);
 #endif
-     printf("(%f, %f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
+     //printf("(%f, %f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
   }
 }
 
@@ -952,12 +952,7 @@ void
 digital_ofdm_mapper_bcv::combineSignal(gr_complex *out, gr_complex* symbols)
 {
   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
-      if(i == 0 && d_ofdm_symbol_index == 0) {
-         printf("(%.8f, %.8f) + (%.8f, %.8f) = ", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag(), symbols[d_data_carriers[i]].real(), symbols[d_data_carriers[i]].imag()); fflush(stdout);
-      }
      out[d_data_carriers[i]] += symbols[d_data_carriers[i]];
-      if(i == 0 && d_ofdm_symbol_index == 0)
-         printf(" (%.8f, %.8f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
   }
 }
 

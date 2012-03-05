@@ -541,7 +541,7 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   d_fp_sampler = NULL;
   d_fp_timing = NULL;
   assert(open_sampler_log());
-  int len = 80;
+  int len = 100;
   pkt_symbols = (gr_complex*) malloc(sizeof(gr_complex) * len *d_fft_length);
   memset(pkt_symbols, 0, sizeof(gr_complex) * len *d_fft_length);
   timing_symbols = (char*) malloc(sizeof(char) * len * d_fft_length);
@@ -832,7 +832,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
     if (sig[0]) 
         printf("ERROR -- Found SYNC in HAVE_HEADER, length of %d\n", d_packetlen);
 
-    /* disable equalization for now 
+    /* disable equalization for now
     if(d_nsenders == 1 && use_estimates) {	
        equalizeSymbols(&in[0], &d_in_estimates[0]);
     } */
@@ -1149,7 +1149,7 @@ digital_ofdm_frame_sink::loadRxMatrix(cx_mat &RX, unsigned int ofdm_symbol_index
 /* used when multiple senders are present 
    update: even with single sender now (after bigger header) */
 inline void
-digital_ofdm_frame_sink::updateCoeffMatrix(FlowInfo *flowInfo, unsigned int subcarrier_index)
+digital_ofdm_frame_sink::updateCoeffMatrix(FlowInfo *flowInfo, unsigned int subcarrier_index, cx_mat &coeff_mat)
 {
   //printf("updateCoeffMatrix, subcarrier: %d, red_size: %d, \n", subcarrier_index, flowInfo->reduced_coeffs.size()); fflush(stdout);
   // every entry in reduced_coeffs holds is an array of gr_complex (d_batch_size * subcarriers)
@@ -1162,7 +1162,7 @@ digital_ofdm_frame_sink::updateCoeffMatrix(FlowInfo *flowInfo, unsigned int subc
      for(unsigned int j = 0; j < d_batch_size; j++)
      {
 	gr_complex *coeffs = flowInfo->reduced_coeffs[i];	// get the reduced_coeffs for this packet
-	flowInfo->coeff_mat(i, j) = coeffs[subcarrier_index * d_batch_size + j];  // get the coeffs for this subcarrier
+	coeff_mat(i, j) = coeffs[subcarrier_index * d_batch_size + j];  // get the coeffs for this subcarrier
      }		
   }
 
@@ -1287,10 +1287,12 @@ digital_ofdm_frame_sink::decodePayload_multiple(FlowInfo *flowInfo)
           cx_mat TX = randu<cx_mat>(d_batch_size, 1);
 
           loadRxMatrix(RX, o, i, flowInfo);
-	  updateCoeffMatrix(flowInfo, i);
+
+	  cx_mat coeff_mat = flowInfo->coeff_mat;
+	  updateCoeffMatrix(flowInfo, i, coeff_mat);
 
           // solve now //
-          TX = solve(flowInfo->coeff_mat, RX);
+          TX = solve(coeff_mat, RX);
 
           // verify //
           //verifySolution(TX, RX);
@@ -1870,56 +1872,31 @@ digital_ofdm_frame_sink::interpolate_coeffs(gr_complex* in_coeffs, gr_complex *o
    int dc_tones = d_occupied_carriers - d_data_carriers.size();						// 80 - 72 = 8
    unsigned int half_occupied_tones = (d_occupied_carriers - dc_tones)/2;				// (80 - 8)/2 = 36
 
-   /*
-   // linearly interpolate to get intermediate carriers //
-   memcpy(out_coeffs, in_coeffs, sizeof(gr_complex) * d_batch_size);
-   int j = 1;
-   for(int s = 2; s < d_occupied_carriers; s+=2) {
-
-       if(s >= half_occupied_tones && s < (half_occupied_tones + dc_tones)) {
-	     continue;
-       } 
-		
-       for(int k = 0; k < d_batch_size; k++) {
-	  int curr_index = s * d_batch_size + k;
-	  int in = j*d_batch_size + k;
-	  out_coeffs[curr_index] = in_coeffs[in]; 
-	  int prev_index = (s-1) * d_batch_size + k;
-	  int prev_prev_index = (s-2) * d_batch_size + k;
-
-	  out_coeffs[prev_index] = (out_coeffs[curr_index] + out_coeffs[prev_prev_index]) / gr_complex(2.0, 0.0);
-       }
-       j++;
-   }
-
-   for(int k = 0; k < d_batch_size; k++) {
-       int index = (d_occupied_carriers - 1) * d_batch_size + k;
-       int prev_index = (d_occupied_carriers - 2) * d_batch_size + k;
-       out_coeffs[index] = out_coeffs[prev_index];
-   } */
-
-   // correct implementation //
+  // correct implementation //
    int out_index = 0, in_index = 0;
    int start_index = 0, end_index = 0;
-   int j = 1; 
+   int j = 0;
    while(1) {
       // copy the first entry of this half //
-      memcpy(out_coeffs+start_index, in_coeffs+in_index, sizeof(gr_complex) * d_batch_size);
+      memcpy(out_coeffs+(start_index*d_batch_size), in_coeffs+in_index, sizeof(gr_complex) * d_batch_size);
+      printf("%d\n", start_index); fflush(stdout);
 
       start_index += 2;
       end_index += half_occupied_tones;
-
+      j += 1;
       // copy the rest of the half //
       for(int s = start_index; s < end_index; s+=2) {
 
           for(int k = 0; k < d_batch_size; k++) {
              int curr_index = s * d_batch_size + k;
-	     in_index = j*d_batch_size + k;
-	     out_coeffs[curr_index] = in_coeffs[in_index];
-	     int prev_index = (s-1) * d_batch_size + k;
-	     int prev_prev_index = (s-2) * d_batch_size + k;
+             in_index = j*d_batch_size + k;
+             out_coeffs[curr_index] = in_coeffs[in_index];
+             //if(k == 0) printf("s: %d, curr_index: %d, j: %d\n", s, curr_index/d_batch_size, j); fflush(stdout);
+             int prev_index = (s-1) * d_batch_size + k;
+             int prev_prev_index = (s-2) * d_batch_size + k;
 
-	     out_coeffs[prev_index] = (out_coeffs[curr_index] + out_coeffs[prev_prev_index]) / gr_complex(2.0, 0.0);
+             out_coeffs[prev_index] = (out_coeffs[curr_index] + out_coeffs[prev_prev_index]) / gr_complex(2.0, 0.0);
+             //if(k == 0) printf("s: %d, prev_index: %d\n", s, (s-1)); fflush(stdout);        
           }
           j++;
       }
@@ -1927,19 +1904,20 @@ digital_ofdm_frame_sink::interpolate_coeffs(gr_complex* in_coeffs, gr_complex *o
       // copy the last in the half //
       for(int k = 0; k < d_batch_size; k++) {
           int index = (end_index - 1) * d_batch_size + k;
-	  int prev_index = (end_index - 2) * d_batch_size + k;
-	  out_coeffs[index] = out_coeffs[prev_index];
-      }   
+          int prev_index = (end_index - 2) * d_batch_size + k;
+          out_coeffs[index] = out_coeffs[prev_index];
+      }
 
-      if(end_index == d_occupied_carriers) 
-	 break; 
+      if(end_index == d_occupied_carriers)
+         break;
 
       //printf("j: %d end_index; %d\n", j, end_index); fflush(stdout);
-      start_index = half_occupied_tones + dc_tones - 1;
+      start_index = half_occupied_tones + dc_tones;
       end_index += dc_tones;
-      in_index = j - 1;
+      in_index = j;
       printf("j: %d start_index: %d, end_index: %d, in_index: %d\n", j, start_index, end_index, in_index); fflush(stdout);
    }
+
 
    // debug interpolated coeffs //
    printf("before interpolation\n"); fflush(stdout);
@@ -2735,7 +2713,7 @@ digital_ofdm_frame_sink::ToPhase_c(COEFF coeff) {
   float phase = ((float) coeff.phase)/SCALE_FACTOR_PHASE;
   float amp = ((float) coeff.amplitude)/SCALE_FACTOR_AMP;
 
-  printf("amp: %f\n", amp); fflush(stdout);
+  printf("z=%f\n", amp); fflush(stdout);
   float angle_rad = phase * M_PI/180;
   return amp * gr_expj(angle_rad);
 }
@@ -3237,18 +3215,19 @@ digital_ofdm_frame_sink::demodulate_ILP(FlowInfo *flowInfo)
 	    continue;											// bypass the DC tones //
      	}
 
-        updateCoeffMatrix(flowInfo, i);
+	cx_mat coeff_mat = flowInfo->coeff_mat;
+        updateCoeffMatrix(flowInfo, i, coeff_mat);
 
 	// build the map for each batch on each subcarrier //
 	vector<gr_complex*> sym_position;
-        buildMap_ILP(flowInfo->coeff_mat, sym_position);
+        buildMap_ILP(coeff_mat, sym_position);
 	batched_sym_position.push_back(sym_position);
   }
 
   printf("here\n"); fflush(stdout);
   assert(batched_sym_position.size() == d_data_carriers.size());
   
-  //debugMap_ILP(batched_sym_position); 
+  debugMap_ILP(batched_sym_position); 
 
   // run the demapper for every OFDM symbol (all batches within the symbol are demapped at once!) //
   int packetlen_cnt[MAX_BATCH_SIZE];

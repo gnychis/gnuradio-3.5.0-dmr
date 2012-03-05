@@ -129,8 +129,8 @@ class ofdm_mod(gr.hier_block2):
         self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
 
 	# apurv++: log the transmitted data in the time domain #
-	self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
-                                                      "symbols_src.dat"))
+	#self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
+        #                                              "symbols_src.dat"))
         self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length,
                                                       "tx_timing_src.dat"))
         self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,

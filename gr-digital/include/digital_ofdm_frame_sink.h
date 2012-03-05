@@ -547,7 +547,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   /* linear system solving */
   void verifySolution(cx_mat TX, cx_mat RX, cx_mat coeff_mat);
   void saveTxMatrix(cx_mat TX, unsigned int ofdm_symbol_index, unsigned int subcarrier_index, vector<gr_complex*> out_sym_vec);
-  void updateCoeffMatrix(FlowInfo *flowInfo, unsigned int subcarrier_index);
+  void updateCoeffMatrix(FlowInfo *flowInfo, unsigned int subcarrier_index, cx_mat &coeff_mat);
   void loadRxMatrix(cx_mat &RX, unsigned int ofdm_symbol_index, unsigned int subcarrier_index, FlowInfo *flowInfo);
   void storePayload(gr_complex *in, gr_complex *in_sampler); 
   bool isFullRank(FlowInfo *flowInfo);
