@@ -39,7 +39,7 @@ using namespace arma;
 //#define SCALE 1e3
 
 #define SCALE_FACTOR_PHASE 1e2
-#define SCALE_FACTOR_AMP 1e2
+#define SCALE_FACTOR_AMP 1e4
 
 digital_ofdm_mapper_bcv_sptr
 digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned int msgq_limit, 
@@ -938,6 +938,7 @@ digital_ofdm_mapper_bcv::encodeSignal(gr_complex *symbols, unsigned int batch_nu
 inline void
 digital_ofdm_mapper_bcv::normalizeSignal(gr_complex* out, int k)
 {
+
   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
 #ifdef SCALE
      out[d_data_carriers[i]] /= (gr_complex(k)*gr_complex(SCALE));
@@ -952,7 +953,12 @@ void
 digital_ofdm_mapper_bcv::combineSignal(gr_complex *out, gr_complex* symbols)
 {
   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+      if(i == 0 && d_ofdm_symbol_index == 0) {
+         printf("(%.8f, %.8f) + (%.8f, %.8f) = ", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag(), symbols[d_data_carriers[i]].real(), symbols[d_data_carriers[i]].imag()); fflush(stdout);
+      }
      out[d_data_carriers[i]] += symbols[d_data_carriers[i]];
+      if(i == 0 && d_ofdm_symbol_index == 0)
+         printf(" (%.8f, %.8f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
   }
 }
 
@@ -974,6 +980,7 @@ digital_ofdm_mapper_bcv::makeHeader()
    d_header.dst_id = 2;		//TODO: same as above
    d_header.flow_id = 0;
    d_header.inno_pkts = d_batch_size;
+   d_header.factor = 1.0/d_batch_size;
 
    d_header.lead_sender = 1;
    d_header.src_id = d_id;         //TODO: remove the hardcoding
