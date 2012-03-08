@@ -55,6 +55,7 @@
 #endif
 
 #define USE_ILP 0
+//#define USE_HEADER_PLL 0
 
 // apurv for logging ends //
 
@@ -70,7 +71,7 @@ digital_make_ofdm_frame_sink (const std::vector<gr_complex> &sym_position,
 			 gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 			 unsigned int occupied_tones, unsigned int fft_length,
 			 float phase_gain=0.25, float freq_gain=0.25*0.25/4.0, unsigned int id=1, 
-			 unsigned int batch_size=1, unsigned int decode_flag=1);
+			 unsigned int batch_size=1, unsigned int decode_flag=1, unsigned int replay_flag=0);
 
 typedef complex<double> comp_d;
 
@@ -94,6 +95,13 @@ typedef struct innovative_pkt_str {
   vector<float> freq_eq_vec;                    // PLL
   gr_complex* symbols;
   unsigned int prevLinkId;
+
+  // *updated* after each header belonging to this inno pkt is decoded, one entry in the vector per header //
+  vector<float*> error_rot_slope;
+  vector<float*> error_rot_ref;
+  vector<float*> error_amp_avg;
+
+  vector<float> pll_slope_vec;
 } PktInfo;
 
 typedef vector<PktInfo*> InnovativePktInfoVector;
@@ -410,7 +418,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 			   unsigned int occupied_tones, unsigned int fft_length,
 			   float phase_gain, float freq_gain, unsigned int id, 
-			   unsigned int batch_size, unsigned int decode_flag);
+			   unsigned int batch_size, unsigned int decode_flag,
+			   unsigned int replay_flag);
 
  private:
   enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_HEADER};
@@ -458,7 +467,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 		     gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 		     unsigned int occupied_tones, unsigned int fft_length,
 		     float phase_gain, float freq_gain, unsigned int id, 
-		     unsigned int batch_size, unsigned int decode_flag);
+		     unsigned int batch_size, unsigned int decode_flag, unsigned int replay_flag);
 
   void enter_search();
   void enter_have_sync();
@@ -533,7 +542,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   /* encoding the signal */
   void encodeSignal(gr_complex *symbols, gr_complex coeff);
   void combineSignal(gr_complex *out, gr_complex* symbols);
-  void normalizeSignal(gr_complex* out, int k);
+  float normalizeSignal(gr_complex* out, int k);
   void generateCodeVector(MULTIHOP_HDR_TYPE &header);
 
   /* make header and packet */
@@ -643,7 +652,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   unsigned int demapper_ILP(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec, 
 			    vector<vector<gr_complex*> > batched_sym_position, FlowInfo *flowInfo, vector<gr_complex> *dfe_vec);
   void buildMap_ILP(cx_mat coeff, vector<gr_complex*> &batched_sym_position);
-  void debugMap_ILP(vector<vector<gr_complex*> > batched_sym_position);
+  void debugMap_ILP(vector<vector<gr_complex*> > batched_sym_position, int pkts);
 
   void slicer_ILP_opt(gr_complex *x, gr_complex *closest_sym, unsigned char *bits, vector<gr_complex*> batched_sym_position, 
                   unsigned int ofdm_index, unsigned int subcarrier_index, gr_complex** sym_vec);
@@ -662,6 +671,30 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   void packCoefficientsInHeader(MULTIHOP_HDR_TYPE& header, gr_complex* coeffs, FlowInfo *flowInfo);
   void interpolate_coeffs(gr_complex* in_coeffs, gr_complex *out_coeffs);   
+
+  /* fwder: possibly change outgoing signal to closest symbols */
+  void findClosestSymbol(gr_complex *x, gr_complex **closest_sym_vec, int num_pkts,
+                                    vector<gr_complex*> batched_sym_position, unsigned int subcarrier_index, unsigned int o_index);
+  void correctStoredSignal(FlowInfo *flowInfo);
+
+
+  /* for offline combination in the frequency domain */
+  FILE *d_fp_corrected_symbols;
+  void logCorrectedSymbols(FlowInfo *flowInfo);  
+  void matchSymbol(gr_complex x, gr_complex &closest_sym, gr_complex* sym_position);
+  bool open_corrected_symbols_log();
+  gr_complex *d_corrected_symbols;
+  unsigned int d_replay_flag;
+
+  FILE *d_fp_corr_log;
+  /* end offline */
+
+
+  /* for extrapolating header PLL to be used in the payload (no pilot!) */
+  float *d_start_rot_error_phase;
+  float *d_avg_rot_error_amp;
+  float *d_slope_rot_error_phase;
+  vector<float*> d_error_vec;						// on each subcarrier, hold error rotations for each OFDM symbol //
 };
 
 

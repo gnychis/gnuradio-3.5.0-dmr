@@ -75,7 +75,8 @@ def main():
         if ok:
             n_right += 1
         #print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t valid_ts: %d \t sec: %d \t frac_sec: %f" % (ok, pktno, n_rcvd, n_right, valid_timestamp, timestamp_sec, timestamp_frac_sec)
-        print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t valid_ts: %d \t sec: %d \t frac_sec: %f" % (ok, pktno, n_rcvd, n_right, valid_timestamp, timestamp_sec, timestamp_frac_sec)
+        #print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t valid_ts: %d \t sec: %d \t frac_sec: %f" % (ok, pktno, n_rcvd, n_right, valid_timestamp, timestamp_sec, timestamp_frac_sec)
+	print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d " % (ok, pktno, n_rcvd, n_right)
 
         if 0:
             printlst = list()

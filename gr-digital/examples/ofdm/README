@@ -37,3 +37,19 @@ Additional options/notes:
 3. batch_size: maximum 3, minimum: 1
 
 4. tx-gain, tx-amplitude, -f: depends on the nodes
+
+
+
+
+
+Steps required to test manual combination in the frequency domain
+-----------------------------------------------------------------
+1. Run the receiver with 'use_default=1, method=-1', to collect the <corrected_symbols-f-domain.dat>. This file is collected at the frame_sink, and contains the analog signals after DFE/PLL correction is performed on them. 
+   - to test the collected log: 
+		cp corrected_symbols-f-domain.dat symbols_src.dat
+		cp sink_timing.dat timing_src.dat
+		run rx with '--replay=1'
+
+2. Repeat 1 for multiple senders, to collect the corresponding <corrected_symbols-f-domain.dat> and <sink_timing.dat>
+3. Run <add_only_data> to generate the combined traces <symbols_src.dat> and <timing_src.dat>
+4. Replay the (3) traces at the receiver, with '--replay=1' to see the decoding rate.

@@ -229,7 +229,9 @@ def unmake_packet(whitened_payload_with_crc, fec_n, fec_k, bps, expectedLen, whi
           printable = ''.join(printlst)
 
 	  print "whitened: "
+	  sys.stdout.flush()
           print printable
+	  sys.stdout.flush()
 	  print "\n"
 	  sys.stdout.flush()
 
@@ -239,7 +241,6 @@ def unmake_packet(whitened_payload_with_crc, fec_n, fec_k, bps, expectedLen, whi
         payload_with_crc = whitened_payload_with_crc
 
     if 1:
-	  print "dewhitened: "
           printlst = list()
           for x in payload_with_crc:
                 t = hex(ord(x)).replace('0x', '')
@@ -249,7 +250,9 @@ def unmake_packet(whitened_payload_with_crc, fec_n, fec_k, bps, expectedLen, whi
           printable = ''.join(printlst)
 
 	  print "dewhitened: "
+	  sys.stdout.flush()
           print printable
+	  sys.stdout.flush()
           print "\n"
 	  sys.stdout.flush()
   

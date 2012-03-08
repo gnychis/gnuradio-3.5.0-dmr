@@ -314,7 +314,8 @@ class ofdm_demod(gr.hier_block2):
                                              self._occupied_tones, self._fft_length,
                                              phgain, frgain,
 					     self._id,
-					     self._batch_size, self._decode_flag)
+					     self._batch_size, self._decode_flag, 
+					     options.replay)
 
         self.connect(self, self.ofdm_recv)
 	
@@ -381,6 +382,8 @@ class ofdm_demod(gr.hier_block2):
                           help="sets the node id [default=%default]")
         expert.add_option("", "--threshold", type="float", default=1.0,
                           help="cross correlation threshold [default=%default]")
+        expert.add_option("", "--replay", type="intx", default=0,
+                          help="replays the f-domain trace collected as dst (replayed trace need NOT be corrected/derotated then) [default=%default]")
         # apurv++ end #
 
     # Make a static method to call before instantiation
@@ -433,8 +436,8 @@ class _queue_watcher_thread(_threading.Thread):
 		ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string(), self._fec_n, self._fec_k, self._bits_per_symbol, self._pktLen)
                 if self.callback:
                    #self.callback(ok, payload)
-		   self.callback(ok, payload, msg.timestamp_valid(), msg.preamble_sec(), msg.preamble_frac_sec())
-	    
+		   self.callback(ok, payload, msg.timestamp_valid(), msg.preamble_sec(), msg.preamble_frac_sec())	    
+
 	    ######### for sending DATA/ACK ##########
 	    elif (msg.type() == 1 or msg.type() == 2):
 		print "fwd_callback fired!"

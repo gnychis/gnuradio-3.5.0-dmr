@@ -27,7 +27,7 @@
 
 /* apurv++ define header type */
 #define MAX_BATCH_SIZE     2 
-#define PADDING_SIZE    6
+#define PADDING_SIZE    2
 #define ACK_PADDING_SIZE 2 
 
 #define DATA_TYPE       1 //0
@@ -69,6 +69,7 @@ typedef struct multihop_hdr_type {
 
   // 1
   unsigned char link_id;                             // composite link id
+  float factor;
 
   // 4
   unsigned int hdr_crc;

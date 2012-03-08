@@ -176,7 +176,7 @@ class ofdm_receiver(gr.hier_block2):
 		    self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), self.ofdm_sync)
 		    self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))
 		
-		method = -1
+		method = 0
 
 	        if method == -1:
 		    ################## for offline analysis, dump sampler input till the frame_sink, using io_signature4 #################
@@ -194,7 +194,7 @@ class ofdm_receiver(gr.hier_block2):
                     #self.connect((self.sampler, 1), gr.file_sink(gr.sizeof_char*fft_length, "ofdm_sampler_timing.dat"))         #timing
 		
 
-		if method == 0:
+		if method == -1:
 				# NORMAL functioning #
 
         	    self.connect((self.ofdm_sync,0), self.nco, (self.sigmix,1))   # use sync freq. offset output to derotate input signal
@@ -245,13 +245,21 @@ class ofdm_receiver(gr.hier_block2):
 		    self.connect((self.sampler, 1), gr.null_sink(gr.sizeof_char*fft_length))
 		
                     self.connect(gr.file_source(gr.sizeof_gr_complex*fft_length, "symbols_src.dat"), self.fft_demod)
-		    self.connect(self.fft_demod, gr.file_sink(gr.sizeof_gr_complex*fft_length, "dump_fft_out.dat"))
                     self.connect(gr.file_source(gr.sizeof_char*fft_length, "timing_src.dat"), (self.ofdm_frame_acq,1))
+		    self.connect(self.fft_demod, (self.ofdm_frame_acq,0))
 		elif use_default == 1:		#(set method == -1)
 			# normal functioning! #
                     self.connect((self.sampler,0), self.fft_demod)                # send derotated sampled signal to FFT
                     self.connect((self.sampler,1), (self.ofdm_frame_acq,1))       # send timing signal to signal frame start
+		    self.connect(self.fft_demod, (self.ofdm_frame_acq,0))
 		    #self.connect(self.fft_demod, gr.file_sink(gr.sizeof_gr_complex*fft_length, "ofdm_receiver-fft_out_c.dat"))	    
+                elif use_default == 2:
+                        # hack the inputs to fft_demod and ofdm_frame_acq (timing) #
+                    self.connect((self.sampler, 0), gr.null_sink(gr.sizeof_gr_complex*fft_length))
+                    self.connect((self.sampler, 1), gr.null_sink(gr.sizeof_char*fft_length))
+
+                    self.connect(gr.file_source(gr.sizeof_gr_complex*fft_length, "symbols_src.dat"), (self.ofdm_frame_acq,0))
+                    self.connect(gr.file_source(gr.sizeof_char*fft_length, "timing_src.dat"), (self.ofdm_frame_acq,1))
 	
 		########################### some logging start ##############################
 		#self.connect((self.ofdm_sync,1), gr.delay(gr.sizeof_char, fft_length), gr.file_sink(gr.sizeof_char, "ofdm_sync_pn-peaks_b.dat"))
@@ -282,11 +290,6 @@ class ofdm_receiver(gr.hier_block2):
 
 	elif block_fft_demod == 2:
 		# for normal functioning! #
-	    self.ss2v = gr.stream_to_vector(gr.sizeof_gr_complex, fft_length)
-	    self.sv2s = gr.vector_to_stream(gr.sizeof_gr_complex, fft_length)	 
-	    self.scale1 = gr.multiply_const_cc(1.0 / fft_length)
-	    #self.connect(self.fft_demod, self.sv2s, self.scale1, self.ss2v, (self.ofdm_frame_acq,0)) 		
-	    self.connect(self.fft_demod, (self.ofdm_frame_acq,0))
             self.connect((self.ofdm_frame_acq,0), (self,0))               # finished with fine/coarse freq correction,
 	    self.connect((self.ofdm_frame_acq,1), (self,1))               # frame and symbol timing, and equalization
 	    self.connect((self.ofdm_frame_acq,2), (self,2))		  # equalizer: hestimates #
