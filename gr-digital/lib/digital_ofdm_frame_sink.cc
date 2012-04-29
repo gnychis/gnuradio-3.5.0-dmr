@@ -1006,6 +1006,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		fflush(stdout); 
 		assert(false);
 	  }
+	  
 	  int count1 = ftell(d_fp_sampler);
           count1 = fwrite_unlocked(pkt_symbols, sizeof(gr_complex), d_log_ofdm_index*d_fft_length, d_fp_sampler);
 	  memset(pkt_symbols, 0, sizeof(gr_complex) * d_log_ofdm_index*d_fft_length);
@@ -1013,6 +1014,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
           count1 = ftell(d_fp_timing);
           count1 = fwrite_unlocked(timing_symbols, sizeof(char), d_log_ofdm_index*d_fft_length, d_fp_timing);
           memset(timing_symbols, 0, sizeof(char) * d_log_ofdm_index*d_fft_length);
+	  
         }
 	enter_search();     						// current pkt done, next packet
         break;
@@ -2293,7 +2295,7 @@ digital_ofdm_frame_sink::makeHeader(MULTIHOP_HDR_TYPE &header, unsigned char *he
    header.batch_number = flowInfo->active_batch;
 
    header.packetlen = d_packetlen;// - 1;                // -1 for '55' appended (TODO)
-   header.nsenders = 1;       			      //TODO: hardcoded!
+   header.nsenders = 2;       			      //TODO: hardcoded!
    header.pkt_type = DATA_TYPE;
    if(isLeadSender()) 
         header.lead_sender = 1;
@@ -2867,7 +2869,6 @@ digital_ofdm_frame_sink::correctStoredSignal(FlowInfo *flowInfo)
       }
   }
   }
-  printf("CorrectOutgoingSignal end\n"); fflush(stdout);
 }
 
 void
@@ -2907,18 +2908,20 @@ void
 digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo)
 {
   unsigned char flowId = creditInfo->flowId;
+#ifdef DEBUG
   printf("encodePktToFwd, flowId: %d\n", flowId); fflush(stdout);
+#endif
 
   /* get FlowInfo */
   FlowInfo *flow_info = getFlowInfo(false, flowId);
   assert((flow_info != NULL) && (flow_info->flowId == flowId));
   InnovativePktInfoVector inno_pkts = flow_info->innovative_pkts;
 
-  correctStoredSignal(flow_info);
+  if(d_replay_flag == 0) 
+     correctStoredSignal(flow_info);
 
   /* coefficients */
   unsigned int n_innovative_pkts = inno_pkts.size();
-  printf("n_innovative_pkts: %d\n", n_innovative_pkts); fflush(stdout);
   assert(n_innovative_pkts > 0);
   gr_complex *coeffs = (gr_complex*) malloc(sizeof(gr_complex) * n_innovative_pkts);
   memset(coeffs, 0, sizeof(gr_complex) * n_innovative_pkts);
@@ -2938,7 +2941,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo)
      memcpy(symbols, pInfo->symbols, sizeof(gr_complex) * n_symbols);
 
      phase[i] = rand() % 360 + 1;
-     float amp = 70.0;
+     float amp = 1.0; //70.0;
 
      /* for testing only
      if(i == 0 && n_innovative_pkts == 2) {
@@ -3177,7 +3180,6 @@ digital_ofdm_frame_sink::processACK() {
 
 inline CreditInfo*
 digital_ofdm_frame_sink::findCreditInfo(unsigned char flowId) {
-  printf("findCreditInfo, flow: %d, vec_size: %d\n", flowId, d_creditInfoVector.size()); fflush(stdout);
   CreditInfo *creditInfo = NULL;
   if(d_creditInfoVector.size() == 0)
 	return creditInfo;
@@ -3186,7 +3188,6 @@ digital_ofdm_frame_sink::findCreditInfo(unsigned char flowId) {
   
   while(it != d_creditInfoVector.end()) {
         creditInfo = *it;
-	printf("iterating flow:%d, flowId: %d\n", creditInfo->flowId, flowId); fflush(stdout);
 	if(creditInfo->flowId == flowId)
 	    return creditInfo;	
         it++;
@@ -3508,7 +3509,9 @@ digital_ofdm_frame_sink::slicer_ILP_opt(gr_complex *x, gr_complex *closest_sym, 
   getCandidateSymbols(x, batched_sym_position, filt_batches);
   int size = filt_batches.size();
 
+#ifdef DEBUG
   printf("active_batch: %d, slicer_ILP_opt: filtered size: %d\n\n", d_active_batch, filt_batches.size()); fflush(stdout);
+#endif
 
   // initialize using the first table entry //
   for(unsigned int k = 0; k < size; k++) {
@@ -3533,8 +3536,9 @@ digital_ofdm_frame_sink::slicer_ILP_opt(gr_complex *x, gr_complex *closest_sym, 
 
   // demap into bits //
   getSymOutBits_ILP(bits, min_index);
+#ifdef DEBUG
   printf("\nmin_euclid_dist: %f, min_index: %d\n", min_euclid_dist, min_index); fflush(stdout);
-
+#endif
   // assign closest_sym // 
   for(unsigned int k = 0; k < d_batch_size; k++)
         closest_sym[k] = batched_sym_position[k][min_index];            // closest_sym: the ideal position where R should hv been at //
@@ -3583,7 +3587,6 @@ digital_ofdm_frame_sink::getSymOutBits_ILP(unsigned char *bits, int index) {
 void
 digital_ofdm_frame_sink::demodulate_ILP(FlowInfo *flowInfo)
 {
-  printf("demodulate_ILP\n"); fflush(stdout);
 
   // initialize for every batch //
   vector<unsigned char*> bytes_out_vec;
@@ -3596,7 +3599,6 @@ digital_ofdm_frame_sink::demodulate_ILP(FlowInfo *flowInfo)
      bytes_out_vec.push_back(bytes);
      out_sym_vec.push_back(symbols);
   }
-  printf("init1\n"); fflush(stdout);
 
   // Since the 'h' values change per subcarrier, reduced coeffs are per subcarrier, hence, there
   // the total # of maps = batch_size * occupied_carriers & each map will have 2^batch_size entries
@@ -3620,7 +3622,6 @@ digital_ofdm_frame_sink::demodulate_ILP(FlowInfo *flowInfo)
 	batched_sym_position.push_back(sym_position);
   }
 
-  printf("here\n"); fflush(stdout);
   assert(batched_sym_position.size() == d_data_carriers.size());
   
   //debugMap_ILP(batched_sym_position, d_batch_size); 
@@ -3675,7 +3676,6 @@ digital_ofdm_frame_sink::demodulate_ILP(FlowInfo *flowInfo)
   }
  
   d_last_batch_acked = d_active_batch;
-  printf("demodulate_ILP done!\n"); fflush(stdout);
 }
 
 
@@ -3686,7 +3686,7 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
 				      vector<vector<gr_complex*> > batched_sym_position, FlowInfo *flowInfo, 
 				      vector<gr_complex> *dfe_vec) {
 
-  printf("demapper_ILP, ofdm_symbol_index: %d\n", ofdm_symbol_index); fflush(stdout);
+  //printf("demapper_ILP, ofdm_symbol_index: %d\n", ofdm_symbol_index); fflush(stdout);
   unsigned int bytes_produced = 0;
 
   gr_complex carrier[MAX_BATCH_SIZE], accum_error[MAX_BATCH_SIZE];
@@ -3736,7 +3736,6 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
      memcpy(sym_vec[i], &rx_symbols_this_batch[ofdm_symbol_index * d_occupied_carriers], sizeof(gr_complex) * d_occupied_carriers);
   }
 
-  printf("demapper_ILP: sym_vec done\n"); fflush(stdout);
   gr_complex sigrot[MAX_BATCH_SIZE], closest_sym[MAX_BATCH_SIZE];
   unsigned int partial_byte[MAX_BATCH_SIZE];
   unsigned char bits[MAX_BATCH_SIZE];
@@ -3750,7 +3749,7 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
 */
 
   unsigned int byte_offset = 0;
-  printf("ILP demod ofdm symbol now.. \n"); fflush(stdout);
+  //printf("ILP demod ofdm symbol now.. \n"); fflush(stdout);
   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
 
      // demodulate 1-byte at a time //
@@ -3780,6 +3779,7 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
 	  // update accum_error for each batch //
 	  for(unsigned int k = 0; k < d_batch_size; k++) {
 	     
+#ifdef DEBUG
 	     float error = abs(sigrot[k] * conj(closest_sym[k]));
 	     float error_no_rot = abs(sym_vec[k][d_data_carriers[i]] * conj(closest_sym[k]));
 	     gr_complex sig = sym_vec[k][d_data_carriers[i]];
@@ -3788,11 +3788,11 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
 	     printf("actual_sym: (%f, %f) rot_sym: (%f, %f), closest_sym: (%f, %f)\n", sig.real(), sig.imag(), sigrot[k].real(), sigrot[k].imag(), closest_sym[k].real(), closest_sym[k].imag());
 	     fflush(stdout);	*/
 	
-	     
+
 	     float eucd_dt = norm(sigrot[k] - closest_sym[k]);
 	     float eucd_dt_no_rot = norm(sym_vec[k][d_data_carriers[i]] - closest_sym[k]);
 	     printf("sym: (%f, %f) rot_sym: (%f, %f), closest_sym: (%f, %f), eucl_dt: %f, eucl_dt_no_rot: %f\n", sig.real(), sig.imag(), sigrot[k].real(), sigrot[k].imag(), closest_sym[k].real(), closest_sym[k].imag(), eucd_dt, eucd_dt_no_rot); fflush(stdout);
-	     
+#endif	     
 
 	     accum_error[k] += (sigrot[k] * conj(closest_sym[k]));
 	     if (norm(sigrot[k])> 0.001) dfe_vec[k][i] +=  d_eq_gain*(closest_sym[k]/sigrot[k]-dfe_vec[k][i]);
@@ -3812,7 +3812,9 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
   
      if(byte_offset == 8) {
 	for(int k = 0; k < d_batch_size; k++) {
+#ifdef DEBUG
 	    printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
+#endif
             out_vec[k][bytes_produced] = partial_byte[k];
 	    partial_byte[k] = 0;
 	}
@@ -3930,7 +3932,6 @@ digital_ofdm_frame_sink::debugMap_ILP(vector<vector<gr_complex*> > batched_sym_p
 void
 digital_ofdm_frame_sink::logCorrectedSymbols(FlowInfo *flowInfo) {
 
-  printf("logCorrectedSymbols\n"); fflush(stdout);
   // prep for building the map //
   vector<gr_complex*> batched_sym_position;
 
@@ -3996,8 +3997,10 @@ digital_ofdm_frame_sink::logCorrectedSymbols(FlowInfo *flowInfo) {
       for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
           sigrot = sym_vec[d_data_carriers[i]] * carrier * dfe_vec[i];
           matchSymbol(sigrot, closest_sym[d_data_carriers[i]], batched_sym_position[i]);
+#ifdef DEBUG
 	  printf("sigrot: (%f, %f), closest: (%f, %f)\n", sigrot.real(), sigrot.imag(), closest_sym[d_data_carriers[i]].real(), closest_sym[d_data_carriers[i]].imag());
 	  fflush(stdout);
+#endif
 
           // update accum_error, dfe_vec //
           accum_error += (sigrot * conj(closest_sym[d_data_carriers[i]]));

@@ -63,32 +63,39 @@ class my_top_block(gr.top_block):
 
 def main():
 
-    global n_rcvd, n_right
+    global n_rcvd, n_right, batch_size, n_batch_correct, n_correct, n_total_batches
         
     n_rcvd = 0
     n_right = 0
 
+    if 1:
+       # to count the number of batches received correctly #
+       batch_size = 2
+       n_batch_correct = 0
+       n_correct = 0
+       n_total_batches = 0
+
     def rx_callback(ok, payload, valid_timestamp, timestamp_sec, timestamp_frac_sec):
-        global n_rcvd, n_right
+        global n_rcvd, n_right, batch_size, n_batch_correct, n_correct, n_total_batches
         n_rcvd += 1
         (pktno,) = struct.unpack('!H', payload[0:2])
         if ok:
             n_right += 1
-        #print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t valid_ts: %d \t sec: %d \t frac_sec: %f" % (ok, pktno, n_rcvd, n_right, valid_timestamp, timestamp_sec, timestamp_frac_sec)
-        #print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t valid_ts: %d \t sec: %d \t frac_sec: %f" % (ok, pktno, n_rcvd, n_right, valid_timestamp, timestamp_sec, timestamp_frac_sec)
-	print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d " % (ok, pktno, n_rcvd, n_right)
+	    n_correct += 1	
 
-        if 0:
-            printlst = list()
-            for x in payload[2:]:
-                t = hex(ord(x)).replace('0x', '')
-                if(len(t) == 1):
-                    t = '0' + t
-                printlst.append(t)
-            printable = ''.join(printlst)
-
-            print printable
-            print "\n"
+        if 1:
+	    # count the correct num of batches (works only for batch_size = 2) #
+	    if (pktno + 1) % batch_size == 0:
+	      n_total_batches += 1
+	      # end of batch #
+	      if n_correct == batch_size:
+	         n_batch_correct += 1
+	      n_correct = 0
+	      print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t correct_batches: %d \t total_batches: %d " % (ok, pktno, n_rcvd, n_right, n_batch_correct, n_total_batches)
+	
+	if 0:
+	      print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d " % (ok, pktno, n_rcvd, n_right)
+	
 
     def fwd_callback():
             print "fwd_callback (wrapper) invoked!"

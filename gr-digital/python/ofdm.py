@@ -123,22 +123,24 @@ class ofdm_mod(gr.hier_block2):
         self.cp_adder = digital_swig.ofdm_cyclic_prefixer(self._fft_length, symbol_length)
         self.scale = gr.multiply_const_cc(1.0 / math.sqrt(self._fft_length))
         
-        self.connect((self._pkt_input, 0), (self.preambles, 0))
-        self.connect((self._pkt_input, 1), (self.preambles, 1))
+        manual = 0
+        if manual == 0:
+	   # the default tx flow-graph #
+           self.connect((self._pkt_input, 0), (self.preambles, 0))
+           self.connect((self._pkt_input, 1), (self.preambles, 1))
+           self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
 
-        self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
+	   """
+           # apurv++: log the transmitted data in the time domain #
+           self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
+           self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "tx_timing_src.dat"))
+           self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "ofdm_ifft_c.dat"))
+	   """
 
-	# apurv++: log the transmitted data in the time domain #
-	#self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
-        #                                              "symbols_src.dat"))
-        self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length,
-                                                      "tx_timing_src.dat"))
-        self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
-                                                 "ofdm_ifft_c.dat"))
-	
-        # apurv++ end log #
+        elif manual == 1:
+	   # punt the pkt_input and use file source # 
+           self.connect(gr.file_source(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"), self.cp_adder, self.scale, self)
 
- 
         if options.verbose:
             self._print_verbage()
 

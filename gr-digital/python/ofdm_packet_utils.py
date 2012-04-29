@@ -149,7 +149,7 @@ def make_packet(payload, samples_per_symbol, bps, fec_n, fec_k, pad_for_usrp=Tru
     ### apurv++: replace above code by this one ###
     pkt_dt = ''.join((enc_payload_with_crc, '\x55'))
 
-    if 1:
+    if 0:
           print "original: "
           printlst = list()
           for x in enc_payload_with_crc:
@@ -168,7 +168,7 @@ def make_packet(payload, samples_per_symbol, bps, fec_n, fec_k, pad_for_usrp=Tru
         pkt = pkt_dt
     ### apurv++: end replace ###
 
-    if 1:
+    if 0:
 	  print "whitened: "
           printlst = list()
           for x in pkt:
@@ -219,7 +219,7 @@ def unmake_packet(whitened_payload_with_crc, fec_n, fec_k, bps, expectedLen, whi
     @type  dewhitening:           bool
     """
 
-    if 1:
+    if 0:
           printlst = list()
           for x in whitened_payload_with_crc:
                 t = hex(ord(x)).replace('0x', '')
@@ -240,7 +240,7 @@ def unmake_packet(whitened_payload_with_crc, fec_n, fec_k, bps, expectedLen, whi
     else:
         payload_with_crc = whitened_payload_with_crc
 
-    if 1:
+    if 0:
           printlst = list()
           for x in payload_with_crc:
                 t = hex(ord(x)).replace('0x', '')

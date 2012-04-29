@@ -176,7 +176,7 @@ class ofdm_receiver(gr.hier_block2):
 		    self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), self.ofdm_sync)
 		    self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))
 		
-		method = 0
+		method = -1
 
 	        if method == -1:
 		    ################## for offline analysis, dump sampler input till the frame_sink, using io_signature4 #################
@@ -194,7 +194,7 @@ class ofdm_receiver(gr.hier_block2):
                     #self.connect((self.sampler, 1), gr.file_sink(gr.sizeof_char*fft_length, "ofdm_sampler_timing.dat"))         #timing
 		
 
-		if method == -1:
+		if method == 0:
 				# NORMAL functioning #
 
         	    self.connect((self.ofdm_sync,0), self.nco, (self.sigmix,1))   # use sync freq. offset output to derotate input signal

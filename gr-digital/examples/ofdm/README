@@ -53,3 +53,23 @@ Steps required to test manual combination in the frequency domain
 2. Repeat 1 for multiple senders, to collect the corresponding <corrected_symbols-f-domain.dat> and <sink_timing.dat>
 3. Run <add_only_data> to generate the combined traces <symbols_src.dat> and <timing_src.dat>
 4. Replay the (3) traces at the receiver, with '--replay=1' to see the decoding rate.
+
+./configure --disable-gr-noaa --disable-gr-video-sdl --disable-gr-trellis --disable-gr-vocoder --disable-gr-pager --disable-volk --disable-gr-atsc --disable-gr-wxgui --disable-gr-audio --disable-docs
+
+4.27.2012
+---------
+Steps to run the 2-hop linear chain, A->B->C:
+1. Run A as the transmitter (benchmark_tx.py)
+2. Run B as the dst (benchmark_rx.py)
+   - collect corrected_symbols-f-domain.dat (corrected symbols logged in the frequency domain) 
+   (P.S: tunnel.py needs to be fixed to work in the rx/tx domain in parallel. Hence we need to run B in the rx mode first and then run tunnel.py on the 
+    collected trace)
+3. Now re-run B as the forwarder (tunnel.py) and feed the trace collected in (2) - ref (1) [Steps required to test manual combination in the frequency domain]
+   - in ofdm.py: set use_default=1, method=1, replay_flag=0
+   - ofdm.py::ofdm_mod : set manual=0, log the transmitted data in the time domain
+     -- frame_sink::makePacket->encodePktToFwd->correctStoredSignal->out_fwd_queue->ofdm_mapper::work->symbols_src.dat, tx_timing_src.dat (time domain)
+3. At B: 
+   - run benchmark_tx
+   - in ofdm.py::ofdm_mod - set manual=1,  
+   
+
