@@ -1,0 +1,32 @@
+Install
+-------
+ 2054  ./configure --disable-gr-noaa --disable-gr-video-sdl --disable-gr-trellis --disable-gr-vocoder --disable-gr-pager --disable-volk --disable-gr-atsc --disable-gr-audio --disable-docs
+
+Ensure all old installations are removed
+----------------------------------------
+ 2056  cd /usr/local/
+ 2057  find . -name '*gnuradio*'
+ 2058  sudo rm -rf etc/gnuradio/ include/gnuradio/ libexec/gnuradio/ share/doc/gnuradio-3.5.0/ share/gnuradio/ lib/python2.6/dist-packages/gnuradio/ lib/python2.6/dist-packages/grc_gnuradio/
+ 2059  cd ..
+ 2060  ls
+ 2061  cd lib/
+ 2062  find . -name '*gnuradio*'
+ 2063  cd ..
+ 2064  ls
+ 2065  cd share/
+ 2066  find . -name '*gnuradio*'
+ 2067  cd ../bin/
+ 2068  find . -name '*gnuradio*'
+ 2069  cd ../include/
+ 2070  find . -name '*gnuradio*'
+
+Install now
+-----------
+ 2071  cd /home/apurvb/gnuradio-3.5.0.rx/
+ 2072  ls
+ 2073  sudo make clean; sudo make -j10; sudo make install
+ 2074  vim gnuradio-core/src/lib/general/Makefile
+ 2075  vim gr-digital/lib/Makefile		(add larmadillo with ltdl in LIBS_DIR)
+ 2076  vim gr-digital/Makefile			( 	""		"" 	     )
+ 2077  sudo make clean; sudo make -j10; sudo make install
+ 2078  sudo ldconfig
