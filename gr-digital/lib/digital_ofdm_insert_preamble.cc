@@ -28,6 +28,7 @@
 #include <stdexcept>
 #include <iostream>
 #include <string.h>
+#include <cstdio>
 
 digital_ofdm_insert_preamble_sptr
 digital_make_ofdm_insert_preamble(int fft_length,
@@ -127,9 +128,11 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	write_out_flag();
 
         /* apurv++ start */
-        memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
-        out_signal[no * d_fft_length] = 1;
-       /* apurv++ end */
+	if (output_items.size() >= 2){
+          memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+          out_signal[no * d_fft_length] = 1;
+	}
+        /* apurv++ end */
 
 	no++;
 	d_nsymbols_output++;
@@ -144,7 +147,9 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 
 
       /* apurv++ start */
-      memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+      if (output_items.size() >= 2){
+        memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+      }
       /* apurv++ end */
 
       write_out_flag();
@@ -165,7 +170,9 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	     d_fft_length * sizeof(gr_complex));
 
       /* apurv++ start */
-      memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+      if (output_items.size() >= 2){
+        memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+      }
       /* apurv++ end */
 
       write_out_flag();
