@@ -64,8 +64,8 @@ class uhd_interface:
         self._gain = self.set_gain(gain)
         self._freq = self.set_freq(freq)
         self.gr_burst_tagger_0 = gr.burst_tagger(gr.sizeof_gr_complex)
-        self.gr_burst_tagger_0.set_true_tag("tx_eob",True)
-        self.gr_burst_tagger_0.set_false_tag("tx_sob",True)
+#        self.gr_burst_tagger_0.set_true_tag("tx_eob",True)
+#        self.gr_burst_tagger_0.set_false_tag("tx_sob",True)
 	time.sleep(1)
 
         self._rate = self.set_sample_rate(bandwidth)
