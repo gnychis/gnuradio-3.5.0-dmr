@@ -123,23 +123,25 @@ class ofdm_mod(gr.hier_block2):
         self.cp_adder = digital_swig.ofdm_cyclic_prefixer(self._fft_length, symbol_length)
         self.scale = gr.multiply_const_cc(1.0 / math.sqrt(self._fft_length))
         
-        manual = 0
+        manual = options.tx_manual
         if manual == 0:
 	   # the default tx flow-graph #
            self.connect((self._pkt_input, 0), (self.preambles, 0))
            self.connect((self._pkt_input, 1), (self.preambles, 1))
            self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
 
-	   """
            # apurv++: log the transmitted data in the time domain #
-           self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
-           self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "tx_timing_src.dat"))
-           self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "ofdm_ifft_c.dat"))
-	   """
+           # self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
+           # self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
+	   if options.src == 1:
+              self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"))
+	      self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
+
+	   self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "burst_trigger_tx.dat"))
 
         elif manual == 1:
 	   # punt the pkt_input and use file source # 
-           self.connect(gr.file_source(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"), self.cp_adder, self.scale, self)
+           self.connect(gr.file_source(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"), self.cp_adder, self.scale, self)
 
         if options.verbose:
             self._print_verbage()
@@ -204,6 +206,8 @@ class ofdm_mod(gr.hier_block2):
                           help="encodes the symbols (if true) [default=%default]")
 	expert.add_option("", "--id", type="intx", default=1,
                           help="set the nodeId [default=%default]")
+        expert.add_option("", "--tx-manual", type="intx", default=0,
+                          help="refer ofdm.py (mod) param [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation
@@ -288,13 +292,14 @@ class ofdm_demod(gr.hier_block2):
         self.ofdm_recv = ofdm_receiver(self._fft_length, self._cp_length,
                                        self._occupied_tones, self._snr, preambles,
 				       self._threshold,
+				       options,
                                        options.log)
 
         mods = {"bpsk": 2, "qpsk": 4, "8psk": 8, "qam8": 8, "qam16": 16, "qam64": 64, "qam256": 256}
         arity = mods[self._modulation]
 	self._bits_per_symbol = int(math.log(mods[self._modulation], 2))
-	print "arity: ", arity
- 	print "mod: ", self._modulation       
+	#print "arity: ", arity
+ 	#print "mod: ", self._modulation       
  
         rot = 1
         if self._modulation == "qpsk":
@@ -321,27 +326,24 @@ class ofdm_demod(gr.hier_block2):
 
         self.connect(self, self.ofdm_recv)
 	
-	manual = 0									# apurv++: manual testing flag
-
+	manual = options.rx_manual								# apurv++: manual testing flag
 	if manual==0:
            self.connect((self.ofdm_recv, 0), (self.ofdm_demod, 0))
            self.connect((self.ofdm_recv, 1), (self.ofdm_demod, 1))
    	   self.connect((self.ofdm_recv, 2), (self.ofdm_demod, 2))			# apurv++, hestimates #
 	   self.connect((self.ofdm_recv, 3), (self.ofdm_demod, 3))			# apurv++, for offline analysis (from sampler)
-
 	   ##self.connect((self.ofdm_recv, 3), gr.null_sink(gr.sizeof_gr_complex*self._fft_length))
-	else: 
+	elif manual==1: 
            self.connect(gr.file_source(gr.sizeof_gr_complex*self._occupied_tones, "out-tx.dat"), (self.ofdm_demod, 0))
            self.connect(gr.file_source(gr.sizeof_char, "out-timing.dat"), (self.ofdm_demod, 1))
 
-        # added output signature to work around bug, though it might not be a bad
-        # thing to export, anyway
+        # added output signature to work around bug, though it might not be a bad thing to export, anyway #
         self.connect(self.ofdm_recv.chan_filt, self)
 
 	# sink some stuff #
-	self.connect((self.ofdm_recv, 0), gr.null_sink(gr.sizeof_gr_complex*self._occupied_tones))
-	self.connect((self.ofdm_recv, 1), gr.null_sink(gr.sizeof_char))
-	self.connect((self.ofdm_recv, 2), gr.null_sink(gr.sizeof_gr_complex*self._occupied_tones))
+	self.connect((self.ofdm_recv, 0), gr.null_sink(gr.sizeof_gr_complex*self._occupied_tones))		# symbols 
+	self.connect((self.ofdm_recv, 1), gr.null_sink(gr.sizeof_char))						# timing
+	self.connect((self.ofdm_recv, 2), gr.null_sink(gr.sizeof_gr_complex*self._occupied_tones))		# hestimates
 
         if options.log:
             self.connect(self.ofdm_demod, gr.file_sink(gr.sizeof_gr_complex*self._occupied_tones, "ofdm_frame_sink_c.dat"))
@@ -386,6 +388,17 @@ class ofdm_demod(gr.hier_block2):
                           help="cross correlation threshold [default=%default]")
         expert.add_option("", "--replay", type="intx", default=0,
                           help="replays the f-domain trace collected as dst (replayed trace need NOT be corrected/derotated then) [default=%default]")
+        expert.add_option("", "--rx-manual", type="intx", default=0,
+                          help="refer ofdm.py (demod) param [default=%default]")
+
+	# used in ofdm_receiver.py #
+        expert.add_option("", "--use-default", type="intx", default=1,
+                          help="refer ofdm_receiver.py param [default=%default]")
+        expert.add_option("", "--method", type="intx", default=-1,
+                          help="refer ofdm_receiver.py param [default=%default]")
+        expert.add_option("", "--use-chan-filt", type="intx", default=1,
+                          help="refer ofdm_receiver.py param [default=%default]")
+
         # apurv++ end #
 
     # Make a static method to call before instantiation

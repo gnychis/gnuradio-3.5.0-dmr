@@ -45,9 +45,10 @@ digital_ofdm_insert_preamble::digital_ofdm_insert_preamble
 	     gr_make_io_signature2(2, 2,
 				   sizeof(gr_complex)*fft_length,
 				   sizeof(char)),
-	     gr_make_io_signature3(1, 3,
+	     gr_make_io_signature4(1, 4,
 				   sizeof(gr_complex)*fft_length,
 				   sizeof(char)*fft_length,					// apurv++
+				   sizeof(char)*fft_length,					// apurv++: for george (burst tagger implementation)
 				   sizeof(char))),
     d_fft_length(fft_length),
     d_preamble(preamble),
@@ -81,8 +82,8 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 
   gr_complex *out_sym = (gr_complex *) output_items[0];
   unsigned char *out_flag = 0;
-  if (output_items.size() >= 3)
-    out_flag = (unsigned char *) output_items[2];
+  if (output_items.size() >= 4)
+    out_flag = (unsigned char *) output_items[3];
 
   
   /* apurv++ */
@@ -92,6 +93,14 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
     memset(out_signal, 0, sizeof(char) * d_fft_length);
   }
   /* apurv++ end */
+
+  /* for burst tagger trigger */
+  unsigned char *burst_trigger = NULL;
+  if(output_items.size() >= 3) {
+     burst_trigger = (unsigned char*) output_items[2];
+     memset(burst_trigger, 0, sizeof(char) * d_fft_length);
+  }
+  /* end */
 
   int no = 0;	// number items output
   int ni = 0;	// number items read from input
@@ -132,7 +141,13 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
           memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
           out_signal[no * d_fft_length] = 1;
 	}
-        /* apurv++ end */
+
+	// for burst tagger trigger: mark all the samples of the preamble as '1' //
+	if(output_items.size() >= 3) {
+	  memset(&burst_trigger[no * d_fft_length], 1, sizeof(char) * d_fft_length); 
+	}
+	/* apurv++ end */
+
 
 	no++;
 	d_nsymbols_output++;
@@ -150,7 +165,13 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       if (output_items.size() >= 2){
         memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
       }
+
+      // for burst tagger trigger: mark all the samples of the data as '1' as well //
+      if(output_items.size() >= 3) {
+         memset(&burst_trigger[no * d_fft_length], 1, sizeof(char) * d_fft_length);
+      }
       /* apurv++ end */
+
 
       write_out_flag();
       no++;
@@ -172,6 +193,11 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       /* apurv++ start */
       if (output_items.size() >= 2){
         memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+      }
+
+      // for burst tagger trigger: mark all samples of data as '1' as well //
+      if(output_items.size() >= 3) {
+	memset(&burst_trigger[no * d_fft_length], 1, sizeof(char) * d_fft_length);
       }
       /* apurv++ end */
 
