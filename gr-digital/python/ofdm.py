@@ -133,11 +133,11 @@ class ofdm_mod(gr.hier_block2):
            # apurv++: log the transmitted data in the time domain #
            # self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
            # self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
-	   if options.src == 1:
+	   if options.src == 0:
               self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"))
 	      self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 
-	   self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "burst_trigger_tx.dat"))
+	   # self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "burst_trigger_tx.dat"))
 
         elif manual == 1:
 	   # punt the pkt_input and use file source # 

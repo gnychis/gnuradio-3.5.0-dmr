@@ -116,14 +116,14 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
   while (no < noutput_items && ni < ninput_items){
     switch(d_state){
     case ST_IDLE:
-      if (in_flag[ni] & 0x1)	// this is first symbol of new payload
+      if ((in_flag[ni] == 1))	// this is first symbol of new payload
 	enter_preamble();
       else
 	ni++;			// eat one input symbol
       break;
       
     case ST_PREAMBLE:
-      assert(in_flag[ni] & 0x1);
+      assert(in_flag[ni] == 1);
 
       if (d_nsymbols_output >= (int) d_preamble.size()){
 	// we've output all the preamble
@@ -180,7 +180,7 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       break;
       
     case ST_PAYLOAD:
-      if (in_flag[ni] & 0x1){	// this is first symbol of a new payload
+      if ((in_flag[ni] == 1)){	// this is first symbol of a new payload
 	enter_preamble();
 	break;
       }
@@ -198,6 +198,12 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       // for burst tagger trigger: mark all samples of data as '1' as well //
       if(output_items.size() >= 3) {
 	memset(&burst_trigger[no * d_fft_length], 1, sizeof(char) * d_fft_length);
+
+	// handle the last OFDM symbol //
+	if(in_flag[ni] == 2) {
+	   // in this case, mark the last sample as '0' to mark the end of the packet //
+	   burst_trigger[((no+1) * d_fft_length) - 1] = 0;
+	}
       }
       /* apurv++ end */
 
