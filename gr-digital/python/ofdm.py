@@ -123,7 +123,7 @@ class ofdm_mod(gr.hier_block2):
         self.cp_adder = digital_swig.ofdm_cyclic_prefixer(self._fft_length, symbol_length)
         self.scale = gr.multiply_const_cc(1.0 / math.sqrt(self._fft_length))
 
-        self.burst_tagger = gr.burst_tagger(gr.sizeof_gr_complex)
+        self.burst_tagger = gr.burst_tagger(gr.sizeof_gr_complex*self._fft_length)
         
         manual = options.tx_manual
         if manual == 0:
