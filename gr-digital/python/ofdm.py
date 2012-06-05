@@ -124,23 +124,24 @@ class ofdm_mod(gr.hier_block2):
         self.scale = gr.multiply_const_cc(1.0 / math.sqrt(self._fft_length))
 
         self.burst_tagger = gr.burst_tagger(gr.sizeof_gr_complex*self._fft_length)
+        self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_short, "burst_trigger_tx.dat"))
         
         manual = options.tx_manual
+        print options.src
         if manual == 0:
 	   # the default tx flow-graph #
            self.connect((self._pkt_input, 0), (self.preambles, 0))
            self.connect((self._pkt_input, 1), (self.preambles, 1))
+#           self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
            self.connect(self.preambles, self.burst_tagger, self.ifft, self.cp_adder, self.scale, self)
-           self.connect((self.preambles,2),(self.burst_tagger,1))   # Connect Apurv's trigger data to the burst tagger
+           self.connect((self.preambles,1),(self.burst_tagger,1))   # Connect Apurv's trigger data to the burst tagger
 
            # apurv++: log the transmitted data in the time domain #
            # self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
            # self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 	   if options.src == 0:
               self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"))
-	      self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
-
-	   # self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "burst_trigger_tx.dat"))
+	      self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 
         elif manual == 1:
 	   # punt the pkt_input and use file source # 

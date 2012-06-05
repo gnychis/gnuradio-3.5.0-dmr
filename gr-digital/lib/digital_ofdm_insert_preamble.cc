@@ -47,8 +47,8 @@ digital_ofdm_insert_preamble::digital_ofdm_insert_preamble
 				   sizeof(char)),
 	     gr_make_io_signature4(1, 4,
 				   sizeof(gr_complex)*fft_length,
-				   sizeof(char)*fft_length,					// apurv++
 				   sizeof(short),					// apurv++: for george (burst tagger implementation)
+				   sizeof(char)*fft_length,					// apurv++
 				   sizeof(char))),
     d_fft_length(fft_length),
     d_preamble(preamble),
@@ -89,7 +89,7 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
   /* apurv++ */
   unsigned char *out_signal = NULL;
   if (output_items.size() >= 2){
-    out_signal = (unsigned char*) output_items[1];
+    out_signal = (unsigned char*) output_items[2];
     memset(out_signal, 0, sizeof(char) * d_fft_length);
   }
   /* apurv++ end */
@@ -97,7 +97,7 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
   /* for burst tagger trigger */
   unsigned short *burst_trigger = NULL;
   if(output_items.size() >= 3) {
-     burst_trigger = (unsigned short*) output_items[2];
+     burst_trigger = (unsigned short*) output_items[1];
      memset(burst_trigger, 0, sizeof(short));
   }
   /* end */
