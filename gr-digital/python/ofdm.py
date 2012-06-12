@@ -125,7 +125,8 @@ class ofdm_mod(gr.hier_block2):
 
         self.burst_tagger = gr.burst_tagger(gr.sizeof_gr_complex*self._fft_length)
         self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_short, "burst_trigger_tx.dat"))
-        
+       
+	print "changed??" 
         manual = options.tx_manual
         print options.src
         if manual == 0:
@@ -138,10 +139,10 @@ class ofdm_mod(gr.hier_block2):
 
            # apurv++: log the transmitted data in the time domain #
            # self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
-           # self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
+           # self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_short, "burst_tagger.dat"))
 	   if options.src == 0:
               self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"))
-	      self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
+	      #self.connect((self.preambles, 3), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 
         elif manual == 1:
 	   # punt the pkt_input and use file source # 

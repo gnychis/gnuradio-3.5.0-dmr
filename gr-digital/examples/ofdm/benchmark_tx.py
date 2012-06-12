@@ -28,6 +28,10 @@ import time, struct, sys
 
 from gnuradio import digital
 
+import struct, sys, os
+print os.getpid()
+#raw_input("Press enter to continue")
+
 # from current dir
 from transmit_path import transmit_path
 from uhd_interface import uhd_transmitter

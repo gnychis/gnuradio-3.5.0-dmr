@@ -85,22 +85,23 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
   if (output_items.size() >= 4)
     out_flag = (unsigned char *) output_items[3];
 
+
+  /* for burst tagger trigger */
+  unsigned short *burst_trigger = NULL;
+  if(output_items.size() >= 2) {
+     burst_trigger = (unsigned short*) output_items[1];
+     memset(burst_trigger, 0, sizeof(short));
+  }
+  /* end */
   
   /* apurv++ */
   unsigned char *out_signal = NULL;
-  if (output_items.size() >= 2){
+  if (output_items.size() >= 3){
     out_signal = (unsigned char*) output_items[2];
     memset(out_signal, 0, sizeof(char) * d_fft_length);
   }
   /* apurv++ end */
 
-  /* for burst tagger trigger */
-  unsigned short *burst_trigger = NULL;
-  if(output_items.size() >= 3) {
-     burst_trigger = (unsigned short*) output_items[1];
-     memset(burst_trigger, 0, sizeof(short));
-  }
-  /* end */
 
   int no = 0;	// number items output
   int ni = 0;	// number items read from input
@@ -137,15 +138,14 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	write_out_flag();
 
         /* apurv++ start */
-	if (output_items.size() >= 2){
+        // for burst tagger trigger: mark all the samples of the preamble as '1' //
+        if(output_items.size() >= 2) {
+          burst_trigger[no] = 1;
+        }
+
+	if (output_items.size() >= 3){
           memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
           out_signal[no * d_fft_length] = 1;
-	}
-
-	// for burst tagger trigger: mark all the samples of the preamble as '1' //
-	if(output_items.size() >= 3) {
-	  //memset(&burst_trigger[no * d_fft_length], 1, sizeof(char) * d_fft_length); 
-	  burst_trigger[no] = 1;	  
 	}
 	/* apurv++ end */
 
@@ -162,14 +162,13 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 
 
       /* apurv++ start */
-      if (output_items.size() >= 2){
-        memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+      // for burst tagger trigger: mark all the samples of the data as '1' as well //
+      if(output_items.size() >= 2) {
+         burst_trigger[no] = 1;
       }
 
-      // for burst tagger trigger: mark all the samples of the data as '1' as well //
-      if(output_items.size() >= 3) {
-         //memset(&burst_trigger[no * d_fft_length], 1, sizeof(char) * d_fft_length);
-	 burst_trigger[no] = 1;
+      if (output_items.size() >= 3){
+        memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
       }
       /* apurv++ end */
 
@@ -192,20 +191,18 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	     d_fft_length * sizeof(gr_complex));
 
       /* apurv++ start */
-      if (output_items.size() >= 2){
-        memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+      // for burst tagger trigger: mark all samples of data as '1' as well //
+      if(output_items.size() >= 2) {
+        burst_trigger[no] = 1;
+        // handle the last OFDM symbol //
+        if(in_flag[ni] == 2) {
+           // in this case, mark the last sample as '0' to mark the end of the packet //
+           burst_trigger[no] = 0;
+        }
       }
 
-      // for burst tagger trigger: mark all samples of data as '1' as well //
-      if(output_items.size() >= 3) {
-	//memset(&burst_trigger[no * d_fft_length], 1, sizeof(char) * d_fft_length);
-	burst_trigger[no] = 1;
-	// handle the last OFDM symbol //
-	if(in_flag[ni] == 2) {
-	   // in this case, mark the last sample as '0' to mark the end of the packet //
-	   //burst_trigger[((no+1) * d_fft_length) - 1] = 0;
-	   burst_trigger[no] = 0;
-	}
+      if (output_items.size() >= 3){
+        memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
       }
       /* apurv++ end */
 
