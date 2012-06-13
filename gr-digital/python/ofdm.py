@@ -68,6 +68,7 @@ class ofdm_mod(gr.hier_block2):
         self._fec_k = options.fec_k
 	self._batch_size = options.batch_size
  	self._encode_flag = options.encode_flag
+	self._ack = options.ack
 
         if(self._fec_n < self._fec_k):
             print "ERROR: K > N in FEC!\n"
@@ -172,16 +173,18 @@ class ofdm_mod(gr.hier_block2):
 		
         elif (type == 0):
 	    ############# print "original_payload =", string_to_hex_list(payload)
-            #pkt = ofdm_packet_utils.make_packet(payload, 1, 1, self._pad_for_usrp, whitening=True)
 	    pkt = ofdm_packet_utils.make_packet(payload, 1, self._bits_per_symbol, self._fec_n, self._fec_k, self._pad_for_usrp, whitening=True)
             
             #print "pkt =", string_to_hex_list(pkt)
             msg = gr.message_from_string(pkt)
 	
 	if type == 0:
-             self._pkt_input.msgq().insert_tail(msg)				# for source! 	(msg needs to be modulated in mapper)
+	    if self._ack == 1:
+	        while self._pkt_input.isACKSocketOpen() == 0:
+		    continue
+            self._pkt_input.msgq().insert_tail(msg)				# for source! 	(msg needs to be modulated in mapper)
 	else:
-   	     self._pkt_input.msgq().insert_tail(payload)			# for forwarder! (payload is already modulated)
+   	    self._pkt_input.msgq().insert_tail(payload)			# for forwarder! (payload is already modulated)
 
     def add_options(normal, expert):
         """
@@ -211,6 +214,8 @@ class ofdm_mod(gr.hier_block2):
                           help="set the nodeId [default=%default]")
         expert.add_option("", "--tx-manual", type="intx", default=0,
                           help="refer ofdm.py (mod) param [default=%default]")
+	expert.add_option("", "--ack", type="intx", default=0,
+			  help="enables ACK on ethernet [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation
