@@ -195,9 +195,9 @@ class ofdm_receiver(gr.hier_block2):
         self.connect((self.ofdm_frame_acq,0), (self,0))               # finished with fine/coarse freq correction,
         self.connect((self.ofdm_frame_acq,1), (self,1))               # frame and symbol timing, and equalization
         self.connect((self.ofdm_frame_acq,2), (self,2))               # equalizer: hestimates 
-	
-        #self.connect((self.ofdm_frame_acq,3), (self,3))           # ref sampler above 
-	
+
+	#self.connect((self.ofdm_frame_acq,3), (self,3))           # ref sampler above
+
 	# apurv++ ends #
 
 

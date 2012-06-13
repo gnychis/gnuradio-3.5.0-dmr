@@ -310,6 +310,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
   if(d_msg_offset[0] == d_msg[0]->length()) {
       d_msg[0].reset();
       printf("num_ofdm_symbols: %d\n", d_ofdm_index); fflush(stdout); 
+      d_pending_flag = 2;						// marks the last OFDM data symbol (for burst tagger trigger) //
   }
 
   if (out_flag)
@@ -611,6 +612,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 
       if(d_modulated)
       {
+	   d_pending_flag = 2;                                             // marks the last OFDM data symbol (for burst tagger trigger) //
            d_packets_sent_for_batch += 1;
            //log();             // for offline analysis //
            assert(d_ofdm_symbol_index == d_num_ofdm_symbols);

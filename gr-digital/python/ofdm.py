@@ -140,8 +140,7 @@ class ofdm_mod(gr.hier_block2):
            # self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 	   if options.src == 0:
               self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"))
-	      self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
-	      #self.connect((self.preambles, 3), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
+	      #self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 
         elif manual == 1:
 	   # punt the pkt_input and use file source # 
@@ -350,7 +349,6 @@ class ofdm_demod(gr.hier_block2):
 	self.connect((self.ofdm_recv, 1), gr.null_sink(gr.sizeof_char))						# timing
 	self.connect((self.ofdm_recv, 2), gr.null_sink(gr.sizeof_gr_complex*self._occupied_tones))		# hestimates
 	'''
-
         if options.log:
             self.connect(self.ofdm_demod, gr.file_sink(gr.sizeof_gr_complex*self._occupied_tones, "ofdm_frame_sink_c.dat"))
 

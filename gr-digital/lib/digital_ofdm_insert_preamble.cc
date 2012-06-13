@@ -102,7 +102,6 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
   }
   /* apurv++ end */
 
-
   int no = 0;	// number items output
   int ni = 0;	// number items read from input
 
