@@ -38,7 +38,7 @@
 #include <stdio.h>
 #include <deque>
 
-//#define USE_PILOT 0
+#define USE_PILOT 0
 #ifdef HAVE_IO_H
 #include <io.h>
 #endif
@@ -55,6 +55,7 @@
 #endif
 
 #define USE_ILP 0
+#define MAX_SENDERS 4
 //#define USE_HEADER_PLL 0
 
 // apurv for logging ends //
@@ -71,7 +72,7 @@ digital_make_ofdm_frame_sink (const std::vector<gr_complex> &sym_position,
 			 gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 			 unsigned int occupied_tones, unsigned int fft_length,
 			 float phase_gain=0.25, float freq_gain=0.25*0.25/4.0, unsigned int id=1, 
-			 unsigned int batch_size=1, unsigned int decode_flag=1, unsigned int replay_flag=0);
+			 unsigned int batch_size=1, unsigned int decode_flag=1, int replay_flag=0);
 
 typedef complex<double> comp_d;
 
@@ -419,7 +420,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   unsigned int occupied_tones, unsigned int fft_length,
 			   float phase_gain, float freq_gain, unsigned int id, 
 			   unsigned int batch_size, unsigned int decode_flag,
-			   unsigned int replay_flag);
+			   int replay_flag);
 
  private:
   enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_HEADER};
@@ -451,8 +452,13 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   unsigned char d_resid;
   unsigned int d_nresid;
+#ifdef USE_PILOT
+  float d_phase[MAX_SENDERS];
+  float d_freq[MAX_SENDERS];			// indexed by the number of concurrent senders (for individual phase tracking)
+#else
   float d_phase[MAX_BATCH_SIZE];
   float d_freq[MAX_BATCH_SIZE];
+#endif
   float d_phase_gain;
   float d_freq_gain;
   float d_eq_gain;
@@ -461,13 +467,18 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   std::vector<int> d_pilot_carriers;
   std::vector<int> d_all_carriers;			// tracks which are data(0), pilot(1) or dc(2) 
 
+  /* for pilot vs data DFE comparison */
+  FILE *d_fp_dfe_data, *d_fp_dfe_pilot;
+  bool d_log_dfe_data_open, d_log_dfe_pilot_open;
+
+
  protected:
   digital_ofdm_frame_sink(const std::vector<gr_complex> &sym_position, 
 		     const std::vector<unsigned char> &sym_value_out,
 		     gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 		     unsigned int occupied_tones, unsigned int fft_length,
 		     float phase_gain, float freq_gain, unsigned int id, 
-		     unsigned int batch_size, unsigned int decode_flag, unsigned int replay_flag);
+		     unsigned int batch_size, unsigned int decode_flag, int replay_flag);
 
   void enter_search();
   void enter_have_sync();
@@ -572,7 +583,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void prepareForNewBatch();
   void debugPktInfo(PktInfo *pktInfo, unsigned char senderId);
   bool isSameNodeList(vector<unsigned char> ids1, vector<unsigned char> ids2);
-  void dewhiten(const int len);
+  void dewhiten(unsigned char *bytes, const int len);
   void whiten(unsigned char *bytes, const int len);
   void debugHeader(unsigned char *header_bytes);
   gr_complex ToPhase_c(float phase_deg);
@@ -680,11 +691,15 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   /* for offline combination in the frequency domain */
   FILE *d_fp_corrected_symbols;
+  FILE *d_fp_uncorrected_symbols;
+
   void logCorrectedSymbols(FlowInfo *flowInfo);  
   void matchSymbol(gr_complex x, gr_complex &closest_sym, gr_complex* sym_position);
   bool open_corrected_symbols_log();
   gr_complex *d_corrected_symbols;
-  unsigned int d_replay_flag;
+  gr_complex *d_uncorrected_symbols;
+
+  int d_replay_flag;
 
   FILE *d_fp_corr_log;
   /* end offline */
@@ -695,6 +710,42 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   float *d_avg_rot_error_amp;
   float *d_slope_rot_error_phase;
   vector<float*> d_error_vec;						// on each subcarrier, hold error rotations for each OFDM symbol //
+
+  /* to send the ACK on the backend ethernet */
+  int create_ack_sock();
+  void send_ack(unsigned char flow_id, unsigned char batch_id);
+  int d_ack_sock;
+  char * d_src_ip_addr;
+  unsigned int d_src_sock_port;
+
+  /* alternative way of doing ILP, more incremental in nature */
+  //float **d_euclid_dist;						// [subcarrier][2^batch_size]; records the euclid dist seen on each subcarrier, for each possibility in the table! //
+  float d_euclid_dist[70][72][4];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
+  unsigned int demapper_ILP_2(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
+                      vector<gr_complex*> batched_sym_position, FlowInfo *flowInfo,
+                      vector<gr_complex> dfe_vec);
+  void slicer_ILP_2(gr_complex x, gr_complex& closest_sym, unsigned char *bits,
+                    gr_complex* batched_sym_position,
+                    unsigned int ofdm_index, unsigned int subcarrier_index);
+  void buildMap_ILP_2(gr_complex* coeffs, gr_complex* sym_position);
+  void demodulate_ILP_2(FlowInfo *flowInfo);
+
+
+  unsigned int demapper_pilot(const gr_complex *in, unsigned char *out);
+  void log_dfe_data();
+  void log_dfe_pilot(gr_complex*);
+  unsigned int demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
+                                              FlowInfo *flowInfo, vector<gr_complex>* dfe_pilot,
+                                              vector<gr_complex*> interpolated_coeffs);
+  void interpolate_data_dfe(vector<gr_complex> dfe_pilot, vector<gr_complex>& dfe_data);
+  void track_pilot_dfe(gr_complex *in, int sender, gr_complex& carrier, vector<gr_complex>& dfe_vec);
+  void buildMap_pilot(FlowInfo *flowInfo, gr_complex* sym_position,
+                                        vector<gr_complex*> interpolated_coeffs,
+                                        vector<gr_complex>* dfe, gr_complex* carrier,
+                                        int subcarrier_index);
+
+  void test_decode_signal(gr_complex *in, vector<gr_complex*> interpolated_coeffs);
+  bool crc_check(std::string msg);
 };
 
 

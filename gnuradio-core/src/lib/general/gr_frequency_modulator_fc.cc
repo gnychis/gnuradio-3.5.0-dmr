@@ -55,7 +55,7 @@ gr_frequency_modulator_fc::work (int noutput_items,
 
   //printf("noutput_items: %d\n", noutput_items); fflush(stdout);
   for (int i = 0; i < noutput_items; i++){
-    d_phase = d_phase; // + d_sensitivity * in[i];
+    d_phase = d_phase + d_sensitivity * in[i];
     float oi, oq;
     gr_sincosf (d_phase, &oq, &oi);
     out[i] = gr_complex (oi, oq);

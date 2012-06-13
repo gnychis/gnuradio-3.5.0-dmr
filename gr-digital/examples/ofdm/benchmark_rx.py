@@ -31,7 +31,9 @@ from gnuradio import digital
 from receive_path import receive_path
 from uhd_interface import uhd_receiver
 
-import struct, sys
+import struct, sys, os
+print os.getpid()
+#raw_input("Press enter to continue")
 
 class my_top_block(gr.top_block):
     def __init__(self, callback, fwd_callback, options):
@@ -63,17 +65,22 @@ class my_top_block(gr.top_block):
 
 def main():
 
-    global n_rcvd, n_right, batch_size, n_batch_correct, n_correct, n_total_batches
+    global n_rcvd, n_right, batch_size, n_batch_correct, n_correct, n_total_batches, ack_sock
         
     n_rcvd = 0
     n_right = 0
 
     if 1:
        # to count the number of batches received correctly #
-       batch_size = 2
+       batch_size = 1
        n_batch_correct = 0
        n_correct = 0
        n_total_batches = 0
+       #ack_sock = socket.socket(socket.PF_INET, socket.SOCK_STREAM)
+       #ack_sock.connect(("128.83.141.213", 9000))
+
+    def send_ack(flow, batch):
+	tb.rxpath.send_ack(flow, batch)	
 
     def rx_callback(ok, payload, valid_timestamp, timestamp_sec, timestamp_frac_sec):
         global n_rcvd, n_right, batch_size, n_batch_correct, n_correct, n_total_batches
@@ -88,10 +95,13 @@ def main():
 	    if (pktno + 1) % batch_size == 0:
 	      n_total_batches += 1
 	      # end of batch #
+	      batch_ok = 0
 	      if n_correct == batch_size:
 	         n_batch_correct += 1
+		 batch_ok = 1
+		 #send_ack(0, 0)
+	      print "batch ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t correct_batches: %d \t total_batches: %d " % (batch_ok, pktno, n_rcvd, n_right, n_batch_correct, n_total_batches)
 	      n_correct = 0
-	      print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t correct_batches: %d \t total_batches: %d " % (ok, pktno, n_rcvd, n_right, n_batch_correct, n_total_batches)
 	
 	if 0:
 	      print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d " % (ok, pktno, n_rcvd, n_right)

@@ -45,8 +45,9 @@ digital_ofdm_insert_preamble::digital_ofdm_insert_preamble
 	     gr_make_io_signature2(2, 2,
 				   sizeof(gr_complex)*fft_length,
 				   sizeof(char)),
-	     gr_make_io_signature3(1, 3,
+	     gr_make_io_signature4(1, 4,
 				   sizeof(gr_complex)*fft_length,
+				   sizeof(short),					// apurv++: for george (burst tagger implementation)
 				   sizeof(char)*fft_length,					// apurv++
 				   sizeof(char))),
     d_fft_length(fft_length),
@@ -81,17 +82,26 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 
   gr_complex *out_sym = (gr_complex *) output_items[0];
   unsigned char *out_flag = 0;
-  if (output_items.size() >= 3)
-    out_flag = (unsigned char *) output_items[2];
+  if (output_items.size() >= 4)
+    out_flag = (unsigned char *) output_items[3];
 
+
+  /* for burst tagger trigger */
+  unsigned short *burst_trigger = NULL;
+  if(output_items.size() >= 2) {
+     burst_trigger = (unsigned short*) output_items[1];
+     memset(burst_trigger, 0, sizeof(short));
+  }
+  /* end */
   
   /* apurv++ */
   unsigned char *out_signal = NULL;
-  if (output_items.size() >= 2){
-    out_signal = (unsigned char*) output_items[1];
+  if (output_items.size() >= 3){
+    out_signal = (unsigned char*) output_items[2];
     memset(out_signal, 0, sizeof(char) * d_fft_length);
   }
   /* apurv++ end */
+
 
   int no = 0;	// number items output
   int ni = 0;	// number items read from input
@@ -107,14 +117,14 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
   while (no < noutput_items && ni < ninput_items){
     switch(d_state){
     case ST_IDLE:
-      if (in_flag[ni] & 0x1)	// this is first symbol of new payload
+      if ((in_flag[ni] == 1))	// this is first symbol of new payload
 	enter_preamble();
       else
 	ni++;			// eat one input symbol
       break;
       
     case ST_PREAMBLE:
-      assert(in_flag[ni] & 0x1);
+      assert(in_flag[ni] == 1);
 
       if (d_nsymbols_output >= (int) d_preamble.size()){
 	// we've output all the preamble
@@ -128,11 +138,16 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	write_out_flag();
 
         /* apurv++ start */
-	if (output_items.size() >= 2){
+        // for burst tagger trigger: mark all the samples of the preamble as '1' //
+        if(output_items.size() >= 2) {
+          burst_trigger[no] = 1;
+        }
+
+	if (output_items.size() >= 3){
           memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
           out_signal[no * d_fft_length] = 1;
 	}
-        /* apurv++ end */
+	/* apurv++ end */
 
 	no++;
 	d_nsymbols_output++;
@@ -147,10 +162,16 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 
 
       /* apurv++ start */
-      if (output_items.size() >= 2){
+      // for burst tagger trigger: mark all the samples of the data as '1' as well //
+      if(output_items.size() >= 2) {
+         burst_trigger[no] = 1;
+      }
+
+      if (output_items.size() >= 3){
         memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
       }
       /* apurv++ end */
+
 
       write_out_flag();
       no++;
@@ -159,7 +180,7 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       break;
       
     case ST_PAYLOAD:
-      if (in_flag[ni] & 0x1){	// this is first symbol of a new payload
+      if ((in_flag[ni] == 1)){	// this is first symbol of a new payload
 	enter_preamble();
 	break;
       }
@@ -170,7 +191,17 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	     d_fft_length * sizeof(gr_complex));
 
       /* apurv++ start */
-      if (output_items.size() >= 2){
+      // for burst tagger trigger: mark all samples of data as '1' as well //
+      if(output_items.size() >= 2) {
+        burst_trigger[no] = 1;
+        // handle the last OFDM symbol //
+        if(in_flag[ni] == 2) {
+           // in this case, mark the last sample as '0' to mark the end of the packet //
+           burst_trigger[no] = 0;
+        }
+      }
+
+      if (output_items.size() >= 3){
         memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
       }
       /* apurv++ end */

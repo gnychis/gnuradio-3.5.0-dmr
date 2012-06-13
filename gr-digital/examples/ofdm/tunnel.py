@@ -55,18 +55,18 @@ class my_top_block(gr.top_block):
     def __init__(self, callback, fwd_callback, options):
         gr.top_block.__init__(self)
 
-        self.source = uhd_receiver(options.args,
-                                   options.bandwidth,
-                                   options.rx_freq, options.rx_gain,
-                                   options.spec, options.antenna,
-                                   options.verbose)
-
+	
         self.sink = uhd_transmitter(options.args,
                                     options.bandwidth,
                                     options.tx_freq, options.tx_gain,
                                     options.spec, options.antenna,
                                     options.verbose)
 
+        self.source = uhd_receiver(options.args,
+                                   options.bandwidth,
+                                   options.rx_freq, options.rx_gain,
+                                   options.spec, options.antenna,
+                                   options.verbose)
         self.txpath = transmit_path(options)
         self.rxpath = receive_path(callback, fwd_callback, options)
 
@@ -112,7 +112,7 @@ class cs_mac(object):
     def set_flow_graph(self, tb):
         self.tb = tb
 
-    def phy_rx_callback(self, ok, payload):
+    def phy_rx_callback(self, ok, payload, valid_timestamp, timestamp_sec, timestamp_frac_sec):
         """
         Invoked by thread associated with PHY to pass received packet up.
 
@@ -196,6 +196,10 @@ class cs_mac(object):
                 """
                 #self.tb.get_pkt_to_fwd()               
                 sent = 1
+
+		self.tb.txpath.send_pkt(struct.pack('!H', 0) + 48 * chr(0 & 0xff), 0, False)
+		#time.sleep(1)
+
 
                 """transmission happens instead in fwd_callback"""
 

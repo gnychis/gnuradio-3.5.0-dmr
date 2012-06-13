@@ -36,7 +36,7 @@
 #include <stdexcept>
 #include <stdio.h>
 
-//#define USE_PILOT 0
+#define USE_PILOT 0
 #ifdef HAVE_IO_H
 #include <io.h>
 #endif
@@ -480,6 +480,14 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void logNativeTxSymbols(gr_complex *out);
   FILE *d_fp_native; bool d_log_open_native;
 
+
+  // ack over ethernet //
+  bool d_sock_opened;
+  int d_sock_fd, d_client_fd;
+  char *d_ack_buf;
+
+  int openACKSocket();
+  int isACKSocketOpen();
   
 /* apurv++ ends */
 };

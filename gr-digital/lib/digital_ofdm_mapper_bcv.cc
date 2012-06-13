@@ -32,7 +32,13 @@
 #include <cstdio> 
 #include <gr_expj.h>
 #include <time.h>
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <stdlib.h>
+
 #include "armadillo"
+
 
 using namespace arma;
 //#define TESTING 0
@@ -40,6 +46,8 @@ using namespace arma;
 
 #define SCALE_FACTOR_PHASE 1e2
 #define SCALE_FACTOR_AMP 1e4
+
+//#define ACK_ON_ETHERNET 1
 
 digital_ofdm_mapper_bcv_sptr
 digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned int msgq_limit, 
@@ -74,16 +82,21 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_send_null(false),
     d_pkt_num(0),
     d_id(id),
-    d_encode_flag(encode_flag)
+    d_encode_flag(encode_flag),
+    d_sock_opened(false)
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
+
+#ifdef ACK_ON_ETHERNET
+  d_sock_fd = openACKSocket();
+#endif
 
   // this is not the final form of this solution since we still use the occupied_tones concept,
   // which would get us into trouble if the number of carriers we seek is greater than the occupied carriers.
   // Eventually, we will get rid of the occupied_carriers concept.
 #ifdef USE_PILOT
-  std::string carriers = "FE7F";		// apurv-- , 2 DC subcarriers
+  std::string carriers = "FC3F";		// apurv-- , 2 DC subcarriers
 #else
   std::string carriers = "F00F";		// apurv++,  8 DC subcarriers
 #endif
@@ -126,21 +139,23 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 
 #ifdef USE_PILOT 
   /* pilot configuration */ 
-  int num_pilots = 6;
+  int num_pilots = 12; //4;
   unsigned int pilot_index = 0;			     // tracks the # of pilots carriers added   
   unsigned int data_index = 0;			     // tracks the # of data carriers added
   unsigned int count = 0;			     // tracks the total # of carriers added
-  unsigned int pilot_gap = 12;
-  unsigned int start_offset = 5;
+  unsigned int pilot_gap = 7; //18;
+  unsigned int start_offset = 0; //8;
 #endif
 
   unsigned int i,j,k;
+  //for(i = 0; i < (d_occupied_carriers/4)+diff_left; i++) {
   for(i = 0; i < carriers.length(); i++) {
     char c = carriers[i];                            // get the current hex character from the string
     for(j = 0; j < 4; j++) {                         // walk through all four bits
       k = (strtol(&c, NULL, 16) >> (3-j)) & 0x1;     // convert to int and extract next bit
       if(k) {                                        // if bit is a 1, 
-	int carrier_index = 4*(i+diff) + j;
+	int carrier_index = 4*(i+diff) + j - diff_left;
+	//int carrier_index = 4*i + j - diff_left;
 
 #ifdef USE_PILOT
 	// check if it should be pilot, else add as data //
@@ -164,18 +179,12 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   assert(pilot_index + data_index == count);
 
   /* debug carriers */ 
-  printf("pilot carriers: \n"); 
+  printf("pilot carriers (%d): \n", d_pilot_carriers.size()); 
   for(int i = 0; i < d_pilot_carriers.size(); i++) {
      printf("%d ", d_pilot_carriers[i]); fflush(stdout);
   }
   printf("\n");
   assert(d_pilot_carriers.size() == pilot_index);
-
-  printf("data carriers: \n"); 
-  for(int i = 0; i < d_data_carriers.size(); i++) {
-     printf("%d ", d_data_carriers[i]); fflush(stdout);
-  }
-  printf("\n");  
   assert(d_data_carriers.size() == data_index); 
   
   // hack the above to populate the d_pilots_carriers map and remove the corresponding entries from d_data_carriers //
@@ -187,6 +196,11 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 	P.S: DC tones should not be pilots!
   */  
 #endif
+  printf("data carriers (%d): \n", d_data_carriers.size());
+  for(int i = 0; i < d_data_carriers.size(); i++) {
+     printf("%d ", d_data_carriers[i]); fflush(stdout);
+  }
+  printf("\n");
 
 
   // make sure we stay in the limit currently imposed by the occupied_carriers
@@ -408,6 +422,52 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	  			     gr_vector_const_void_star &input_items,
   			             gr_vector_void_star &output_items)
 {
+  /* ack over ethernet */
+  struct sockaddr_in client_addr;
+  int addrlen = sizeof(client_addr);
+  
+#ifdef ACK_ON_ETHERNET 
+  while (!d_sock_opened) {
+    d_client_fd = accept(d_sock_fd, (struct sockaddr*)&client_addr, (socklen_t*)&addrlen);
+    if (d_client_fd != -1) {
+      printf("@ attached rcvr with ACK socket!\n"); fflush(stdout);
+      d_sock_opened = true;
+
+      /* make the socket non-blocking */
+      int flags = fcntl(d_client_fd, F_GETFL, 0);
+      fcntl(d_client_fd, F_SETFL, flags|O_NONBLOCK);
+      break;
+    }
+  }
+
+  /* once a packet has been *completely* modulated, check for ACK on the backend ethernet socket */
+  if(d_modulated) {
+    memset(d_ack_buf, 0, sizeof(d_ack_buf));
+    int nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), MSG_PEEK);
+    if(nbytes >= 0) {
+       if(nbytes == ACK_HEADERBYTELEN) {
+    	  nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), 0);
+	  fflush(stdout);
+       }
+       else {
+ 	  nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), MSG_WAITALL); 
+       }
+       printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ received nbytes: %d as ACK @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n", nbytes);
+
+       MULTIHOP_ACK_HDR_TYPE ack_header;
+       memcpy(&ack_header, d_ack_buf, sizeof(d_ack_buf));
+       printf("ACK details, batch: %d, flow: %d\n", ack_header.batch_number, ack_header.flow_id); fflush(stdout);
+
+
+       printf("batch: %d ACKed, packets sent for batch: %d, \n", ack_header.batch_number, d_packets_sent_for_batch); fflush(stdout);
+       if(d_batch_to_send <= ack_header.batch_number) {
+	  d_batch_to_send = ack_header.batch_number + 1;
+	  d_packets_sent_for_batch = 0;
+       }
+    }
+  }
+#endif
+
 #ifdef TESTING 
   /* send out only when triggered from ofdm.py mod */
   while(d_batch_to_send == -1)
@@ -416,7 +476,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 
   //int packetlen = 0;		//only used for make_header//
 
-#ifndef TESTING
+#ifndef ACK_ON_ETHERNET
   if(d_packets_sent_for_batch == d_batch_size)
   {
 	d_packets_sent_for_batch = 0;
@@ -464,14 +524,14 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 
   // timekeeping, etc //
   if(d_modulated) {
-      while(0) {
+      while(1) {
          struct timeval now;
          gettimeofday(&now, 0);
          uint64_t timeNow = (now.tv_sec * 1e6) + now.tv_usec;
          uint64_t interval = timeNow - d_time_pkt_sent;
 
-         if(interval > 1e3) {
-	     printf("timeNow: %ld, d_time_pkt_sent: %ld, interval: %ld\n", timeNow, d_time_pkt_sent, interval); fflush(stdout);
+         if(interval > 1e4) {
+	     printf("timeNow: %llu, d_time_pkt_sent: %llu, interval: %llu\n", timeNow, d_time_pkt_sent, interval); fflush(stdout);
              break;
 	 }
      }
@@ -545,14 +605,6 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       normalizeSignal(out, d_batch_size);						// normalize the outgoing signal //
       //logGeneratedTxSymbols(out); 
 
-#ifdef USE_PILOT
-      int cur_pilot = 1;
-      for(int i = 0; i < d_pilot_carriers.size(); i++) {
-	 out[d_pilot_carriers[i]] = gr_complex(cur_pilot, 0.0);
-	 cur_pilot = -cur_pilot;
-      }
-#endif 
-
  	// offline, timekeeping, etc //
       assert(d_ofdm_symbol_index < d_num_ofdm_symbols);
       d_ofdm_symbol_index++;
@@ -567,11 +619,18 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
            struct timeval now;
            gettimeofday(&now, 0);
            d_time_pkt_sent = (now.tv_sec * 1e6) + now.tv_usec;
-           printf("d_time_pkt_sent: %ld\n", d_time_pkt_sent);
+           printf("d_time_pkt_sent: %llu\n", d_time_pkt_sent); fflush(stdout);
       }
 	// etc end //
   }
 
+#ifdef USE_PILOT
+      double cur_pilot = 1.0;
+      for(int i = 0; i < d_pilot_carriers.size(); i++) {
+         out[d_pilot_carriers[i]] = gr_complex(cur_pilot, 0.0);
+         cur_pilot = -cur_pilot;
+      }
+#endif
  
   char *out_flag = 0;
   if(output_items.size() == 2)
@@ -822,6 +881,7 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolHeader(gr_complex* out)
         d_hdr_bit_offset += d_nbits;
 
         out[d_data_carriers[i]] = d_constellation[bits];
+	//printf("fill sc: %d\n", d_data_carriers[i]); fflush(stdout);
         i++;
       }
       else {  // if we can't fit nbits, store them for the next 
@@ -953,12 +1013,12 @@ void
 digital_ofdm_mapper_bcv::combineSignal(gr_complex *out, gr_complex* symbols)
 {
   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+      /*
       if(i == 0 && d_ofdm_symbol_index == 0) {
          printf("(%.8f, %.8f) + (%.8f, %.8f) = ", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag(), symbols[d_data_carriers[i]].real(), symbols[d_data_carriers[i]].imag()); fflush(stdout);
-      }
+      }*/
      out[d_data_carriers[i]] += symbols[d_data_carriers[i]];
-      if(i == 0 && d_ofdm_symbol_index == 0)
-         printf(" (%.8f, %.8f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
+     //if(i == 0 && d_ofdm_symbol_index == 0)  printf(" (%.8f, %.8f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
   }
 }
 
@@ -1139,4 +1199,55 @@ digital_ofdm_mapper_bcv::processACK(gr_message_sptr ackMsg) {
   }
 
   ackMsg.reset();
+}
+
+/* ack over ethernet */
+int
+digital_ofdm_mapper_bcv::openACKSocket() {
+  int sock_port = 9000;
+  int sockfd;
+  struct sockaddr_in dest;
+
+  /* create socket */
+  sockfd = socket(PF_INET, SOCK_STREAM, 0);
+  fcntl(sockfd, F_SETFL, O_NONBLOCK);
+ 
+  /* ensure the socket address can be reused, even after CTRL-C the application */ 
+  int optval = 1;
+  int ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+  if(ret == -1) {
+	printf("@ digital_ofdm_mapper_bcv::setsockopt ERROR\n"); fflush(stdout);
+  }
+
+  /* initialize structure dest */
+  bzero(&dest, sizeof(dest));
+  dest.sin_family = AF_INET;
+
+  /* assign a port number to socket */
+  dest.sin_port = htons(sock_port);
+  dest.sin_addr.s_addr = INADDR_ANY;
+
+  bind(sockfd, (struct sockaddr*)&dest, sizeof(dest));
+
+  /* make it listen to socket with max 20 connections */
+  listen(sockfd, 20);
+  if(sockfd != -1) {
+    printf("ACK Socket OPEN success\n"); fflush(stdout);
+  }
+  else {
+    printf("ACK Socket OPEN error\n"); fflush(stdout);
+  }
+
+  /* allocate d_ack_buf */
+  d_ack_buf = (char*) malloc(sizeof(char) * sizeof(ACK_HEADERDATALEN));
+  return sockfd;
+}
+
+int
+digital_ofdm_mapper_bcv::isACKSocketOpen() {
+  if(!d_sock_opened) 
+    return 0;
+
+  return 1;
 }

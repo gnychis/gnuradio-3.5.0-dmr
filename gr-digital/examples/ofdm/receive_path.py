@@ -107,3 +107,6 @@ class receive_path(gr.hier_block2):
 
     def make_packet(self):
         self.ofdm_rx.make_packet()
+
+    def send_ack(self, flow, batch):
+	self.ofdm_rx.send_ack(flow, batch)
