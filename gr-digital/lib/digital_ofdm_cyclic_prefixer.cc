@@ -37,12 +37,13 @@ digital_make_ofdm_cyclic_prefixer (size_t input_size, size_t output_size)
 digital_ofdm_cyclic_prefixer::digital_ofdm_cyclic_prefixer (size_t input_size,
 							    size_t output_size)
   : gr_sync_interpolator ("ofdm_cyclic_prefixer",
-			  gr_make_io_signature (1, 1, input_size*sizeof(gr_complex)),
-			  gr_make_io_signature (1, 1, sizeof(gr_complex)),
+			  //gr_make_io_signature (1, 1, input_size*sizeof(gr_complex)),
+			  gr_make_io_signature2 (1, 2, input_size*sizeof(gr_complex), sizeof(short)),		// apurv++ burst tagger
+			  //gr_make_io_signature (1, 1, sizeof(gr_complex)),
+			  gr_make_io_signature2 (1, 2, sizeof(gr_complex), sizeof(short)),			// apurv++ burst tagger
 			  output_size), 
     d_input_size(input_size),
     d_output_size(output_size)
-
 {
 }
 
@@ -53,18 +54,45 @@ digital_ofdm_cyclic_prefixer::work (int noutput_items,
 {
   gr_complex *in = (gr_complex *) input_items[0];
   gr_complex *out = (gr_complex *) output_items[0];
+
+  /* apurv start - for burst tagger */
+  bool _trigger = false;
+  if(input_items.size() >= 2 && output_items.size() >= 2) 
+	_trigger = true;
+
+  short *in_trigger = NULL;
+  if(_trigger) {
+      in_trigger = (short*) input_items[1];
+  }
+
+  short *out_trigger = NULL;
+  if(_trigger) {
+      out_trigger = (short*) output_items[1];
+  }
+  /* apurv end */
+ 
   size_t cp_size = d_output_size - d_input_size;
   unsigned int i=0, j=0;
 
   j = cp_size;
   for(i=0; i < d_input_size; i++,j++) {
     out[j] = in[i];
+    if(_trigger) 
+        out_trigger[j] = 1;
   }
 
   j = d_input_size - cp_size;
   for(i=0; i < cp_size; i++, j++) {
     out[i] = in[j];
+    if(_trigger)
+        out_trigger[i] = 1;				// apurv++ out_trigger = 1 for every ofdm symbol (look below)
   }
 
+  /* apurv start -  except the last one in the packet */ 
+  if(_trigger && in_trigger[0] == 0) {
+    out_trigger[d_output_size-1] = 0;
+  }
+  /* apurv end */
+ 
   return d_output_size;
 }

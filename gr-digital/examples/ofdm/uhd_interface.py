@@ -46,35 +46,35 @@ class uhd_interface:
                  gain=None, spec=None, antenna=None):
         
         if(istx):
-            #self.u = uhd.usrp_sink(device_addr=args, stream_args=uhd.stream_args('fc32'))
-            self.u = uhd.usrp_sink(device_addr=args,
-                                   io_type=uhd.io_type.COMPLEX_FLOAT32,
-                                   num_channels=1)
+            self.u = uhd.usrp_sink(device_addr=args, stream_args=uhd.stream_args('fc32'))
+            #self.u = uhd.usrp_sink(device_addr=args,
+            #                       io_type=uhd.io_type.COMPLEX_FLOAT32,
+            #                       num_channels=1)
 
         else:
-            #self.u = uhd.usrp_source(device_addr=args, stream_args=uhd.stream_args('fc32'))
-            self.u = uhd.usrp_source(device_addr=args,
-                                   io_type=uhd.io_type.COMPLEX_FLOAT32,
-                                   num_channels=1)
+            self.u = uhd.usrp_source(device_addr=args, stream_args=uhd.stream_args('fc32'))
+            #self.u = uhd.usrp_source(device_addr=args,
+            #                       io_type=uhd.io_type.COMPLEX_FLOAT32,
+            #                       num_channels=1)
 
 
-        self._args = args
-        self._ant  = antenna
-        self._spec = spec
-        self._gain = self.set_gain(gain)
-        self._freq = self.set_freq(freq)
-	time.sleep(1)
-
+	self._args = args
+	self._ant  = antenna
+ 	self._spec = spec
+	self._gain = self.set_gain(gain)
+	self._freq = self.set_freq(freq)
         self._rate = self.set_sample_rate(bandwidth)
 
         # Set the subdevice spec
         if(spec):
-            self.u.set_subdev_spec(spec, 0)
+           self.u.set_subdev_spec(spec, 0)
 
         # Set the antenna
         if(antenna):
-            self.u.set_antenna(antenna, 0)
-        
+           self.u.set_antenna(antenna, 0)
+
+	time.sleep(2)
+
     def set_sample_rate(self, bandwidth):
         self.u.set_samp_rate(bandwidth)
         actual_bw = self.u.get_samp_rate()
@@ -173,12 +173,14 @@ class uhd_receiver(uhd_interface, gr.hier_block2):
         gr.hier_block2.__init__(self, "uhd_receiver",
                                 gr.io_signature(0,0,0),
                                 gr.io_signature(1,1,gr.sizeof_gr_complex))
+				#gr.io_signature(0,0,0))
       
         # Set up the UHD interface as a receiver
         uhd_interface.__init__(self, False, args, bandwidth,
                                freq, gain, spec, antenna)
 
         self.connect(self.u, self)
+	#self.connect(self.u, gr.null_sink(gr.sizeof_gr_complex))
 
         if(verbose):
             self._print_verbage()

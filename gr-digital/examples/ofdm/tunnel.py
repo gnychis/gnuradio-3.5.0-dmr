@@ -47,6 +47,10 @@ from uhd_interface import uhd_receiver
 import os, sys
 import random, time, struct
 
+import struct, sys, os
+print os.getpid()
+#raw_input("Press enter to continue")
+
 # /////////////////////////////////////////////////////////////////////////////
 #                             the flow graph
 # /////////////////////////////////////////////////////////////////////////////
@@ -55,7 +59,6 @@ class my_top_block(gr.top_block):
     def __init__(self, callback, fwd_callback, options):
         gr.top_block.__init__(self)
 
-	
         self.sink = uhd_transmitter(options.args,
                                     options.bandwidth,
                                     options.tx_freq, options.tx_gain,
@@ -67,11 +70,13 @@ class my_top_block(gr.top_block):
                                    options.rx_freq, options.rx_gain,
                                    options.spec, options.antenna,
                                    options.verbose)
+
         self.txpath = transmit_path(options)
         self.rxpath = receive_path(callback, fwd_callback, options)
 
         self.connect(self.txpath, self.sink)
         self.connect(self.source, self.rxpath)
+
 
     def get_pkt_to_fwd(self):
         self.rxpath.make_packet()
@@ -154,8 +159,8 @@ class cs_mac(object):
 
         while 1:
 
+	    sent = 0
             # emulate the CSMA loosely  
-            sent = 0
             while sent == 0:
 
                 # DIFS
@@ -198,10 +203,10 @@ class cs_mac(object):
                 sent = 1
 
 		self.tb.txpath.send_pkt(struct.pack('!H', 0) + 48 * chr(0 & 0xff), 0, False)
-		#time.sleep(1)
+		time.sleep(0.001)
+		#time.sleep(100)
 
-
-                """transmission happens instead in fwd_callback"""
+            """transmission happens instead in fwd_callback"""
 
 # /////////////////////////////////////////////////////////////////////////////
 #                                   main

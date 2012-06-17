@@ -384,7 +384,7 @@ digital_ofdm_mapper_bcv::generateOFDMSymbol(gr_complex* out, int len)
 
     }
 
-    printf("d_bit_offset[0]: %d, d_msg_offset[0]: %d\n", d_bit_offset[0], d_msg_offset[0]); fflush(stdout);
+    //printf("d_bit_offset[0]: %d, d_msg_offset[0]: %d\n", d_bit_offset[0], d_msg_offset[0]); fflush(stdout);
 
     if(d_bit_offset[0] == 8) {
       d_bit_offset[0] = 0;

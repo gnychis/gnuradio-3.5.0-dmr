@@ -108,10 +108,11 @@ def main():
         send_pkt(payload)
         n += len(payload)
         sys.stderr.write('.')
-        if options.discontinuous and pktno % 5 == 4:
-            time.sleep(1)
+        #if options.discontinuous and pktno % 5 == 4:
+        #    time.sleep(1)
         pktno += 1
-	time.sleep(0.001)
+	#time.sleep(0.001)
+	time.sleep(0.1)
 
     send_pkt(eof=True)
     tb.wait()                       # wait for it to finish

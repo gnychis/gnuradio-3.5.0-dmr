@@ -22,6 +22,7 @@
 #include <gr_uhd_usrp_sink.h>
 #include <gr_io_signature.h>
 #include <stdexcept>
+#include <cstdio>
 #include <boost/make_shared.hpp>
 
 static const pmt::pmt_t SOB_KEY = pmt::pmt_string_to_symbol("tx_sob");
@@ -311,6 +312,7 @@ public:
 
         //increment the timespec by the number of samples sent
         _metadata.time_spec += uhd::time_spec_t(0, num_sent, _sample_rate);
+	printf("uhd_usrp_sink(tx) :: num_sent:::::::: %d, sob: %d, eob: %d\n", num_sent, _metadata.start_of_burst, _metadata.end_of_burst); fflush(stdout);
         return num_sent;
     }
 
@@ -326,10 +328,12 @@ public:
         const uint64_t tag0_count = tag0.offset;
         const uint64_t samp0_count = this->nitems_read(0);
 
+	printf("uhd_usrp_sink(tx) :: tag_work called, num_tags: %d, nitems_read: %ld, offset: %ld\n", _tags.size(), samp0_count, tag0_count); fflush(stdout);
         //only transmit nsamples from 0 to the first tag
         //this ensures that the next work starts on a tag
         if (samp0_count != tag0_count){
             ninput_items = tag0_count - samp0_count;
+	    printf("uhd_usrp_sink(tx) :: ninput_items: %ld\n", ninput_items); fflush(stdout);
             return;
         }
 
@@ -346,19 +350,24 @@ public:
             //from zero until the next tag or end of work
             if (my_tag_count != tag0_count){
                 ninput_items = my_tag_count - samp0_count;
+		printf("uhd_usrp_sink(tx) :: my_tag_count: %ld, ninput_items: %ld\n", my_tag_count, ninput_items); fflush(stdout);
                 break;
             }
 
             //handle end of burst with a mini end of burst packet
             else if (pmt::pmt_equal(key, EOB_KEY)){
                 _metadata.end_of_burst = pmt::pmt_to_bool(value);
+		printf("uhd_usrp_sink(tx) :: EOB_KEY\n"); fflush(stdout);
                 ninput_items = 1;
                 return;
             }
 
             //set the start of burst flag in the metadata
             else if (pmt::pmt_equal(key, SOB_KEY)){
+		//uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS);
+		//_dev->issue_stream_cmd(stream_cmd);
                 _metadata.start_of_burst = pmt::pmt_to_bool(value);
+		printf("uhd_usrp_sink(tx) :: SOB_KEY\n"); fflush(stdout); 
             }
 
             //set the time specification in the metadata
@@ -368,6 +377,7 @@ public:
                     pmt::pmt_to_uint64(pmt_tuple_ref(value, 0)),
                     pmt::pmt_to_double(pmt_tuple_ref(value, 1))
                 );
+		printf("uhd_usrp_sink(tx) :: TIME_KEY\n"); fflush(stdout);
             }
         }
     }
@@ -375,6 +385,7 @@ public:
     //Send an empty start-of-burst packet to begin streaming.
     //Set at a time in the near future to avoid late packets.
     bool start(void){
+	//printf("uhd_usrp_sink(tx) :: start(), tx_freq: %f, rx_freq: %f\n", _dev->get_tx_freq(), _dev->get_rx_freq()); fflush(stdout);
         #ifdef GR_UHD_USE_STREAM_API
         _tx_stream = _dev->get_tx_stream(_stream_args);
         #endif
@@ -400,6 +411,7 @@ public:
     //Send an empty end-of-burst packet to end streaming.
     //Ending the burst avoids an underflow error on stop.
     bool stop(void){
+	printf("uhd_usrp_sink(tx) :: stop()\n"); fflush(stdout);
         _metadata.start_of_burst = false;
         _metadata.end_of_burst = true;
         _metadata.has_time_spec = false;
