@@ -59,17 +59,25 @@ class my_top_block(gr.top_block):
     def __init__(self, callback, fwd_callback, options):
         gr.top_block.__init__(self)
 
+        self.source = uhd_receiver(options.args,
+                                   options.bandwidth,
+                                   options.rx_freq, options.rx_gain,
+                                   options.spec, options.antenna,
+                                   options.verbose)
+
         self.sink = uhd_transmitter(options.args,
                                     options.bandwidth,
                                     options.tx_freq, options.tx_gain,
                                     options.spec, options.antenna,
                                     options.verbose)
 
+	"""
         self.source = uhd_receiver(options.args,
                                    options.bandwidth,
                                    options.rx_freq, options.rx_gain,
                                    options.spec, options.antenna,
                                    options.verbose)
+	"""
 
         self.txpath = transmit_path(options)
         self.rxpath = receive_path(callback, fwd_callback, options)
@@ -157,6 +165,7 @@ class cs_mac(object):
         min_delay = 0.005               # seconds
         difs_delay = 0.05
 
+	sent = 0
         while 1:
 
 	    sent = 0
