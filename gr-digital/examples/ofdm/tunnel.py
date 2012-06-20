@@ -125,7 +125,7 @@ class cs_mac(object):
         @param payload: contents of the packet (string)
         """
         if self.verbose:
-            print "Rx: ok = %r  len(payload) = %4d" % (ok, len(payload))
+            print "Rx: ok = %r  len(payload) = %4d valid_ts: %d \t sec: %d \t frac_sec: %f" % (ok, len(payload), valid_timestamp, timestamp_sec, timestamp_frac_sec)
 
     def fwd_callback(self, packet):
         """
