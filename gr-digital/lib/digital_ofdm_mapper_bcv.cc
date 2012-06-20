@@ -95,11 +95,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   // this is not the final form of this solution since we still use the occupied_tones concept,
   // which would get us into trouble if the number of carriers we seek is greater than the occupied carriers.
   // Eventually, we will get rid of the occupied_carriers concept.
-#ifdef USE_PILOT
-  std::string carriers = "FC3F";		// apurv-- , 2 DC subcarriers
-#else
   std::string carriers = "F00F";		// apurv++,  8 DC subcarriers
-#endif
 
   // A bit hacky to fill out carriers to occupied_carriers length
   int diff = (d_occupied_carriers - 4*carriers.length()); 
@@ -139,11 +135,11 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 
 #ifdef USE_PILOT 
   /* pilot configuration */ 
-  int num_pilots = 12; //4;
+  int num_pilots = 8; //12; //4;
   unsigned int pilot_index = 0;			     // tracks the # of pilots carriers added   
   unsigned int data_index = 0;			     // tracks the # of data carriers added
   unsigned int count = 0;			     // tracks the total # of carriers added
-  unsigned int pilot_gap = 7; //18;
+  unsigned int pilot_gap = 11; //7; //18;
   unsigned int start_offset = 0; //8;
 #endif
 
@@ -384,7 +380,7 @@ digital_ofdm_mapper_bcv::generateOFDMSymbol(gr_complex* out, int len)
 
     }
 
-    printf("d_bit_offset[0]: %d, d_msg_offset[0]: %d\n", d_bit_offset[0], d_msg_offset[0]); fflush(stdout);
+    //printf("d_bit_offset[0]: %d, d_msg_offset[0]: %d\n", d_bit_offset[0], d_msg_offset[0]); fflush(stdout);
 
     if(d_bit_offset[0] == 8) {
       d_bit_offset[0] = 0;

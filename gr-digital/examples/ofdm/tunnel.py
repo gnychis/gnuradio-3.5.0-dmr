@@ -55,6 +55,12 @@ class my_top_block(gr.top_block):
     def __init__(self, callback, fwd_callback, options):
         gr.top_block.__init__(self)
 
+
+        self.source = uhd_receiver(options.args,
+                                   options.bandwidth,
+                                   options.rx_freq, options.rx_gain,
+                                   options.spec, options.antenna,
+                                   options.verbose)
 	
         self.sink = uhd_transmitter(options.args,
                                     options.bandwidth,
@@ -62,11 +68,14 @@ class my_top_block(gr.top_block):
                                     options.spec, options.antenna,
                                     options.verbose)
 
+	"""
         self.source = uhd_receiver(options.args,
                                    options.bandwidth,
                                    options.rx_freq, options.rx_gain,
                                    options.spec, options.antenna,
                                    options.verbose)
+	"""
+
         self.txpath = transmit_path(options)
         self.rxpath = receive_path(callback, fwd_callback, options)
 
@@ -198,7 +207,7 @@ class cs_mac(object):
                 sent = 1
 
 		self.tb.txpath.send_pkt(struct.pack('!H', 0) + 48 * chr(0 & 0xff), 0, False)
-		#time.sleep(1)
+		#time.sleep(0.01)
 
 
                 """transmission happens instead in fwd_callback"""
