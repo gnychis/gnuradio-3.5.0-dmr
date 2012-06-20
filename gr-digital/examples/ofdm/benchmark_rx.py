@@ -100,7 +100,8 @@ def main():
 	         n_batch_correct += 1
 		 batch_ok = 1
 		 #send_ack(0, 0)
-	      print "batch ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t correct_batches: %d \t total_batches: %d " % (batch_ok, pktno, n_rcvd, n_right, n_batch_correct, n_total_batches)
+	      #print "batch ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t correct_batches: %d \t total_batches: %d " % (batch_ok, pktno, n_rcvd, n_right, n_batch_correct, n_total_batches)
+	      print "batch ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d \t correct_batches: %d \t total_batches: %d \t valid_ts: %d \t sec: %d \t frac_sec: %f" % (batch_ok, pktno, n_rcvd, n_right, n_batch_correct, n_total_batches, valid_timestamp, timestamp_sec, timestamp_frac_sec)
 	      n_correct = 0
 	
 	if 0:

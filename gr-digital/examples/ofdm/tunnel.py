@@ -64,7 +64,7 @@ class my_top_block(gr.top_block):
                                    options.rx_freq, options.rx_gain,
                                    options.spec, options.antenna,
                                    options.verbose)
-	
+
         self.sink = uhd_transmitter(options.args,
                                     options.bandwidth,
                                     options.tx_freq, options.tx_gain,
@@ -157,6 +157,7 @@ class cs_mac(object):
         min_delay = 0.005               # seconds
         difs_delay = 0.05
 
+	sent = 0
         while 1:
 
 	    sent = 0

@@ -572,11 +572,7 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
     d_fft_length(fft_length),
     d_out_queue(fwd_queue)
 {
-#ifdef USE_PILOT				// check!
-  std::string carriers = "FC3F";                //4-DC subcarriers      // apurv--
-#else
   std::string carriers = "F00F";                //8-DC subcarriers      // apurv++
-#endif
 
   // A bit hacky to fill out carriers to occupied_carriers length
   int diff = (d_occupied_carriers - 4*carriers.length());
@@ -610,11 +606,11 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   }
 #ifdef USE_PILOT			// check!
   /* pilot configuration */
-  int num_pilots = 12; //4;
+  int num_pilots = 8; //4;
   unsigned int pilot_index = 0;                      // tracks the # of pilots carriers added   
   unsigned int data_index = 0;                       // tracks the # of data carriers added
   unsigned int count = 0;                            // tracks the total # of carriers added
-  unsigned int pilot_gap = 7; //18;
+  unsigned int pilot_gap = 11; //18;
   unsigned int start_offset = 0; //8;
 #endif
 
@@ -713,18 +709,18 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   d_in_estimates = (gr_complex*) malloc(sizeof(gr_complex) * occupied_carriers);
   memset(d_in_estimates, 0, sizeof(gr_complex) * occupied_carriers);  
 
-  //assert(open_hestimates_log());
+  assert(open_hestimates_log());
 
   d_log_pkt = false;
   d_log_ofdm_index = 0;
   d_fp_sampler = NULL;
   d_fp_timing = NULL;
-  assert(open_sampler_log());
+  //assert(open_sampler_log());
 
   d_fp_corrected_symbols = NULL;
   d_fp_uncorrected_symbols = NULL;
   //d_fp_corr_log = NULL;
-  assert(open_corrected_symbols_log());
+  //assert(open_corrected_symbols_log());
 
   int len = 400;
   
@@ -923,7 +919,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 
     // only demod after getting the preamble signal; otherwise, the 
     // equalizer taps will screw with the PLL performance
-#ifdef USE_PILOT
+#ifdef USE_PILOT				// check!
     bytes = demapper_pilot(&in[0], d_bytes_out);
 #else
     bytes = demapper(&in[0], d_bytes_out);      // demap one ofdm symbol
@@ -950,7 +946,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
         if (header_ok()) {						 // full header received
 
 	  /* log hestimates */
-	  if(use_estimates && 0) {
+	  if(use_estimates) {
 	      int count = ftell(d_fp_hestimates);
 	      count = fwrite_unlocked(&in_estimates[0], sizeof(gr_complex), d_occupied_carriers, d_fp_hestimates);
    	  }
@@ -4357,6 +4353,21 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
               if ((packetlen_cnt[k]) == d_packetlen) {
                   gr_message_sptr msg = gr_make_message(0, d_packet_whitener_offset, 0, (packetlen_cnt[k]));
                   memcpy(msg->msg(), packet[k], (packetlen_cnt[k]));
+
+                  // With a good header, let's now check for the preamble sync timestamp
+                  std::vector<gr_tag_t> rx_sync_tags;
+                  const uint64_t nread = this->nitems_read(0);
+                  this->get_tags_in_range(rx_sync_tags, 0, nread, nread+last_noutput_items, SYNC_TIME);
+                  if(rx_sync_tags.size()>0) {
+                    size_t t = rx_sync_tags.size()-1;
+                    const pmt::pmt_t &value = rx_sync_tags[t].value;
+                    uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+                    double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+                    msg->set_timestamp(sync_secs, sync_frac_of_secs);
+                  } else {
+                    //std::cerr << "---- Header received, with no sync timestamp?\n";
+                  }
+
 		  bool crc_valid = crc_check(msg->to_string());
 		  printf("crc valid: %d\n", crc_valid); fflush(stdout);
                   d_target_queue->insert_tail(msg);
@@ -4869,5 +4880,9 @@ digital_ofdm_frame_sink::crc_check(std::string msg)
   //printf("hex exp crc (%d): %s\n", sizeof(hex_exp_crc), hex_exp_crc.c_str()); fflush(stdout);
   free(msg_data);
   printf("crc_check end!\n"); fflush(stdout);
-  return (hex_exp_crc.compare(hex_crc) == 0);
+
+  bool res =  (hex_exp_crc.compare(hex_crc) == 0);
+
+  return res;
+  //return (hex_exp_crc.compare(hex_crc) == 0);
 }
