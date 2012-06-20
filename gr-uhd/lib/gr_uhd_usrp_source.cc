@@ -25,6 +25,7 @@
 #include <iostream>
 #include <boost/format.hpp>
 #include <boost/make_shared.hpp>
+#include <cstdio>
 
 static const pmt::pmt_t TIME_KEY = pmt::pmt_string_to_symbol("rx_time");
 
@@ -38,6 +39,8 @@ inline gr_io_signature_sptr args_to_io_sig(const uhd::stream_args_t &args){
         if (args.cpu_format == "fc32") size = 8;
         if (args.cpu_format == "sc16") size = 4;
     #endif
+    printf("nchan: %d, size: %d\n", nchan, size); fflush(stdout);
+    //return gr_make_io_signature(0, 0, 0);
     return gr_make_io_signature(nchan, nchan, size);
 }
 
@@ -364,15 +367,18 @@ public:
     }
 
     bool start(void){
+	printf("uhd_usrp_source(rx):: start()\n"); fflush(stdout);
         #ifdef GR_UHD_USE_STREAM_API
         _rx_stream = _dev->get_rx_stream(_stream_args);
         _samps_per_packet = _rx_stream->get_max_num_samps();
         #endif
         //setup a stream command that starts streaming slightly in the future
+	
         static const double reasonable_delay = 0.1; //order of magnitude over RTT
         uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
         stream_cmd.stream_now = _stream_now;
-        stream_cmd.time_spec = get_time_now() + uhd::time_spec_t(reasonable_delay);
+        stream_cmd.time_spec = get_time_now() + uhd::time_spec_t(reasonable_delay); 
+	//uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS);
         _dev->issue_stream_cmd(stream_cmd);
         _tag_now = true;
         return true;

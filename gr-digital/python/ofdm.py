@@ -124,17 +124,24 @@ class ofdm_mod(gr.hier_block2):
         self.cp_adder = digital_swig.ofdm_cyclic_prefixer(self._fft_length, symbol_length)
         self.scale = gr.multiply_const_cc(1.0 / math.sqrt(self._fft_length))
 
-        self.burst_tagger = gr.burst_tagger(gr.sizeof_gr_complex*self._fft_length)
-        self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_short, "burst_trigger_tx.dat"))
-        
+        self.burst_tagger = gr.burst_tagger(gr.sizeof_gr_complex)					# 1 sample
+        #self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_short, "burst_trigger_tx.dat"))
+	
+	use_burst_tagger = 0 
+
         manual = options.tx_manual
         if manual == 0:
 	   # the default tx flow-graph #
            self.connect((self._pkt_input, 0), (self.preambles, 0))
            self.connect((self._pkt_input, 1), (self.preambles, 1))
-           self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
-           #self.connect(self.preambles, self.burst_tagger, self.ifft, self.cp_adder, self.scale, self)
-           #self.connect((self.preambles,1),(self.burst_tagger,1))   # Connect Apurv's trigger data to the burst tagger
+
+	   if use_burst_tagger == 0:
+	       self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
+	   else:
+	       # some burst tagger connections #
+	       self.connect(self.preambles, self.ifft, self.cp_adder, self.burst_tagger, self.scale, self)
+	       self.connect((self.preambles, 1), (self.cp_adder, 1), (self.burst_tagger,1))   # Connect Apurv's trigger data to the burst tagger
+	       self.connect((self.cp_adder, 1), gr.file_sink(gr.sizeof_short, "burst_trigger_tx.dat"))
 
            # apurv++: log the transmitted data in the time domain #
            # self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
@@ -159,6 +166,8 @@ class ofdm_mod(gr.hier_block2):
                                                  "ofdm_ifft_c.dat"))
             self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex,
                                                      "ofdm_cp_adder_c.dat"))
+
+	self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex, "ofdm_cp_adder_c.dat"))
 
     def send_pkt(self, payload, type=0, eof=False):
         """

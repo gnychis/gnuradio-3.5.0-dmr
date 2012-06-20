@@ -26,6 +26,7 @@
 
 #include <gr_burst_tagger.h>
 #include <gr_io_signature.h>
+#include <cstdio>
 #include <string.h>
 
 gr_burst_tagger_sptr
@@ -62,18 +63,26 @@ gr_burst_tagger::work(int noutput_items,
 
   memcpy(out, signal, noutput_items * d_itemsize);
 
+  //printf("noutput_items: %d\n", noutput_items); fflush(stdout); 
   for(int i = 0; i < noutput_items; i++) {
     if(trigger[i] > 0) {
       if(d_state == false) {
+	printf("burst_tagger: SOB, i: %d, noutput_items: %d, nitems_written: %d\n", i, noutput_items, nitems_written(0)); fflush(stdout);
 	d_state = true;
 	pmt::pmt_t value = pmt::PMT_T;
+	d_key = pmt::pmt_string_to_symbol("tx_sob");
+	d_id = pmt::pmt_string_to_symbol(this->name());
 	add_item_tag(0, nitems_written(0)+i, d_key, value, d_id);
       }
     }
     else {
       if(d_state == true) {
+	printf("burst_tagger: EOB, i: %d, noutput_items: %d, nitems_written: %d\n", i, noutput_items, nitems_written(0)); fflush(stdout);
 	d_state = false;
-	pmt::pmt_t value = pmt::PMT_F;
+	//pmt::pmt_t value = pmt::PMT_F;
+	d_key = pmt::pmt_string_to_symbol("tx_eob");
+	d_id = pmt::pmt_string_to_symbol(this->name());
+	pmt::pmt_t value = pmt::PMT_T;
 	add_item_tag(0, nitems_written(0)+i, d_key, value, d_id);
       }
     }
