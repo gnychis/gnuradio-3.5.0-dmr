@@ -36,7 +36,7 @@
 #include <stdexcept>
 #include <stdio.h>
 
-#define USE_PILOT 0
+//#define USE_PILOT 0
 #ifdef HAVE_IO_H
 #include <io.h>
 #endif
