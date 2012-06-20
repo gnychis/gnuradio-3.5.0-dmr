@@ -203,7 +203,7 @@ class cs_mac(object):
                 #self.tb.get_pkt_to_fwd()               
                 sent = 1
 
-		self.tb.txpath.send_pkt(struct.pack('!H', 0) + 48 * chr(0 & 0xff), 0, False)
+		#self.tb.txpath.send_pkt(struct.pack('!H', 0) + 48 * chr(0 & 0xff), 0, False)
 		time.sleep(0.001)
 
             """transmission happens instead in fwd_callback"""

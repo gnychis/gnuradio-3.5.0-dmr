@@ -3028,8 +3028,10 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo)
   assert((flow_info != NULL) && (flow_info->flowId == flowId));
   InnovativePktInfoVector inno_pkts = flow_info->innovative_pkts;
 
+  /*
   if(d_replay_flag != CORRECTED_REPLAY) 
      correctStoredSignal(flow_info);
+  */
 
   /* coefficients */
   unsigned int n_innovative_pkts = inno_pkts.size();
@@ -3931,7 +3933,7 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
 	  // update accum_error for each batch //
 	  for(unsigned int k = 0; k < d_batch_size; k++) {
 	     
-#ifndef DEBUG
+#ifdef DEBUG
 	     float error = abs(sigrot[k] * conj(closest_sym[k]));
 	     float error_no_rot = abs(sym_vec[k][d_data_carriers[i]] * conj(closest_sym[k]));
 	     gr_complex sig = sym_vec[k][d_data_carriers[i]];
@@ -3962,7 +3964,7 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
   
      if(byte_offset == 8) {
 	for(int k = 0; k < d_batch_size; k++) {
-#ifndef DEBUG
+#ifdef DEBUG
 	    printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
 #endif
             out_vec[k][bytes_produced] = partial_byte[k];
