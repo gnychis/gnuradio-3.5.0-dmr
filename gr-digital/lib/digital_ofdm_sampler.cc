@@ -87,6 +87,9 @@ digital_ofdm_sampler::digital_ofdm_sampler (unsigned int fft_length,
 {
   lts_samples_since=0;
   set_relative_rate(1.0/(double) fft_length);   // buffer allocator hint
+
+  std::string arg("");
+  d_usrp = uhd::usrp::multi_usrp::make(arg);
 }
 
 void
@@ -126,16 +129,18 @@ digital_ofdm_sampler::general_work (int noutput_items,
     const uint64_t sample_offset = rx_time_tags[t].offset;  // distance from sample to timestamp in samples
     const pmt::pmt_t &value = rx_time_tags[t].value;
 
-		// If the offset is greater than 0, this is a bit odd and complicated, so let's throw an error
-		// and if this is common, George will fix it.
-		if(sample_offset>0) {
-			std::cerr << "----- ERROR:  RX Time offset > 0, George will fix if this is common\n";
-			exit(-1);
-		}
-		
-		// Now, compute the actual time in seconds and fractional seconds of the preamble
-		lts_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
-		lts_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+    // If the offset is greater than 0, this is a bit odd and complicated, so let's throw an error
+    // and if this is common, George will fix it.
+    if(sample_offset>0) {
+	 std::cerr << "----- ERROR:  RX Time offset > 0, George will fix if this is common\n";
+	 exit(-1);
+    }
+
+    // Now, compute the actual time in seconds and fractional seconds of the preamble
+    lts_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+    lts_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+
+    printf("(SAMPLER): found TIME_KEY.. lts_secs: %llu, lts_frac_of_secs: %f\n", lts_secs, lts_frac_of_secs); fflush(stdout);
   }
 
   //FIXME: we only process a single OFDM symbol at a time; after the preamble, we can 
@@ -153,7 +158,11 @@ digital_ofdm_sampler::general_work (int noutput_items,
 
       // The analog to digital converter is 400 million samples / sec.  That translates to 
       // 2.5ns of time for every sample.
-      double time_per_sample = 1 / 100000000.0 * (int)(1/this->relative_rate());
+
+      int decimation = 128;
+      double rate = 1.0/decimation;
+
+      double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
       uint64_t samples_passed = lts_samples_since + index;
       double elapsed = samples_passed * time_per_sample;
       
@@ -165,9 +174,9 @@ digital_ofdm_sampler::general_work (int noutput_items,
         sync_frac_sec -= (uint64_t)sync_frac_sec;
       }
 
-      if(VERBOSE) {
+      if(VERBOSE || 1) {
         std::cout << "got a preamble.... calculating timestamp of sync\n";
-        std::cout << "... relative_rate: " << relative_rate() << "\n";
+        std::cout << "... relative_rate: " << rate << "\n";
         std::cout << "... time_per_sample: " << time_per_sample << "\n";
         std::cout << "... samples_passed: " << samples_passed << "\n";
         std::cout << "... elapsed: "<< elapsed << "\n";
@@ -177,18 +186,33 @@ digital_ofdm_sampler::general_work (int noutput_items,
 
       // Pack up our time of synchronization, pass it along using the stream tags
       gr_tag_t tag;   // create a new tag
-      tag.srcid = pmt::pmt_string_to_symbol(this->name());    // to know the source block that created tag
-      tag.offset=this->nitems_written(1)+17;     // the offset in the sample stream that we found this tag
+      tag.srcid = pmt::pmt_string_to_symbol(name());    // to know the source block that created tag
+      tag.offset=nitems_written(1);     // the offset in the sample stream that we found this tag
                                                  // 17 is a magic number which was the offset i found them at (decode length?)
       tag.key=SYNC_TIME;    // the "key" of the tag, which I've defined to be "SYNC_TIME"
+
+      /*
       tag.value = pmt::pmt_make_tuple(
           pmt::pmt_from_uint64((int)elapsed),      // FPGA clock in seconds that we found the sync
           pmt::pmt_from_double(elapsed - (int)elapsed)  // FPGA clock in fractional seconds that we found the sync
+        ); */
+
+      tag.value = pmt::pmt_make_tuple(
+          pmt::pmt_from_uint64(sync_sec),      // FPGA clock in seconds that we found the sync
+          pmt::pmt_from_double(sync_frac_sec)  // FPGA clock in fractional seconds that we found the sync
         );
-      add_item_tag(1, tag);
-      if(0) 
-        std::cout << "--- added sync tag in ofdm_sampler stream at " << this->nitems_written(1) << "\n";
-      if(0)
+
+      //add_item_tag(1, tag);
+
+      add_item_tag(1, tag.offset, tag.key, tag.value, tag.srcid);
+      uhd::time_spec_t proc_time = d_usrp->get_time_now() - uhd::time_spec_t(sync_sec, sync_frac_sec);
+  
+      printf("(SAMPLER) RX timestamp (%llu, %f), proc_time (%llu, %f)\n", sync_sec, sync_frac_sec, (uint64_t) proc_time.get_full_secs(), proc_time.get_frac_secs());
+      fflush(stdout);
+
+      if(1) 
+        std::cout << "--- added sync tag in ofdm_sampler stream at " << nitems_written(1) << "\n";
+      if(1)
         std::cout << "--- found sync at: " << (int)elapsed << " and " << elapsed-(int)elapsed << " (" << elapsed << ")\n";
 
     }

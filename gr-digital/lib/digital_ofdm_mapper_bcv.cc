@@ -35,10 +35,10 @@
 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <stdlib.h>
 
 #include "armadillo"
-
 
 using namespace arma;
 //#define TESTING 0
@@ -48,6 +48,7 @@ using namespace arma;
 #define SCALE_FACTOR_AMP 1e4
 
 //#define ACK_ON_ETHERNET 1
+#define TRIGGER_ON_ETHERNET 1
 
 digital_ofdm_mapper_bcv_sptr
 digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned int msgq_limit, 
@@ -83,13 +84,23 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_pkt_num(0),
     d_id(id),
     d_encode_flag(encode_flag),
-    d_sock_opened(false)
+    d_sock_opened(false),
+    d_time_tag(false),
+    d_trigger_sock_opened(false) 
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
 
 #ifdef ACK_ON_ETHERNET
   d_sock_fd = openACKSocket();
+#endif
+
+#ifdef TRIGGER_ON_ETHERNET
+  d_trigger_src_ip_addr = "128.83.141.213";
+  d_trigger_src_sock_port = 9001;
+  d_trigger_sock = -1;
+  std::string arg("");
+  d_usrp = uhd::usrp::multi_usrp::make(arg);
 #endif
 
   // this is not the final form of this solution since we still use the occupied_tones concept,
@@ -234,12 +245,13 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
      return work_source(noutput_items, input_items, output_items);
   }
 
+  
   gr_complex *out = (gr_complex *)output_items[0];
   
   if(d_eof) {
     return -1;
   }
-  
+
   if(!d_msg[0]) {
     d_msg[0] = d_msgq->delete_head();			   // block, waiting for a message
     d_ofdm_index = 0;
@@ -275,12 +287,42 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
       d_ack = false;
       d_data = false;
     }
+
+    d_null_symbol_cnt = 0;
   }
 
   char *out_flag = 0;
   if(output_items.size() == 2)
     out_flag = (char *) output_items[1];
   
+/* testing the co-sender scenario - in this case, the co-sender blocks until it receives a trigger
+     from the lead sender */
+#ifdef TRIGGER_ON_ETHERNET
+   // TODO: need to make it more robust! //
+  if(d_trigger_sock == -1)
+      create_trigger_sock();
+
+   int trigger_len = sizeof(TRIGGER_MSG_TYPE);
+   memset(d_trigger_buf, 0, trigger_len);
+   int nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_PEEK);
+   if(nbytes >= 0) {
+	if(nbytes == trigger_len) {
+	    nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, 0);
+	}
+	else {
+	    nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_WAITALL);	
+	}
+	printf(" $$$$$$$$$$$$$$$$$$$$$$$$$$$$$ received nbytes: %d as TRIGGER $$$$$$$$$$$$$$$$$$$$$\n", nbytes);
+	fflush(stdout);
+
+	TRIGGER_MSG_TYPE trigger_msg;
+	memcpy(&trigger_msg, d_trigger_buf, trigger_len);
+	printf("TRIGGER details, batch: %d, flow: %d, lead sender: %d\n", trigger_msg.batch, trigger_msg.flow_id, trigger_msg.src_id); fflush(stdout);
+   } else {
+	printf("TRIGGER: recv needs to be blocking!! \n"); fflush(stdout);
+	assert(false);
+   }
+#endif
 
   /* single OFDM symbol: Initialize all bins to 0 to set unused carriers */
   memset(out, 0, d_fft_length*sizeof(gr_complex));
@@ -291,8 +333,19 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
   else {
 	/* data */
      if(d_msg_offset[0] < HEADERBYTELEN) {
-        generateOFDMSymbol(out, HEADERBYTELEN);				// only modulate the hdr for DATA
-	//printf("hdr------ offset: %d\n", d_msg_offset[0]); fflush(stdout);
+        if(!d_time_tag) {
+           make_time_tag(d_msg[0]);
+           d_time_tag = true;
+        }
+
+	if(d_null_symbol_cnt < NULL_SYMBOL_COUNT) {
+	   d_null_symbol_cnt++;
+	}
+	else {	
+	   assert(d_null_symbol_cnt == NULL_SYMBOL_COUNT);
+           generateOFDMSymbol(out, HEADERBYTELEN);				// only modulate the hdr for DATA
+	   //printf("hdr------ offset: %d\n", d_msg_offset[0]); fflush(stdout);
+	}
      } 
      else {
 	/* header has already been modulated, just send the payload *symbols* as it is */
@@ -307,6 +360,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
       d_msg[0].reset();
       printf("num_ofdm_symbols: %d\n", d_ofdm_index); fflush(stdout); 
       d_pending_flag = 2;						// marks the last OFDM data symbol (for burst tagger trigger) //
+      d_time_tag = false;
   }
 
   if (out_flag)
@@ -443,11 +497,11 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
     int nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), MSG_PEEK);
     if(nbytes >= 0) {
        if(nbytes == ACK_HEADERBYTELEN) {
-    	  nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), 0);
-	  fflush(stdout);
+	 nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), 0);
+	 fflush(stdout);
        }
        else {
- 	  nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), MSG_WAITALL); 
+	  nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), MSG_WAITALL); 
        }
        printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ received nbytes: %d as ACK @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n", nbytes);
 
@@ -503,6 +557,8 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	    d_msg[b] = d_msgq->delete_head();		// dequeue the pkts from the queue //
 	    assert(d_msg[b]->length() > 0);	
 	    d_packetlen = d_msg[b]->length();		// assume: all pkts in batch are of same length //
+	    d_num_ofdm_symbols = ceil(((float) ((d_packetlen) * 8))/(d_data_carriers.size() * d_nbits)); // include 'x55'
+	    printf("d_num_ofdm_symbols: %d\n", d_num_ofdm_symbols); fflush(stdout);
 	}
 
 	initializeBatchParams();
@@ -527,9 +583,9 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
          uint64_t timeNow = (now.tv_sec * 1e6) + now.tv_usec;
          uint64_t interval = timeNow - d_time_pkt_sent;
 
-         if(interval > 1e4) {
+	 if(interval > 1e4) {
 	     printf("timeNow: %llu, d_time_pkt_sent: %llu, interval: %llu\n", timeNow, d_time_pkt_sent, interval); fflush(stdout);
-             break;
+	     break;
 	 }
      }
      d_modulated = false;
@@ -539,24 +595,68 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   // if start of a packet: then add a header and whiten the entire packet //
   if(d_pending_flag == 1)
   {
-      printf("d_packets_sent_for_batch: %d, d_batch_to_send: %d, d_batch_q_num: %d\n", d_packets_sent_for_batch, d_batch_to_send, d_batch_q_num); fflush(stdout);
+     printf("d_packets_sent_for_batch: %d, d_batch_to_send: %d, d_batch_q_num: %d\n", d_packets_sent_for_batch, d_batch_to_send, d_batch_q_num); fflush(stdout);
 
-      fflush(stdout);
-      if(((HEADERBYTELEN*8) % d_data_carriers.size()) != 0) {	// assuming bpsk //
-	 printf("HEADERBYTELEN: %d, size: %d\n", HEADERBYTELEN, d_data_carriers.size()); fflush(stdout);
-	 assert(false);
-      }
+     fflush(stdout);
+     if(((HEADERBYTELEN*8) % d_data_carriers.size()) != 0) {	// assuming bpsk //
+	  printf("HEADERBYTELEN: %d, size: %d\n", HEADERBYTELEN, d_data_carriers.size()); fflush(stdout);
+	  assert(false);
+     }
 
-      makeHeader();
-      initHeaderParams();
+     makeHeader();
+     initHeaderParams();
+
+
+	  /* testing the co-sender scenario - in this case, the co-sender blocks until it receives a trigger from the lead sender */
+#ifdef TRIGGER_ON_ETHERNET
+	  // TODO: need to make it more robust! //
+	  if(d_trigger_sock == -1)
+		  create_trigger_sock();
+
+	  int trigger_len = sizeof(TRIGGER_MSG_TYPE);
+	  memset(d_trigger_buf, 0, trigger_len);
+	  int nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_PEEK);
+	  if(nbytes >= 0) {
+		  if(nbytes == trigger_len) {
+			  nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, 0);
+		  }
+		  else {
+			  nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_WAITALL);
+		  }
+		  d_trigger_rx_time = d_usrp->get_time_now();
+		  printf(" $$$$$$$$$$$$$$$$$$$$$$$$$$$$$ received nbytes: %d as TRIGGER $$$$$$$$$$$$$$$$$$$$$\n", nbytes);
+		  fflush(stdout);
+
+		  TRIGGER_MSG_TYPE trigger_msg;
+		  memcpy(&trigger_msg, d_trigger_buf, trigger_len);
+		  printf("TRIGGER details, batch: %d, flow: %d, lead sender: %d\n", trigger_msg.batch, trigger_msg.flow_id, trigger_msg.src_id); fflush(stdout);
+	  } else {
+		  printf("TRIGGER: recv needs to be blocking!! \n"); fflush(stdout);
+		  assert(false);
+	  }
+	  d_time_tag = false;
+#endif
   }
 
   // the final result will be in 'out' //
   gr_complex *out = (gr_complex *)output_items[0];
   memset(out, 0, sizeof(gr_complex) * d_fft_length);
 
-  if(d_hdr_byte_offset < HEADERBYTELEN)
+  if(d_hdr_byte_offset < HEADERBYTELEN) {
+#ifdef TRIGGER_ON_ETHERNET
+      if(!d_time_tag) {
+           make_time_tag1();
+           d_time_tag = true;
+        }
+#endif
       generateOFDMSymbolHeader(out); 					// send the header symbols out first //
+	  if(d_hdr_byte_offset == HEADERBYTELEN && 0) {
+		  /* to avoid sending any payload!!! --- JUST FOR TESTING REMOVEEEEEEEEE */
+		  d_modulated = true; 
+		  d_pending_flag = 2;
+		  d_packets_sent_for_batch += 1; 
+	  }
+  }
   else
   {
        // offline analysis //
@@ -608,16 +708,16 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 
       if(d_modulated)
       {
-	   d_pending_flag = 2;                                             // marks the last OFDM data symbol (for burst tagger trigger) //
-           d_packets_sent_for_batch += 1;
-           //log();             // for offline analysis //
-           assert(d_ofdm_symbol_index == d_num_ofdm_symbols);
-           d_ofdm_symbol_index = 0;
+	  d_pending_flag = 2;                                             // marks the last OFDM data symbol (for burst tagger trigger) //
+	  d_packets_sent_for_batch += 1;
+	  //log();             // for offline analysis //
+	  assert(d_ofdm_symbol_index == d_num_ofdm_symbols);
+	  d_ofdm_symbol_index = 0;
 
-           struct timeval now;
-           gettimeofday(&now, 0);
-           d_time_pkt_sent = (now.tv_sec * 1e6) + now.tv_usec;
-           printf("d_time_pkt_sent: %llu\n", d_time_pkt_sent); fflush(stdout);
+	  struct timeval now;
+	  gettimeofday(&now, 0);
+	  d_time_pkt_sent = (now.tv_sec * 1e6) + now.tv_usec;
+	  printf("d_time_pkt_sent: %llu\n", d_time_pkt_sent); fflush(stdout);
       }
 	// etc end //
   }
@@ -1040,13 +1140,13 @@ digital_ofdm_mapper_bcv::makeHeader()
    d_header.inno_pkts = d_batch_size;
    d_header.factor = 1.0/d_batch_size;
 
-   d_header.lead_sender = 1;
+   d_header.lead_sender = 0;
    d_header.src_id = d_id;         //TODO: remove the hardcoding
-   d_header.prev_hop_id = 1;
+   d_header.prev_hop_id = d_id;
 
    d_header.packetlen = d_packetlen - 1;		// -1 for '55' appended (ref ofdm_packet_utils)
    d_header.batch_number = d_batch_to_send;
-   d_header.nsenders = 2;				//TODO: remove hardcoding
+   d_header.nsenders = 1;				//TODO: remove hardcoding
    d_header.pkt_type = DATA_TYPE;
   
    d_header.pkt_num = d_pkt_num++;
@@ -1170,9 +1270,6 @@ digital_ofdm_mapper_bcv::open_log()
   }
   */
    // initialize the symbol vector for logging //
-   d_num_ofdm_symbols = ceil(((float) ((d_packetlen) * 8))/(d_data_carriers.size() * d_nbits));	// include 'x55'
-   printf("d_num_ofdm_symbols: %d\n", d_num_ofdm_symbols); fflush(stdout);
-
    for(unsigned int i = 0; i < d_batch_size; i++) {
      gr_complex *symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_num_ofdm_symbols * d_occupied_carriers);
      d_log_symbols.push_back(symbols);
@@ -1248,4 +1345,107 @@ digital_ofdm_mapper_bcv::isACKSocketOpen() {
     return 0;
 
   return 1;
+}
+
+/* in the forwarding mode */
+void
+digital_ofdm_mapper_bcv::make_time_tag(gr_message_sptr msg) {
+  assert(!d_time_tag);
+  long _time_secs = msg->preamble_sec();
+  double _time_fracs = msg->preamble_frac_sec();
+
+  assert(msg->timestamp_valid());
+
+  const pmt::pmt_t key = pmt::pmt_string_to_symbol("tx_time");
+  const pmt::pmt_t value = pmt::pmt_make_tuple(
+		  pmt::pmt_from_uint64(_time_secs),
+		  pmt::pmt_from_double(_time_fracs)
+		  );
+  const pmt::pmt_t srcid = pmt::pmt_string_to_symbol(this->name());
+  add_item_tag(1/*chan0*/, nitems_written(1), key, value, srcid);
+  printf("(MAPPER) make_time_tag, at offset: %llu\n", nitems_written(1)); fflush(stdout);
+}
+
+/* trigger on the ethernet */
+inline void // client /
+digital_ofdm_mapper_bcv::create_trigger_sock() {
+  int sockfd;
+  struct sockaddr_in dest;
+  printf("ofdm_mapper:: create_trigger_sock\n"); fflush(stdout);
+
+  /* create socket */
+  d_trigger_sock = socket(PF_INET, SOCK_STREAM, 0);
+  if(d_trigger_sock != -1) {
+    printf("@ TRIGGER socket created at the destination SUCCESS\n"); fflush(stdout);
+  } else {
+    assert(false);
+  }
+
+  /* initialize value in dest */
+  bzero(&dest, sizeof(struct sockaddr_in));
+  dest.sin_family = PF_INET;
+  dest.sin_port = htons(d_trigger_src_sock_port);
+  dest.sin_addr.s_addr = inet_addr(d_trigger_src_ip_addr);
+  /* Connecting to server */
+  int ret = connect(d_trigger_sock, (struct sockaddr*)&dest, sizeof(struct sockaddr_in));
+  assert(ret == 0);
+
+  d_trigger_buf = (char*) malloc(sizeof(TRIGGER_MSG_TYPE));
+
+  test_socket();
+}
+
+inline void
+digital_ofdm_mapper_bcv::test_socket() {
+  printf("test_socket on ethernet\n"); fflush(stdout);
+  int count = 5;
+
+  while(count != 0) {
+		  char msg_buf[3]; 
+		  int nbytes = recv(d_trigger_sock, msg_buf, sizeof(msg_buf), 0);
+		  if(nbytes > 0) {
+				  printf("(MAPPER): test_socket received request %d bytes\n", nbytes); fflush(stdout);
+
+				  char reply_buf[] = "R";
+				  if (send(d_trigger_sock, reply_buf, sizeof(reply_buf), 0) < 0) {
+						  printf("(MAPPER): test_socket reply failed\n"); fflush(stdout);
+				  }
+		  }
+  }
+  printf("test_socket done\n"); fflush(stdout);
+}
+
+/* in the work_source() mode to just test if trigger on ethernet works */
+inline void
+digital_ofdm_mapper_bcv::make_time_tag1() {
+  assert(!d_time_tag);
+
+  /* calculate the time reqd to send the preamble+header */
+  int decimation = 128;
+  double rate = 1.0/decimation;
+ 
+  int num_ofdm_symbols_to_wait = 117; //35 + 120;
+
+  int cp_length = d_fft_length/4;
+  uint32_t num_samples = num_ofdm_symbols_to_wait * (d_fft_length+cp_length);
+  double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
+  double duration = num_samples * time_per_sample;
+
+  uint64_t sync_secs = (uint64_t) duration;
+  double sync_frac_of_secs = duration - (uint64_t) duration;
+
+  uhd::time_spec_t c_time = d_usrp->get_time_now();
+  //uhd::time_spec_t out_time = c_time + uhd::time_spec_t(sync_secs, sync_frac_of_secs);
+  uhd::time_spec_t out_time = d_trigger_rx_time + uhd::time_spec_t(sync_secs, sync_frac_of_secs);
+
+  printf("timestamp: trigger_rx (%llu, %f), curr_secs: %llu, curr_fracs: %f, out_secs: %llu, out_fracs: %f\n", (uint64_t) d_trigger_rx_time.get_full_secs(), d_trigger_rx_time.get_frac_secs(), (uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), (uint64_t) out_time.get_full_secs(), out_time.get_frac_secs()); fflush(stdout);
+
+  const pmt::pmt_t key = pmt::pmt_string_to_symbol("tx_time");
+  const pmt::pmt_t value = pmt::pmt_make_tuple(
+                  pmt::pmt_from_uint64((uint64_t) out_time.get_full_secs()),
+                  pmt::pmt_from_double(out_time.get_frac_secs())
+                  );
+  const pmt::pmt_t srcid = pmt::pmt_string_to_symbol(this->name());
+  add_item_tag(1/*chan0*/, nitems_written(1), key, value, srcid);
+  printf("(MAPPER) make_time_tag, at offset: %llu\n", nitems_written(1)); fflush(stdout);
 }

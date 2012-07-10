@@ -38,6 +38,8 @@
 #include <stdio.h>
 #include <deque>
 
+#include <uhd/usrp/multi_usrp.hpp>
+
 //#define USE_PILOT 0
 #ifdef HAVE_IO_H
 #include <io.h>
@@ -531,15 +533,16 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   unsigned int d_nsenders;
   unsigned char d_lead_sender;
   unsigned int d_pkt_num;
-  unsigned char d_flow;
+  //unsigned char d_flow; 
+  int d_flow;
   unsigned int d_pkt_type;
   unsigned int d_prevLinkId;
 
   gr_complex *d_in_estimates;		// will be updated only if preamble is not detected in between a pkt! //
 
   /* fwd/dst identification */
-  bool d_fwd, d_dst;
-  bool amDest_or_Fwder();  
+  bool d_fwd, d_dst, d_neighbor;
+  bool shouldProcess();  
   bool isMyPacket();
 
   /* internal store, stores the innovative packets seen for this flow */
@@ -612,9 +615,9 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   /* apurv end */
 
   /* fwder operations */
-  void makePacket(); 		
+  void makePacket(bool sync_send=false); 		
   bool isLeadSender();
-  void encodePktToFwd(CreditInfo *creditInfo);
+  void encodePktToFwd(CreditInfo *creditInfo, bool sync_send=false);
   
 
   /* credits */
@@ -746,6 +749,18 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   void test_decode_signal(gr_complex *in, vector<gr_complex*> interpolated_coeffs);
   bool crc_check(std::string msg);
+
+  /* stream tags, timestamping, etc */
+  FILE *d_fp_sync_symbols;
+  bool d_sync_file_opened;
+  gr_tag_t d_sync_tag;
+  void set_msg_timestamp(gr_message_sptr msg);
+  void test_timestamp(int);
+  void test_sync_send(CreditInfo *creditInfo);
+
+  /* usrp instance */
+  uhd::usrp::multi_usrp::sptr d_usrp;
+
 };
 
 

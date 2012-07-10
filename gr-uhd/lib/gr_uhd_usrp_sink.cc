@@ -298,6 +298,9 @@ public:
         get_tags_in_range(_tags, 0, samp0_count, samp0_count + ninput_items);
         if (not _tags.empty()) this->tag_work(ninput_items);
 
+        uint64_t o_sync_secs = (uint64_t) _metadata.time_spec.get_full_secs();
+        double o_sync_frac_of_secs = _metadata.time_spec.get_frac_secs();
+
         #ifdef GR_UHD_USE_STREAM_API
         //send all ninput_items with metadata
         const size_t num_sent = _tx_stream->send(
@@ -312,7 +315,15 @@ public:
 
         //increment the timespec by the number of samples sent
         _metadata.time_spec += uhd::time_spec_t(0, num_sent, _sample_rate);
-	printf("uhd_usrp_sink(tx) :: num_sent:::::::: %d, sob: %d, eob: %d\n", num_sent, _metadata.start_of_burst, _metadata.end_of_burst); fflush(stdout);
+        uint64_t sync_secs = (uint64_t) _metadata.time_spec.get_full_secs();
+        double sync_frac_of_secs = _metadata.time_spec.get_frac_secs();
+
+        /* current time */
+        uhd::time_spec_t c_time = get_time_now();
+        uint64_t c_sync_secs = (uint64_t) c_time.get_full_secs();
+        double c_sync_frac_of_secs = c_time.get_frac_secs();
+
+	printf("uhd_usrp_sink(tx) :: num_sent:::::::: %d, ninput_items: %d, sob: %d, eob: %d, o_sync_sec: %llu, o_sync_frac: %f, sync_sec: %llu, sync_frac: %f, c_sync_sec: %llu, c_sync_frac: %f\n", num_sent, ninput_items, _metadata.start_of_burst, _metadata.end_of_burst, o_sync_secs, o_sync_frac_of_secs, sync_secs, sync_frac_of_secs, c_sync_secs, c_sync_frac_of_secs); fflush(stdout);
         return num_sent;
     }
 
@@ -320,66 +331,70 @@ public:
  * Tag Work
  **********************************************************************/
     inline void tag_work(int &ninput_items){
-        //the for loop below assumes tags sorted by count low -> high
-        std::sort(_tags.begin(), _tags.end(), gr_tag_t::offset_compare);
+	//the for loop below assumes tags sorted by count low -> high
+	std::sort(_tags.begin(), _tags.end(), gr_tag_t::offset_compare);
 
-        //extract absolute sample counts
-        const gr_tag_t &tag0 = _tags.front();
-        const uint64_t tag0_count = tag0.offset;
-        const uint64_t samp0_count = this->nitems_read(0);
+	//extract absolute sample counts
+	const gr_tag_t &tag0 = _tags.front();
+	const uint64_t tag0_count = tag0.offset;
+	const uint64_t samp0_count = this->nitems_read(0);
 
 	printf("uhd_usrp_sink(tx) :: tag_work called, num_tags: %d, nitems_read: %ld, offset: %ld\n", _tags.size(), samp0_count, tag0_count); fflush(stdout);
-        //only transmit nsamples from 0 to the first tag
-        //this ensures that the next work starts on a tag
-        if (samp0_count != tag0_count){
-            ninput_items = tag0_count - samp0_count;
+	//only transmit nsamples from 0 to the first tag
+	//this ensures that the next work starts on a tag
+	if (samp0_count != tag0_count){
+	    ninput_items = tag0_count - samp0_count;
 	    printf("uhd_usrp_sink(tx) :: ninput_items: %ld\n", ninput_items); fflush(stdout);
-            return;
-        }
+	    return;
+	}
 
-        //time will not be set unless a time tag is found
-        _metadata.has_time_spec = false;
+	//time will not be set unless a time tag is found
+	_metadata.has_time_spec = false;
 
-        //process all of the tags found with the same count as tag0
-        BOOST_FOREACH(const gr_tag_t &my_tag, _tags){
-            const uint64_t my_tag_count = my_tag.offset;
-            const pmt::pmt_t &key = my_tag.key;
-            const pmt::pmt_t &value = my_tag.value;
+	//process all of the tags found with the same count as tag0
+	BOOST_FOREACH(const gr_tag_t &my_tag, _tags){
+	    const uint64_t my_tag_count = my_tag.offset;
+	    const pmt::pmt_t &key = my_tag.key;
+	    const pmt::pmt_t &value = my_tag.value;
 
-            //determine how many samples to send...
-            //from zero until the next tag or end of work
-            if (my_tag_count != tag0_count){
-                ninput_items = my_tag_count - samp0_count;
+	    //determine how many samples to send...
+	    //from zero until the next tag or end of work
+	    if (my_tag_count != tag0_count){
+		ninput_items = my_tag_count - samp0_count;
 		printf("uhd_usrp_sink(tx) :: my_tag_count: %ld, ninput_items: %ld\n", my_tag_count, ninput_items); fflush(stdout);
-                break;
-            }
+		break;
+	    }
 
-            //handle end of burst with a mini end of burst packet
-            else if (pmt::pmt_equal(key, EOB_KEY)){
-                _metadata.end_of_burst = pmt::pmt_to_bool(value);
-		printf("uhd_usrp_sink(tx) :: EOB_KEY\n"); fflush(stdout);
-                ninput_items = 1;
-                return;
-            }
+	    //handle end of burst with a mini end of burst packet
+	    else if (pmt::pmt_equal(key, EOB_KEY)){
+		    _metadata.end_of_burst = pmt::pmt_to_bool(value);
+		    printf("uhd_usrp_sink(tx) :: EOB_KEY\n"); fflush(stdout);
+		    ninput_items = 1;
+		    return;
+	    }
 
-            //set the start of burst flag in the metadata
-            else if (pmt::pmt_equal(key, SOB_KEY)){
-		//uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS);
-		//_dev->issue_stream_cmd(stream_cmd);
-                _metadata.start_of_burst = pmt::pmt_to_bool(value);
-		printf("uhd_usrp_sink(tx) :: SOB_KEY\n"); fflush(stdout); 
-            }
+	    //set the start of burst flag in the metadata
+	    else if (pmt::pmt_equal(key, SOB_KEY)){
+		    _metadata.start_of_burst = pmt::pmt_to_bool(value);
+		    printf("uhd_usrp_sink(tx) :: SOB_KEY, offset: %llu\n", my_tag_count); fflush(stdout); 
+	    }
 
-            //set the time specification in the metadata
-            else if (pmt::pmt_equal(key, TIME_KEY)){
-                _metadata.has_time_spec = true;
-                _metadata.time_spec = uhd::time_spec_t(
-                    pmt::pmt_to_uint64(pmt_tuple_ref(value, 0)),
-                    pmt::pmt_to_double(pmt_tuple_ref(value, 1))
-                );
-		printf("uhd_usrp_sink(tx) :: TIME_KEY\n"); fflush(stdout);
-            }
-        }
+	    //set the time specification in the metadata
+	    else if (pmt::pmt_equal(key, TIME_KEY)){
+		    _metadata.has_time_spec = true;
+		    _metadata.time_spec = uhd::time_spec_t(
+				    pmt::pmt_to_uint64(pmt_tuple_ref(value, 0)),
+				    pmt::pmt_to_double(pmt_tuple_ref(value, 1)));
+
+		    uhd::time_spec_t c_time = get_time_now();
+		    uhd::time_spec_t m_time = _metadata.time_spec;
+
+		    uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+		    double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+		    printf("uhd_usrp_sink(tx) :: TIME_KEY, offset: %llu, sync_secs: %llu, frac_sec: %f, curr_full_sec: %lld, curr_frac_sec: %f, m_full_sec: %lld, m_frac_sec: %f\n", my_tag_count, sync_secs, sync_frac_of_secs, (long long) c_time.get_full_secs(), c_time.get_frac_secs(), (long long) m_time.get_full_secs(), m_time.get_frac_secs()); fflush(stdout);
+		    /* apurv++ end */
+	    }
+	}
     }
 
     //Send an empty start-of-burst packet to begin streaming.

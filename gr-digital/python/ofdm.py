@@ -40,13 +40,13 @@ class ofdm_mod(gr.hier_block2):
     Send packets by calling send_pkt
     """
     def __init__(self, options, msgq_limit=2, pad_for_usrp=True):
-        """
+	"""
 	Hierarchical block for sending packets
 
-        Packets to be sent are enqueued by calling send_pkt.
-        The output is the complex modulated signal at baseband.
+	Packets to be sent are enqueued by calling send_pkt.
+	The output is the complex modulated signal at baseband.
 
-        @param options: pass modulation options from higher layers (fft length, occupied tones, etc.)
+	@param options: pass modulation options from higher layers (fft length, occupied tones, etc.)
         @param msgq_limit: maximum number of messages in message queue
         @type msgq_limit: int
         @param pad_for_usrp: If true, packets are padded such that they end up a multiple of 128 samples
@@ -67,7 +67,7 @@ class ofdm_mod(gr.hier_block2):
         self._fec_n = options.fec_n
         self._fec_k = options.fec_k
 	self._batch_size = options.batch_size
- 	self._encode_flag = options.encode_flag
+	self._encode_flag = options.encode_flag
 	self._ack = options.ack
 
         if(self._fec_n < self._fec_k):
@@ -127,7 +127,7 @@ class ofdm_mod(gr.hier_block2):
         self.burst_tagger = gr.burst_tagger(gr.sizeof_gr_complex)					# 1 sample
         #self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_short, "burst_trigger_tx.dat"))
 	
-	use_burst_tagger = 0 
+	use_burst_tagger = 1
 
         manual = options.tx_manual
         if manual == 0:
@@ -135,19 +135,19 @@ class ofdm_mod(gr.hier_block2):
            self.connect((self._pkt_input, 0), (self.preambles, 0))
            self.connect((self._pkt_input, 1), (self.preambles, 1))
 
-	   if use_burst_tagger == 0:
+           if use_burst_tagger == 0:
 	       self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
 	   else:
 	       # some burst tagger connections #
 	       self.connect(self.preambles, self.ifft, self.cp_adder, self.burst_tagger, self.scale, self)
 	       self.connect((self.preambles, 1), (self.cp_adder, 1), (self.burst_tagger,1))   # Connect Apurv's trigger data to the burst tagger
-	       self.connect((self.cp_adder, 1), gr.file_sink(gr.sizeof_short, "burst_trigger_tx.dat"))
+	       #self.connect((self.cp_adder, 1), gr.file_sink(gr.sizeof_short, "burst_trigger_tx.dat"))
 
            # apurv++: log the transmitted data in the time domain #
            # self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
            # self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
-	   if options.src == 0:
-              self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"))
+	   #if options.src == 0:
+              #self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"))
 	      #self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 
         elif manual == 1:
@@ -167,7 +167,7 @@ class ofdm_mod(gr.hier_block2):
             self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex,
                                                      "ofdm_cp_adder_c.dat"))
 
-	self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex, "ofdm_cp_adder_c.dat"))
+	#self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex, "ofdm_cp_adder_c.dat"))
 
     def send_pkt(self, payload, type=0, eof=False):
         """
@@ -176,10 +176,9 @@ class ofdm_mod(gr.hier_block2):
         @param payload: data to send
         @type payload: string
         """
+	print "send_pkt"
         if eof:
             msg = gr.message(1) # tell self._pkt_input we're not sending any more packets
-	
-		
         elif (type == 0):
 	    ############# print "original_payload =", string_to_hex_list(payload)
 	    pkt = ofdm_packet_utils.make_packet(payload, 1, self._bits_per_symbol, self._fec_n, self._fec_k, self._pad_for_usrp, whitening=True)
@@ -188,9 +187,9 @@ class ofdm_mod(gr.hier_block2):
             msg = gr.message_from_string(pkt)
 	
 	if type == 0:
-	    if self._ack == 1:
-	        while self._pkt_input.isACKSocketOpen() == 0:
-		    continue
+       	    if self._ack == 1:
+	       	while self._pkt_input.isACKSocketOpen() == 0:
+		      continue
             self._pkt_input.msgq().insert_tail(msg)				# for source! 	(msg needs to be modulated in mapper)
 	else:
    	    self._pkt_input.msgq().insert_tail(payload)			# for forwarder! (payload is already modulated)
@@ -216,13 +215,13 @@ class ofdm_mod(gr.hier_block2):
         expert.add_option("", "--src", type="intx", default=0,
                           help="puts the node in SRC mode if 1 [default=%default]")
 	expert.add_option("", "--batch-size", type="intx", default=1,
-                          help="sets the batch size [default=%default]")
+			  help="sets the batch size [default=%default]")
 	expert.add_option("", "--encode-flag", type="intx", default=1,
-                          help="encodes the symbols (if true) [default=%default]")
+			  help="encodes the symbols (if true) [default=%default]")
 	expert.add_option("", "--id", type="intx", default=1,
-                          help="set the nodeId [default=%default]")
-        expert.add_option("", "--tx-manual", type="intx", default=0,
-                          help="refer ofdm.py (mod) param [default=%default]")
+			  help="set the nodeId [default=%default]")
+	expert.add_option("", "--tx-manual", type="intx", default=0,
+			  help="refer ofdm.py (mod) param [default=%default]")
 	expert.add_option("", "--ack", type="intx", default=0,
 			  help="enables ACK on ethernet [default=%default]")
 	# apurv++ end #
@@ -265,7 +264,7 @@ class ofdm_demod(gr.hier_block2):
         @param options: pass modulation options from higher layers (fft length, occupied tones, etc.)
         @param callback:  function of two args: ok, payload
         @type callback: ok: bool; payload: string
-	"""
+		"""
 	gr.hier_block2.__init__(self, "ofdm_demod",
 				gr.io_signature(1, 1, gr.sizeof_gr_complex), # Input signature
 				gr.io_signature(1, 1, gr.sizeof_gr_complex)) # Output signature
@@ -308,9 +307,7 @@ class ofdm_demod(gr.hier_block2):
         symbol_length = self._fft_length + self._cp_length
         self.ofdm_recv = ofdm_receiver(self._fft_length, self._cp_length,
                                        self._occupied_tones, self._snr, preambles,
-				       self._threshold,
-				       options,
-                                       options.log)
+				       self._threshold, options, options.log)
 
         mods = {"bpsk": 2, "qpsk": 4, "8psk": 8, "qam8": 8, "qam16": 16, "qam64": 64, "qam256": 256}
         arity = mods[self._modulation]
@@ -336,8 +333,7 @@ class ofdm_demod(gr.hier_block2):
         self.ofdm_demod = digital_swig.ofdm_frame_sink(rotated_const, range(arity),
                                              self._rcvd_pktq, self._out_pktq,
                                              self._occupied_tones, self._fft_length,
-                                             phgain, frgain,
-					     self._id,
+                                             phgain, frgain, self._id,
 					     self._batch_size, self._decode_flag, 
 					     options.replay)
 
@@ -345,14 +341,14 @@ class ofdm_demod(gr.hier_block2):
 	
 	manual = options.rx_manual								# apurv++: manual testing flag
 	if manual==0:
-           self.connect((self.ofdm_recv, 0), (self.ofdm_demod, 0))
-           self.connect((self.ofdm_recv, 1), (self.ofdm_demod, 1))
-   	   self.connect((self.ofdm_recv, 2), (self.ofdm_demod, 2))			# apurv++, hestimates #
-	   #self.connect((self.ofdm_recv, 3), (self.ofdm_demod, 3))			# apurv++, for offline analysis (from sampler)
-	   ##self.connect((self.ofdm_recv, 3), gr.null_sink(gr.sizeof_gr_complex*self._fft_length))
+           	self.connect((self.ofdm_recv, 0), (self.ofdm_demod, 0))
+           	self.connect((self.ofdm_recv, 1), (self.ofdm_demod, 1))
+   	   	self.connect((self.ofdm_recv, 2), (self.ofdm_demod, 2))			# apurv++, hestimates #
+		#self.connect((self.ofdm_recv, 3), (self.ofdm_demod, 3))			# apurv++, for offline analysis (from sampler)
+		##self.connect((self.ofdm_recv, 3), gr.null_sink(gr.sizeof_gr_complex*self._fft_length))
 	elif manual==1: 
-           self.connect(gr.file_source(gr.sizeof_gr_complex*self._occupied_tones, "out-tx.dat"), (self.ofdm_demod, 0))
-           self.connect(gr.file_source(gr.sizeof_char, "out-timing.dat"), (self.ofdm_demod, 1))
+           	self.connect(gr.file_source(gr.sizeof_gr_complex*self._occupied_tones, "out-tx.dat"), (self.ofdm_demod, 0))
+           	self.connect(gr.file_source(gr.sizeof_char, "out-timing.dat"), (self.ofdm_demod, 1))
 
         # added output signature to work around bug, though it might not be a bad thing to export, anyway #
         self.connect(self.ofdm_recv.chan_filt, self)
@@ -385,7 +381,7 @@ class ofdm_demod(gr.hier_block2):
         expert.add_option("", "--cp-length", type="intx", default=128,
                           help="set the number of bits in the cyclic prefix [default=%default]")
 	expert.add_option("", "--snr", type="float", default=30.0,
-                          help="SNR estimate [default=%default]")
+                         help="SNR estimate [default=%default]")
 
         # apurv++ adding options #
         expert.add_option("", "--fec-n", type="intx", default=0,
@@ -422,7 +418,7 @@ class ofdm_demod(gr.hier_block2):
 
     def make_packet(self):
 	#print "ofdm.py  get_pkt_fwd"
- 	self.ofdm_demod.makePacket()
+ 	#self.ofdm_demod.makePacket()
 	print "ofdm.py make_packet return"
 
     def send_ack(self, flow, batch):
@@ -440,10 +436,10 @@ class ofdm_demod(gr.hier_block2):
         print "CP length:       %3d"   % (self._cp_length)
 	
 	print "Node Id:         %3d"   % (self._id)
-        print "Batch size:      %3d"   % (self._batch_size)
-        print "Decode symbols:  %3d"   % (self._decode_flag)
+	print "Batch size:      %3d"   % (self._batch_size)
+	print "Decode symbols:  %3d"   % (self._decode_flag)
 	print "Correlation threshold: %f" % (self._threshold)
-        print "FEC: (",self._fec_n,",",self._fec_k,")"	
+	print "FEC: (",self._fec_n,",",self._fec_k,")"	
 	
 class _queue_watcher_thread(_threading.Thread):
     def __init__(self, rcvd_pktq, callback, fec_n=0, fec_k=0, bits_per_symbol=0, size=0):
@@ -467,15 +463,15 @@ class _queue_watcher_thread(_threading.Thread):
 	    ########## receiver sink #########
 	    if msg.type() == 0:
 		print "here!"
-                #ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string())                  
+           	#ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string())                  
 		ok, payload = ofdm_packet_utils.unmake_packet(msg.to_string(), self._fec_n, self._fec_k, self._bits_per_symbol, self._pktLen)
-                if self.callback:
+            	if self.callback:
                    #self.callback(ok, payload)
 		   self.callback(ok, payload, msg.timestamp_valid(), msg.preamble_sec(), msg.preamble_frac_sec())	    
 
-	    ######### for sending DATA/ACK ##########
+	    ######## for sending DATA/ACK ##########
 	    elif (msg.type() == 1 or msg.type() == 2):
-		print "fwd_callback fired!"
+		#print "fwd_callback fired!"
 		if self.callback:
 		   self.callback(msg)	
 

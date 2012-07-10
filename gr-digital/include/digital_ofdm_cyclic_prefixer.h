@@ -54,6 +54,8 @@ class DIGITAL_API digital_ofdm_cyclic_prefixer : public gr_sync_interpolator
  private:
   size_t d_input_size;
   size_t d_output_size;
+
+  void test_timestamp(int output_items, short trigger);
 };
 
 #endif /* INCLUDED_DIGITAL_OFDM_CYCLIC_PREFIXER_H */

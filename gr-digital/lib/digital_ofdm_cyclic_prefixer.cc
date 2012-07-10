@@ -93,6 +93,30 @@ digital_ofdm_cyclic_prefixer::work (int noutput_items,
     out_trigger[d_output_size-1] = 0;
   }
   /* apurv end */
- 
+
+  //test_timestamp(1, in_trigger[0]);			// enable to debug stream tags //
   return d_output_size;
+}
+
+/* just for debugging - to ensure the tags are being propgated correctly! */
+inline void
+digital_ofdm_cyclic_prefixer::test_timestamp(int output_items, short trigger) {
+  //printf("test_timestamp (CP), output_items: %d, nread1: %llu, trigger: %d\n", output_items, nitems_read(1), trigger); fflush(stdout);
+  unsigned int tag_port = 1;
+  std::vector<gr_tag_t> rx_tags;
+  const uint64_t nread1 = nitems_read(tag_port);
+  get_tags_in_range(rx_tags, tag_port, nread1, nread1+output_items, pmt::pmt_string_to_symbol("tx_time"));
+
+  if(rx_tags.size()>0) {
+     size_t t = rx_tags.size()-1;
+     uint64_t offset = rx_tags[t].offset;
+
+     printf("test_timestamp1 (CP):: found %d tags, offset: %llu, output_items: %d, nread1: %llu\n", rx_tags.size(), rx_tags[t].offset, output_items, nread1); fflush(stdout);
+
+     const pmt::pmt_t &value = rx_tags[t].value;
+     uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+     double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+  } else {
+     //std::cerr << "ACQ---- Header received, with no sync timestamp1?\n";
+  }
 }

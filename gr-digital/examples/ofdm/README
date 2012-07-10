@@ -73,3 +73,7 @@ Steps to run the 2-hop linear chain, A->B->C:
    - in ofdm.py::ofdm_mod - set manual=1,  
    
 
+
+6.20.2012
+---------
+Updated with a ton of options now

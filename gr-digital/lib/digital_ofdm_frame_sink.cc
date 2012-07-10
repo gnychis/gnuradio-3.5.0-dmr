@@ -628,6 +628,7 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
 	int carrier_index = 4*i + j - diff_left;
 #ifdef USE_PILOT			// check!
         // check if it should be pilot, else add as data //
+
         if(count == (start_offset + (pilot_index * pilot_gap))) {               // check notes below !
            d_pilot_carriers.push_back(carrier_index);
            pilot_index++;
@@ -709,7 +710,7 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   d_in_estimates = (gr_complex*) malloc(sizeof(gr_complex) * occupied_carriers);
   memset(d_in_estimates, 0, sizeof(gr_complex) * occupied_carriers);  
 
-  assert(open_hestimates_log());
+  //assert(open_hestimates_log());
 
   d_log_pkt = false;
   d_log_ofdm_index = 0;
@@ -791,6 +792,13 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   */
   d_fp_dfe_data = NULL; d_fp_dfe_pilot = NULL;
   d_log_dfe_data_open = false; d_log_dfe_pilot_open = false;
+
+  d_fp_sync_symbols = NULL;
+  d_sync_file_opened = false;
+
+  std::string arg("");
+  d_usrp = uhd::usrp::multi_usrp::make(arg);
+  d_flow = -1;
 }
 
 void
@@ -888,6 +896,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 
     if (sig[0]) {  // Found it, set up for header decode
       enter_have_sync();
+      test_timestamp(1);
       if(input_items.size() >= 4) {
 	  printf("log_pkt: true\n"); fflush(stdout);
 	    /* offline analysis start */
@@ -907,6 +916,12 @@ digital_ofdm_frame_sink::work (int noutput_items,
 
   case STATE_HAVE_SYNC:
     //printf("STATE_HAVE_SYNC\n"); fflush(stdout);
+    //test_timestamp(1);
+    if(d_flow != -1) {
+		makePacket(true);
+		enter_search(); 
+		break;
+    }
 
     /* apurv++: equalize hdr */
     if(use_estimates) {
@@ -946,7 +961,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
         if (header_ok()) {						 // full header received
 
 	  /* log hestimates */
-	  if(use_estimates) {
+	  if(use_estimates && 0) {
 	      int count = ftell(d_fp_hestimates);
 	      count = fwrite_unlocked(&in_estimates[0], sizeof(gr_complex), d_occupied_carriers, d_fp_hestimates);
    	  }
@@ -967,18 +982,16 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		break;
 	  }*/
 
-
 	  /* first pkt in session should always be from the lead sender */
 	  if(d_lead_sender == 1 && d_pkt_type == DATA_TYPE) 
 	  {
 		printf("lead sender: %d, senders: %d!\n", d_header.src_id, d_nsenders); fflush(stdout);
-	  	if(!amDest_or_Fwder()) {
-                   printf("neither destination nor forwarder, ignore!\n"); fflush(stdout);
-                   enter_search();
-                   break;
-	      	} 	
+		if(!shouldProcess()) {
+		   enter_search();
+		   break;
+		}
 
-	        assert(d_fwd || d_dst);	
+	        assert(d_fwd || d_dst || d_neighbor);
 
 	        /* stale batch ? */
         	if(d_header.batch_number < d_active_batch) {
@@ -994,6 +1007,15 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		}
 		else if(d_header.batch_number > d_active_batch)
   	  	    prepareForNewBatch();				// ensure the FlowInfo is in place
+
+                if(d_neighbor && 0) {
+                   assert(!(d_fwd || d_dst));
+
+                   // TODO: check if the credit allows, only then proceed - need to be made way more robust //
+                   makePacket(true);
+                   enter_search();                      // perhaps block the work thread instead for the tx time duration?? //
+                   break;
+                }
 
 		/* interested in pkt! create a new PktInfo for the flow */
 		d_pktInfo = createPktInfo();
@@ -1854,8 +1876,13 @@ digital_ofdm_frame_sink::open_sampler_log()
 }
 
 
+/* node can be either of 3: 
+   - final destination of the flow
+   - a forwarder
+   - a triggered forwarder
+*/
 bool
-digital_ofdm_frame_sink::amDest_or_Fwder() {
+digital_ofdm_frame_sink::shouldProcess() {
    //TODO: code up!
 
   if(d_id == d_header.dst_id) {
@@ -1865,7 +1892,8 @@ digital_ofdm_frame_sink::amDest_or_Fwder() {
   }
   else {
      printf("Forwarder! d_id: %d, d_header.dst_id: %d\n", d_id, d_header.dst_id); fflush(stdout);
-     d_fwd = true;
+     //d_fwd = true;
+     d_neighbor = true;
      d_dst = false;							
   }
 
@@ -2392,7 +2420,7 @@ digital_ofdm_frame_sink::generateCodeVector(MULTIHOP_HDR_TYPE &header)
 bool
 digital_ofdm_frame_sink::isLeadSender() {
    //TODO: decide!!!
-   return 1;
+   return 0;
 }
 
 /* handle the 'lead sender' case */
@@ -2618,8 +2646,9 @@ digital_ofdm_frame_sink::updateCredit()
 
 /* called from the outside directly by the wrapper, asking for any pkt to forward */
 void
-digital_ofdm_frame_sink::makePacket()
+digital_ofdm_frame_sink::makePacket(bool sync_send)
 {
+   printf("makePacket syncSend: %d\n", sync_send); fflush(stdout);
    /* check if any ACKs need to be sent out first */
    int count = d_ack_queue.size();
    if(count > 0) {// && num_acks_sent == 0) {				
@@ -2641,6 +2670,7 @@ digital_ofdm_frame_sink::makePacket()
    if(count > 0) {
 	for(int i = 0; i < count; i++) {
 	   creditInfo = d_creditInfoVector[i];
+	   found = true; break;					// REMOVE THIS -- ONLY FOR TESTING!!!!!!!!!!
 	   if(creditInfo->credit >= 1.0) {
 	 	found = true;
 		break;
@@ -2651,23 +2681,22 @@ digital_ofdm_frame_sink::makePacket()
    /* credit >= 1.0 found, packet needs to be created! */
    if(found){// && num_data_fwd == 0) {
 	assert(creditInfo);
-	//printf("sink::makePacket - DATA to send\n"); fflush(stdout);
+	printf("sink::makePacket - DATA to send, flow: %d\n", creditInfo->flowId); fflush(stdout);
 
         /* create the pkt now! */
         FlowInfo *flowInfo = getFlowInfo(false, creditInfo->flowId);
         assert(flowInfo);
 
-	encodePktToFwd(creditInfo);
+	if(sync_send) {
+	   test_sync_send(creditInfo);
+	}
+	else {
+	   encodePktToFwd(creditInfo, sync_send);
+	}
 	creditInfo->credit -= 1.0;				
 	//printf("sink::makePacket - DATA end\n"); fflush(stdout);
 	num_data_fwd++;
 	return;
-   }
-   else { 
-	/* insert a simple EOF msg indicating that no pkts to send for now 
-	gr_message_sptr out_msg = gr_make_message(2, 0, 0, 0);			// type = 2, ie EOF
-	d_out_queue->insert_tail(out_msg);
-	out_msg.reset(); */
    }
    //printf("sink::makePacket - nothing to send\n"); fflush(stdout);
 }
@@ -3016,7 +3045,7 @@ digital_ofdm_frame_sink::findClosestSymbol(gr_complex *x, gr_complex **closest_s
 }
 
 void
-digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo)
+digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
 {
   unsigned char flowId = creditInfo->flowId;
 #ifdef DEBUG
@@ -3148,13 +3177,28 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo)
   ******************** debug end *************************/
 
   //memcpy(out_msg->msg() + HEADERBYTELEN, (void*) out_symbols, sizeof(gr_complex) * n_symbols);      // copy payload symbols
+
+  // set the tx timestamp, if its a sync send //
+  if(sync_send) {
+     const pmt::pmt_t &value = d_sync_tag.value;
+     uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+     double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+
+
+     printf("RX timestamp: secs: %llu, frac_of_secs: %f\n", sync_secs, sync_frac_of_secs); fflush(stdout);
+
+     sync_secs += 1;			// for now , add 1 sec of delay!
+
+     out_msg->set_timestamp(sync_secs, sync_frac_of_secs);
+     printf("FWD PACKET---- TX timestamp: secs: %llu, frac_of_secs: %f\n", sync_secs, sync_frac_of_secs); 
+     fflush(stdout);
+  }
+
   d_out_queue->insert_tail(out_msg);
   out_msg.reset();
 
   free(coeffs);
   free(out_symbols);
-
-  //printf("encodePktToFwd end\n"); fflush(stdout);
 }
 
 /* just to test */
@@ -4357,18 +4401,7 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
                   memcpy(msg->msg(), packet[k], (packetlen_cnt[k]));
 
                   // With a good header, let's now check for the preamble sync timestamp
-                  std::vector<gr_tag_t> rx_sync_tags;
-                  const uint64_t nread = this->nitems_read(0);
-                  this->get_tags_in_range(rx_sync_tags, 0, nread, nread+last_noutput_items, SYNC_TIME);
-                  if(rx_sync_tags.size()>0) {
-                    size_t t = rx_sync_tags.size()-1;
-                    const pmt::pmt_t &value = rx_sync_tags[t].value;
-                    uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
-                    double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
-                    msg->set_timestamp(sync_secs, sync_frac_of_secs);
-                  } else {
-                    //std::cerr << "---- Header received, with no sync timestamp?\n";
-                  }
+		  //set_msg_timestamp(msg);
 
 		  bool crc_valid = crc_check(msg->to_string());
 		  printf("crc valid: %d\n", crc_valid); fflush(stdout);
@@ -4403,6 +4436,36 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
   }
 #endif
   printf("demodulate_ILP_2 end, pkt_no: %d\n\n", d_pkt_num); fflush(stdout);
+}
+
+inline void
+digital_ofdm_frame_sink::set_msg_timestamp(gr_message_sptr msg) {
+  unsigned int tag_port = 1;
+  std::vector<gr_tag_t> rx_sync_tags;
+  const uint64_t nread = this->nitems_read(tag_port);
+  this->get_tags_in_range(rx_sync_tags, tag_port, nread, nread+last_noutput_items, SYNC_TIME);
+  if(rx_sync_tags.size()>0) {
+     size_t t = rx_sync_tags.size()-1;
+     printf("set_timestamp (SINK):: found %d tags, offset: %ld, nread: %ld, output_items: %ld\n", rx_sync_tags.size(), rx_sync_tags[t].offset, nread, last_noutput_items); fflush(stdout);
+     const pmt::pmt_t &value = rx_sync_tags[t].value;
+     uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+     double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+     msg->set_timestamp(sync_secs, sync_frac_of_secs);
+  } else {
+     std::cerr << "SINK ---- Header received, with no sync timestamp?\n";
+  }
+
+  std::vector<gr_tag_t> rx_sync_tags2;
+  this->get_tags_in_range(rx_sync_tags2, tag_port, 0, nread, SYNC_TIME);
+  if(rx_sync_tags2.size()>0) {
+     size_t t = rx_sync_tags2.size()-1;
+     printf("test_timestamp2 (SINK):: found %d tags, offset: %ld, nread: %ld\n", rx_sync_tags2.size(), rx_sync_tags2[t].offset, nread); fflush(stdout);
+     const pmt::pmt_t &value = rx_sync_tags2[t].value;
+     uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+     double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+  } else {
+     std::cerr << "SINK ---- Header received, with no sync timestamp2?\n";
+  }
 }
 
 void
@@ -4887,4 +4950,166 @@ digital_ofdm_frame_sink::crc_check(std::string msg)
 
   return res;
   //return (hex_exp_crc.compare(hex_crc) == 0);
+}
+
+/* returns true if a tag was found */
+inline void
+digital_ofdm_frame_sink::test_timestamp(int output_items) {
+  //output_items = last_noutput_items;
+  unsigned int tag_port = 1;
+  std::vector<gr_tag_t> rx_sync_tags;
+  const uint64_t nread1 = nitems_read(tag_port);
+//get_tags_in_range(rx_sync_tags, tag_port, nread1, nread1+output_items, SYNC_TIME);
+  get_tags_in_range(rx_sync_tags, tag_port, nread1, nread1+17, SYNC_TIME); 
+
+  printf("(SINK) nread1: %llu, output_items: %d\n", nread1, output_items); fflush(stdout);
+  if(rx_sync_tags.size()>0) {
+     size_t t = rx_sync_tags.size()-1;
+     uint64_t offset = rx_sync_tags[t].offset;
+
+     printf("test_timestamp1 (SINK):: found %d tags, offset: %llu, output_items: %d, nread1: %llu\n", rx_sync_tags.size(), rx_sync_tags[t].offset, output_items, nread1); fflush(stdout);
+
+     const pmt::pmt_t &value = rx_sync_tags[t].value;
+     uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+     double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+
+     d_sync_tag.value = rx_sync_tags[t].value;
+     d_sync_tag.offset = offset;
+  }
+ 
+  //std::cerr << "SINK---- Header received, with no sync timestamp1?\n";
+  //assert(false);
+}
+
+/* to test the triggered sending behavior. Creates a packet with a dumb header, uses the samples recorded earlier to 
+   to generate the packet and transmit */
+void
+digital_ofdm_frame_sink::test_sync_send(CreditInfo *creditInfo) {
+  printf("test_sync_send ---------- \n"); fflush(stdout);
+  int fd = 0;
+  if(!d_sync_file_opened) {
+      const char *filename1 = "data_tx_symbols.dat";
+      //int fd;
+      if ((fd = open (filename1, O_RDONLY|OUR_O_LARGEFILE|OUR_O_BINARY, 0664)) < 0) {
+         perror(filename1);
+	 assert(false);
+      }
+      else {
+         if((d_fp_sync_symbols = fdopen (fd, true ? "rb" : "r")) == NULL) {
+             fprintf(stderr, "sync data file cannot be opened\n");
+             close(fd);
+	     assert(false);
+         }
+      }
+
+      d_sync_file_opened = true;  
+  }
+
+  FlowInfo *flow_info = getFlowInfo(false, creditInfo->flowId);
+  assert(d_fp_sync_symbols != NULL);
+  
+  /* read data samples to send from a file: 'data' content of 1 packet = 6 oFDM symbols */
+  int n_actual_symbols = d_num_ofdm_symbols * d_data_carriers.size();
+
+  gr_complex *out_symbols = (gr_complex*) malloc(sizeof(gr_complex) * n_actual_symbols);
+  //int count = fread_unlocked(out_symbols, sizeof(gr_complex), n_actual_symbols, d_fp_sync_symbols);
+
+  //assert(count == n_actual_symbols);
+
+  /* pick new random <coeff> and encode the data symbols */
+  assert(d_batch_size == 1);
+
+  float phase = rand() % 360 + 1;
+  float amp = 1.0;
+  gr_complex coeff = amp * gr_expj(phase * M_PI/180);
+  //encodeSignal(out_symbols, coeff);
+
+  /* make header */
+  unsigned char header_bytes[HEADERBYTELEN];
+  MULTIHOP_HDR_TYPE header;
+  memset(&header, 0, sizeof(MULTIHOP_HDR_TYPE));
+
+  header.inno_pkts = 1;
+
+  //float factor = normalizeSignal(out_symbols, 1);
+  header.factor = 1.0;
+
+  /* put the coeff into the header */
+  header.coeffs[0].phase = phase * SCALE_FACTOR_PHASE;
+  header.coeffs[0].amplitude = amp * SCALE_FACTOR_AMP;
+
+  /* populate the 'header' struct and the 'header_bytes' */
+  makeHeader(header, header_bytes, flow_info, creditInfo->nextLink.linkId);
+  //debugHeader(header_bytes); 
+
+  /* the outgoing message 
+  gr_message_sptr out_msg = gr_make_message(DATA_TYPE, 0, 0, HEADERBYTELEN + (n_actual_symbols * sizeof(gr_complex)));
+  memcpy(out_msg->msg(), header_bytes, HEADERBYTELEN);
+
+  int offset = HEADERBYTELEN;
+  int dc_tones = d_occupied_carriers - d_data_carriers.size();
+  assert(dc_tones > 0 && (d_occupied_carriers % 2 == 0) && (dc_tones % 2 == 0));                // even occupied_tones and dc_tones //
+  unsigned int half_occupied_tones = (d_occupied_carriers - dc_tones)/2;
+
+  for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
+      unsigned int index = i * d_occupied_carriers;
+      memcpy((out_msg->msg() + offset), (out_symbols + index), sizeof(gr_complex) * half_occupied_tones);
+
+      offset += (sizeof(gr_complex) * half_occupied_tones);
+      index += (half_occupied_tones + dc_tones);                                                // bypass the DC tones //
+
+      memcpy((out_msg->msg() + offset), (out_symbols + index), sizeof(gr_complex) * half_occupied_tones);
+      offset += (sizeof(gr_complex) * half_occupied_tones);
+  }
+  */
+
+  /* just send the header for now (no payload) */
+  gr_message_sptr out_msg = gr_make_message(DATA_TYPE, 0, 0, HEADERBYTELEN);
+  memcpy(out_msg->msg(), header_bytes, HEADERBYTELEN);
+
+
+  /* set the outgoing timestamp */
+  const pmt::pmt_t &value = d_sync_tag.value;
+  uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+  double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+
+  /* calculate duration to send out preamble+header */ 
+  int decimation = 128;
+  double rate = 1.0/decimation;
+
+  int null_ofdm_symbols = 500;
+
+  int cp_length = d_fft_length/4;
+  uint32_t num_samples = (d_num_hdr_ofdm_symbols+1+null_ofdm_symbols) * (d_fft_length+cp_length);
+  double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
+  double duration = num_samples * time_per_sample; 
+  printf("RX timestamp (%llu, %f), duration: %f\n", sync_secs, sync_frac_of_secs, duration); fflush(stdout);
+
+  uhd::time_spec_t c_time = d_usrp->get_time_now();
+  uhd::time_spec_t proc_time = c_time - uhd::time_spec_t(sync_secs, sync_frac_of_secs);
+
+  printf("FWD PACKET -- c_time(%llu, %f), proc_time (%llu, %f)\n", (uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), (uint64_t) proc_time.get_full_secs(), proc_time.get_frac_secs()); fflush(stdout);
+
+
+  /* add the duration to the current timestamp */
+  sync_secs += (int) duration;
+  sync_frac_of_secs = duration - (int) duration + sync_frac_of_secs;
+  if(sync_frac_of_secs>1) {
+     sync_secs += (uint64_t)sync_frac_of_secs;
+     sync_frac_of_secs -= (uint64_t)sync_frac_of_secs;
+  }
+
+  printf("TX timestamp (%llu, %f), duration: %f\n", sync_secs, sync_frac_of_secs, duration); fflush(stdout);
+ 
+  //sync_secs += 1;                    // for now , add 1 sec of delay!
+  //sync_frac_of_secs += 0.5;
+
+  out_msg->set_timestamp(sync_secs, sync_frac_of_secs);
+  //printf("FWD PACKET---- TX timestamp (%llu, %f), proc_time(%llu, %f)", sync_secs, sync_frac_of_secs, (uint64_t) proc_time.get_full_secs(), proc_time.get_frac_secs());
+  fflush(stdout);
+
+  d_out_queue->insert_tail(out_msg);
+  out_msg.reset();
+
+  //free(out_symbols);
 }

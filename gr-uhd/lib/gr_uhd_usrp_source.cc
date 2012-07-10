@@ -347,6 +347,7 @@ public:
             break;
 
         case uhd::rx_metadata_t::ERROR_CODE_TIMEOUT:
+	    printf("rx:: TIMEOUT ----------- \n"); fflush(stdout);
             //Assume that the user called stop() on the flow graph.
             //However, a timeout can occur under error conditions.
             return WORK_DONE;

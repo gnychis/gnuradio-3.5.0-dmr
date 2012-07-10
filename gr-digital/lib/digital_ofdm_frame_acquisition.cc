@@ -61,6 +61,9 @@
 #define M_TWOPI (2*M_PI)
 #define MAX_NUM_SYMBOLS 1000
 
+
+static const pmt::pmt_t SYNC_TIME = pmt::pmt_string_to_symbol("sync_time");
+
 digital_ofdm_frame_acquisition_sptr
 digital_make_ofdm_frame_acquisition (unsigned int occupied_carriers, unsigned int fft_length, 
 				unsigned int cplen,
@@ -261,6 +264,7 @@ digital_ofdm_frame_acquisition::general_work(int noutput_items,
     d_phase_count = 1;
   }
 
+  //test_timestamp(1);				// enable to track tag propagation
   consume_each(1);
   return 1;
 }
@@ -303,3 +307,24 @@ digital_ofdm_frame_acquisition::log_hestimate()
 }
 // apurv++ end //
 
+/* just for debugging - tracking propagation of tags from sampler to sink */
+inline void
+digital_ofdm_frame_acquisition::test_timestamp(int output_items) {
+  unsigned int tag_port = 1;
+  std::vector<gr_tag_t> rx_sync_tags1;
+  const uint64_t nread1 = nitems_read(tag_port);
+  get_tags_in_range(rx_sync_tags1, tag_port, nread1, nread1+output_items, SYNC_TIME);
+
+  printf("(ACQ) nread1: %llu, output_items: %d\n", nread1, output_items); fflush(stdout);
+  if(rx_sync_tags1.size()>0) {
+     size_t t = rx_sync_tags1.size()-1;
+     uint64_t offset = rx_sync_tags1[t].offset;
+
+     const pmt::pmt_t &value = rx_sync_tags1[t].value;
+     uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+     double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+     printf("test_timestamp1 (ACQ):: found %d tags, offset: %llu, output_items: %d, nread1: %llu value[%llu, %f]\n", rx_sync_tags1.size(), rx_sync_tags1[t].offset, output_items, nread1, sync_secs, sync_frac_of_secs); fflush(stdout);
+  } else {
+     //std::cerr << "ACQ---- Header received, with no sync timestamp1?\n";
+  }
+}

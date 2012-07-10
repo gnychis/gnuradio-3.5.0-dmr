@@ -36,6 +36,8 @@
 #include <stdexcept>
 #include <stdio.h>
 
+#include <uhd/usrp/multi_usrp.hpp>
+
 //#define USE_PILOT 0
 #ifdef HAVE_IO_H
 #include <io.h>
@@ -54,6 +56,8 @@
 // apurv for logging ends //
 
 //#define TESTING        0
+
+#define NULL_SYMBOL_COUNT 0
 
 // whitening random tuple (from ofdm_packet_utils.py) //
 unsigned char random_mask_tuple1[] = {
@@ -488,7 +492,28 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 
   int openACKSocket();
   int isACKSocketOpen();
-  
+
+  bool d_time_tag;
+  void make_time_tag(gr_message_sptr msg);
+
+  int d_null_symbol_cnt;
+
+
+  /* trigger over ethernet */
+  bool d_trigger_sock_opened;
+  int d_trigger_sock;
+  char *d_trigger_src_ip_addr;
+  char *d_trigger_buf;
+  unsigned int d_trigger_src_sock_port;
+  void create_trigger_sock();
+  uhd::time_spec_t d_trigger_rx_time;
+
+  /* usrp instance */
+  uhd::usrp::multi_usrp::sptr d_usrp;
+  void make_time_tag1();  
+
+  void test_socket(); 
+ 
 /* apurv++ ends */
 };
 

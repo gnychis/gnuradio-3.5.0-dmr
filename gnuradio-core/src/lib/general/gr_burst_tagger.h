@@ -52,6 +52,8 @@ class GR_CORE_API gr_burst_tagger : public gr_sync_block
   int work(int noutput_items,
 	   gr_vector_const_void_star &input_items,
 	   gr_vector_void_star &output_items);
+
+  void modify_timestamp(int output_items, int index);
 };
 
 #endif

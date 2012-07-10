@@ -26,6 +26,8 @@
 #include <digital_api.h>
 #include <gr_sync_block.h>
 
+#include <uhd/usrp/multi_usrp.hpp>
+
 class digital_ofdm_sampler;
 typedef boost::shared_ptr<digital_ofdm_sampler> digital_ofdm_sampler_sptr;
 
@@ -72,6 +74,9 @@ class DIGITAL_API digital_ofdm_sampler : public gr_block
   void log_preamble(gr_complex *, long);
   bool open_log();
   // apurv++ ends //
+
+  uhd::usrp::multi_usrp::sptr d_usrp;
+ 
 };
 
 #endif

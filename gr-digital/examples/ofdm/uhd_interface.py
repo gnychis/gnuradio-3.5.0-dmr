@@ -44,12 +44,16 @@ def add_freq_option(parser):
 class uhd_interface:
     def __init__(self, istx, args, bandwidth, freq=None,
                  gain=None, spec=None, antenna=None):
-        
+
         if(istx):
             self.u = uhd.usrp_sink(device_addr=args, stream_args=uhd.stream_args('fc32'))
             #self.u = uhd.usrp_sink(device_addr=args,
             #                       io_type=uhd.io_type.COMPLEX_FLOAT32,
             #                       num_channels=1)
+
+	    # to monitor the events raised in case there was an underflow (U) or late-msg (L) problem #
+            self._out_pktq = gr.msg_queue()
+            self.u_amsg_source = uhd.amsg_source(args, self._out_pktq)
 
         else:
             self.u = uhd.usrp_source(device_addr=args, stream_args=uhd.stream_args('fc32'))
@@ -73,7 +77,7 @@ class uhd_interface:
         if(antenna):
            self.u.set_antenna(antenna, 0)
 
-	time.sleep(2)
+	time.sleep(1)
 
     def set_sample_rate(self, bandwidth):
         self.u.set_samp_rate(bandwidth)

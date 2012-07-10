@@ -136,7 +136,7 @@ class cs_mac(object):
 
         @param packet: the pkt to be forwarded through the transmitter chain    
         """
-        print "fwd_callback invoked in tunnel.py"
+        #print "fwd_callback invoked in tunnel.py"
         if packet.type() == 1:
            print "<tunnel.py> tx DATA!"
            #time.sleep(0.02)                                               #IFS

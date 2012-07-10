@@ -96,6 +96,16 @@ typedef struct ack_multihop_hdr_type {
 
 } MULTIHOP_ACK_HDR_TYPE;
 
+/* for trigger on the ethernet */
+#pragma pack(1)
+typedef struct trigger_type {
+  unsigned char src_id;
+  unsigned char dst_id;
+  int batch;
+  unsigned char flow_id;
+  int pkt_type;
+} TRIGGER_MSG_TYPE;
+
 /* apurv++ end header type */
 /*
 unsigned char random_mask_tuple[] = {
@@ -419,7 +429,7 @@ public:
   void set_arg2(double arg2) { d_arg2 = arg2; }
   void set_arg3(double arg3) { d_arg3 = arg3; }
 
-  long timestamp_valid() const { return (long)d_timestamp_valid; }
+  bool timestamp_valid() const { return d_timestamp_valid; }
   long preamble_sec() const { return (long)d_preamble_sec; }
   double preamble_frac_sec() const { return d_preamble_frac_sec; }
 
