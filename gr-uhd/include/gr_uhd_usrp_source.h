@@ -106,8 +106,26 @@ GR_UHD_API boost::shared_ptr<uhd_usrp_source> uhd_make_usrp_source(
     const uhd::stream_args_t &stream_args
 );
 
+GR_UHD_API boost::shared_ptr<uhd_usrp_source> get_usrp_source_instance();
+
+boost::shared_ptr<uhd_usrp_source> _instance;
+bool _created = false;
+
 class GR_UHD_API uhd_usrp_source : virtual public gr_sync_block{
 public:
+
+    /*!
+     * Set the start time for incoming samples.
+     * To control when samples are received,
+     * set this value before starting the flow graph.
+     * The value is cleared after each run.
+     * When not specified, the start time will be:
+     *  - Immediately for the one channel case
+     *  - in the near future for multi-channel
+     *
+     * \param time the absolute time for reception to begin
+     */
+    virtual void set_start_time(const uhd::time_spec_t &time) = 0;
 
     /*!
      * Set the frontend specification.

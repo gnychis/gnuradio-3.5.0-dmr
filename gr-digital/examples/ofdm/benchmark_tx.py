@@ -32,6 +32,10 @@ from gnuradio import digital
 from transmit_path import transmit_path
 from uhd_interface import uhd_transmitter
 
+import struct, sys, os
+print os.getpid()
+#raw_input("Press enter to continue")
+
 class my_top_block(gr.top_block):
     def __init__(self, options):
         gr.top_block.__init__(self)

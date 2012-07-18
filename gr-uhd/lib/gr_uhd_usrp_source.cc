@@ -61,7 +61,9 @@ public:
         _stream_args(stream_args),
         _nchan(std::max<size_t>(1, stream_args.channels.size())),
         _stream_now(_nchan == 1),
-        _tag_now(false)
+        _tag_now(false),
+        _start_time_set(false),
+	_is_streaming(false)
     {
         if (stream_args.cpu_format == "fc32") _type = boost::make_shared<uhd::io_type_t>(uhd::io_type_t::COMPLEX_FLOAT32);
         if (stream_args.cpu_format == "sc16") _type = boost::make_shared<uhd::io_type_t>(uhd::io_type_t::COMPLEX_INT16);
@@ -69,6 +71,10 @@ public:
         str << name() << unique_id();
         _id = pmt::pmt_string_to_symbol(str.str());
         _dev = uhd::usrp::multi_usrp::make(device_addr);
+
+        printf("Switching to the external clock!\n"); fflush(stdout);
+        this->set_clock_config(uhd::clock_config_t::external(), 0);
+        this->set_time_next_pps(uhd::time_spec_t(0.0));
     }
 
     void set_subdev_spec(const std::string &spec, size_t mboard){
@@ -366,9 +372,15 @@ public:
 
         return num_samps;
     }
+    void set_start_time(const uhd::time_spec_t &time){
+        _start_time = time;
+        _start_time_set = true;
+        _stream_now = false;
+    }
 
     bool start(void){
 	printf("uhd_usrp_source(rx):: start()\n"); fflush(stdout);
+	_is_streaming = true;
         #ifdef GR_UHD_USE_STREAM_API
         _rx_stream = _dev->get_rx_stream(_stream_args);
         _samps_per_packet = _rx_stream->get_max_num_samps();
@@ -378,8 +390,13 @@ public:
         static const double reasonable_delay = 0.1; //order of magnitude over RTT
         uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
         stream_cmd.stream_now = _stream_now;
-        stream_cmd.time_spec = get_time_now() + uhd::time_spec_t(reasonable_delay); 
-	//uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS);
+        if (_start_time_set){
+            _start_time_set = false; //cleared for next run
+            stream_cmd.time_spec = _start_time;
+        }
+        else{
+            stream_cmd.time_spec = get_time_now() + uhd::time_spec_t(reasonable_delay);
+        }
         _dev->issue_stream_cmd(stream_cmd);
         _tag_now = true;
         return true;
@@ -409,6 +426,7 @@ public:
     }
 
     bool stop(void){
+	_is_streaming = false;
         _dev->issue_stream_cmd(uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS);
 
         this->flush();
@@ -428,6 +446,11 @@ private:
     bool _stream_now, _tag_now;
     uhd::rx_metadata_t _metadata;
     pmt::pmt_t _id;
+
+    uhd::time_spec_t _start_time;
+    bool _start_time_set;
+
+    bool _is_streaming;
 };
 
 
@@ -457,7 +480,22 @@ boost::shared_ptr<uhd_usrp_source> uhd_make_usrp_source(
     const uhd::device_addr_t &device_addr,
     const uhd::stream_args_t &stream_args
 ){
+    /*
     return boost::shared_ptr<uhd_usrp_source>(
         new uhd_usrp_source_impl(device_addr, stream_args)
-    );
+    );*/ 
+    if(!_created) {
+	printf("creating new USRP RX instance\n"); fflush(stdout);
+	_created = true;
+	_instance = boost::shared_ptr<uhd_usrp_source>(new uhd_usrp_source_impl(device_addr, stream_args));
+    }
+    else {
+	printf("returning created RX instance!\n"); fflush(stdout);
+    }
+    return _instance;
+}
+
+boost::shared_ptr<uhd_usrp_source> get_usrp_source_instance(){
+    assert(_created);
+    return _instance;
 }

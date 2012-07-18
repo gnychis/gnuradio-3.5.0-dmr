@@ -40,7 +40,7 @@
 
 #include <uhd/usrp/multi_usrp.hpp>
 
-//#define USE_PILOT 0
+#define USE_PILOT 0
 #ifdef HAVE_IO_H
 #include <io.h>
 #endif
@@ -59,6 +59,8 @@
 #define USE_ILP 0
 #define MAX_SENDERS 4
 //#define USE_HEADER_PLL 0
+
+#define NULL_OFDM_SYMBOLS 35
 
 // apurv for logging ends //
 
@@ -454,13 +456,12 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   unsigned char d_resid;
   unsigned int d_nresid;
-#ifdef USE_PILOT
+
   float d_phase[MAX_SENDERS];
   float d_freq[MAX_SENDERS];			// indexed by the number of concurrent senders (for individual phase tracking)
-#else
-  float d_phase[MAX_BATCH_SIZE];
-  float d_freq[MAX_BATCH_SIZE];
-#endif
+  float d_phase1[MAX_SENDERS];
+  float d_freq1[MAX_SENDERS];
+
   float d_phase_gain;
   float d_freq_gain;
   float d_eq_gain;
@@ -541,7 +542,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   gr_complex *d_in_estimates;		// will be updated only if preamble is not detected in between a pkt! //
 
   /* fwd/dst identification */
-  bool d_fwd, d_dst, d_neighbor;
+  bool d_fwd, d_dst;
   bool shouldProcess();  
   bool isMyPacket();
 
@@ -723,7 +724,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   /* alternative way of doing ILP, more incremental in nature */
   //float **d_euclid_dist;						// [subcarrier][2^batch_size]; records the euclid dist seen on each subcarrier, for each possibility in the table! //
-  float d_euclid_dist[70][72][4];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
+  float d_euclid_dist[170][72][4];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
   unsigned int demapper_ILP_2(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
                       vector<gr_complex*> batched_sym_position, FlowInfo *flowInfo,
                       vector<gr_complex> dfe_vec);
@@ -750,6 +751,19 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void test_decode_signal(gr_complex *in, vector<gr_complex*> interpolated_coeffs);
   bool crc_check(std::string msg);
 
+  int d_null_symbol_count;
+#ifdef USE_PILOT
+  float d_slope_angle[MAX_SENDERS], d_start_angle[MAX_SENDERS], d_end_angle[MAX_SENDERS];
+#else
+  /* for average slope of angle1, phase1, freq1 */
+  float d_slope_angle1, d_slope_freq1, d_slope_phase1;
+  float d_start_angle1, d_start_freq1, d_start_phase1;
+  float d_end_angle1, d_end_freq1, d_end_phase1;
+  float d_end_angle;
+#endif
+
+  int d_hdr_ofdm_index;
+
   /* stream tags, timestamping, etc */
   FILE *d_fp_sync_symbols;
   bool d_sync_file_opened;
@@ -758,9 +772,11 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void test_timestamp(int);
   void test_sync_send(CreditInfo *creditInfo);
 
+
   /* usrp instance */
   uhd::usrp::multi_usrp::sptr d_usrp;
-
+  
+ 
 };
 
 

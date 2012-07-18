@@ -75,6 +75,7 @@ class DIGITAL_API digital_ofdm_sampler : public gr_block
   bool open_log();
   // apurv++ ends //
 
+  uint64_t d_prev_index;
   uhd::usrp::multi_usrp::sptr d_usrp;
  
 };

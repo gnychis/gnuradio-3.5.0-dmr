@@ -26,6 +26,29 @@
 #include <gr_block.h>
 #include <vector>
 
+// apurv for logging the preamble //
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdexcept>
+#include <stdio.h>
+
+#ifdef HAVE_IO_H
+#include <io.h>
+#endif
+#ifdef O_BINARY
+#define OUR_O_BINARY O_BINARY
+#else
+#define OUR_O_BINARY 0
+#endif
+
+#ifdef O_LARGEFILE
+#define OUR_O_LARGEFILE O_LARGEFILE
+#else
+#define OUR_O_LARGEFILE 0
+#endif
+// apurv for logging ends //
+
 class digital_ofdm_insert_preamble;
 typedef boost::shared_ptr<digital_ofdm_insert_preamble> digital_ofdm_insert_preamble_sptr;
 
@@ -104,6 +127,11 @@ public:
   /* timestamping related stuff */
   void track_and_modify_timestamp(int output_items);
   uint64_t d_p_index;
+
+  /* log the preamble being transmitted (enable if required) */
+  FILE *d_fp;
+  void log_preamble();
+  void open_log();
 };
 
 #endif /* INCLUDED_GR_OFDM_INSERT_PREAMBLE_H */

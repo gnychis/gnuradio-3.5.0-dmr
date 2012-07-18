@@ -48,7 +48,7 @@ using namespace arma;
 #define SCALE_FACTOR_AMP 1e4
 
 //#define ACK_ON_ETHERNET 1
-#define TRIGGER_ON_ETHERNET 1
+//#define TRIGGER_ON_ETHERNET 1
 
 digital_ofdm_mapper_bcv_sptr
 digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned int msgq_limit, 
@@ -209,12 +209,12 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   }
   printf("\n");
 
-
   // make sure we stay in the limit currently imposed by the occupied_carriers
   if(d_data_carriers.size() > d_occupied_carriers) {
     throw std::invalid_argument("digital_ofdm_mapper_bcv: subcarriers allocated exceeds size of occupied carriers");
   }
-  
+  fill_all_carriers_map();  
+
   d_nbits = (unsigned long)ceil(log10(float(d_constellation.size())) / log10(2.0));
 
   // for offline analysis - apurv++ //
@@ -324,36 +324,56 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
    }
 #endif
 
+  bool tx_pilot = false;
+
   /* single OFDM symbol: Initialize all bins to 0 to set unused carriers */
   memset(out, 0, d_fft_length*sizeof(gr_complex));
   if(d_ack || d_default) {
 	/* ack */
      generateOFDMSymbol(out, d_msg[0]->length());  			// entire msg needs to be modulated for ACK
   }
-  else {
+  else if(d_data) {
 	/* data */
      if(d_msg_offset[0] < HEADERBYTELEN) {
+	generateOFDMSymbol(out, HEADERBYTELEN);
         if(!d_time_tag) {
            make_time_tag(d_msg[0]);
            d_time_tag = true;
         }
-
-	if(d_null_symbol_cnt < NULL_SYMBOL_COUNT) {
-	   d_null_symbol_cnt++;
-	}
-	else {	
-	   assert(d_null_symbol_cnt == NULL_SYMBOL_COUNT);
-           generateOFDMSymbol(out, HEADERBYTELEN);				// only modulate the hdr for DATA
-	   //printf("hdr------ offset: %d\n", d_msg_offset[0]); fflush(stdout);
-	}
-     } 
+	tx_pilot = true;
+     }
+     else if(d_null_symbol_cnt < NULL_SYMBOL_COUNT) {
+	d_null_symbol_cnt++;
+     }
      else {
 	/* header has already been modulated, just send the payload *symbols* as it is */
+	gr_complex *t_out = (gr_complex*) malloc(sizeof(gr_complex) * d_data_carriers.size());
+
+	int _offset = (d_ofdm_index-34-NULL_SYMBOL_COUNT) * d_data_carriers.size() * sizeof(gr_complex) + HEADERBYTELEN;
+	printf("_offset: %d, d_ofdm_index: %d\n", _offset, d_ofdm_index); fflush(stdout);
+	memcpy(t_out, d_msg[0]->msg() + _offset, sizeof(gr_complex) * d_data_carriers.size());
+
+	logGeneratedTxSymbols(t_out);
+
  	copyOFDMSymbol(out, d_msg[0]->length());		
+	//logNativeTxSymbols(out);
+	free(t_out);
 	//printf("data--------- offset: %d\n", d_msg_offset[0]); fflush(stdout);
+	tx_pilot = true;
      }  
+
      d_ofdm_index+=1; 
   }
+
+#ifdef USE_PILOT
+  if(tx_pilot) {
+      double cur_pilot = 1.0;
+      for(int i = 0; i < d_pilot_carriers.size(); i++) {
+         out[d_pilot_carriers[i]] = gr_complex(cur_pilot, 0.0);
+         cur_pilot = -cur_pilot;
+      }
+  }
+#endif
 
   /* complete message modulated */
   if(d_msg_offset[0] == d_msg[0]->length()) {
@@ -609,34 +629,37 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 
 	  /* testing the co-sender scenario - in this case, the co-sender blocks until it receives a trigger from the lead sender */
 #ifdef TRIGGER_ON_ETHERNET
-	  // TODO: need to make it more robust! //
-	  if(d_trigger_sock == -1)
-		  create_trigger_sock();
+     // TODO: need to make it more robust! //
+     if(d_trigger_sock == -1)
+	     create_trigger_sock();
 
-	  int trigger_len = sizeof(TRIGGER_MSG_TYPE);
-	  memset(d_trigger_buf, 0, trigger_len);
-	  int nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_PEEK);
-	  if(nbytes >= 0) {
-		  if(nbytes == trigger_len) {
-			  nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, 0);
-		  }
-		  else {
-			  nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_WAITALL);
-		  }
-		  d_trigger_rx_time = d_usrp->get_time_now();
-		  printf(" $$$$$$$$$$$$$$$$$$$$$$$$$$$$$ received nbytes: %d as TRIGGER $$$$$$$$$$$$$$$$$$$$$\n", nbytes);
-		  fflush(stdout);
+     int trigger_len = sizeof(TRIGGER_MSG_TYPE);
+     memset(d_trigger_buf, 0, trigger_len);
+     int nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_PEEK);
+     if(nbytes >= 0) {
+	     if(nbytes == trigger_len) {
+		     nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, 0);
+	     }
+	     else {
+		     nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_WAITALL);
+	     }
+	     d_trigger_rx_time = d_usrp->get_time_now();
+	     printf(" $$$$$$$$$$$$$$$$$$$$$$$$$$$$$ received nbytes: %d as TRIGGER $$$$$$$$$$$$$$$$$$$$$\n", nbytes);
+	     fflush(stdout);
 
-		  TRIGGER_MSG_TYPE trigger_msg;
-		  memcpy(&trigger_msg, d_trigger_buf, trigger_len);
-		  printf("TRIGGER details, batch: %d, flow: %d, lead sender: %d\n", trigger_msg.batch, trigger_msg.flow_id, trigger_msg.src_id); fflush(stdout);
-	  } else {
-		  printf("TRIGGER: recv needs to be blocking!! \n"); fflush(stdout);
-		  assert(false);
-	  }
-	  d_time_tag = false;
+	     TRIGGER_MSG_TYPE trigger_msg;
+	     memcpy(&trigger_msg, d_trigger_buf, trigger_len);
+	     printf("TRIGGER details, batch: %d, flow: %d, lead sender: %d\n", trigger_msg.batch, trigger_msg.flow_id, trigger_msg.src_id); fflush(stdout);
+     } else {
+	     printf("TRIGGER: recv needs to be blocking!! \n"); fflush(stdout);
+	     assert(false);
+     }
+     d_time_tag = false;
 #endif
+     d_null_symbol_cnt = 0;
   }
+
+  bool tx_pilot = false;
 
   // the final result will be in 'out' //
   gr_complex *out = (gr_complex *)output_items[0];
@@ -650,15 +673,14 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
         }
 #endif
       generateOFDMSymbolHeader(out); 					// send the header symbols out first //
-	  if(d_hdr_byte_offset == HEADERBYTELEN && 0) {
-		  /* to avoid sending any payload!!! --- JUST FOR TESTING REMOVEEEEEEEEE */
-		  d_modulated = true; 
-		  d_pending_flag = 2;
-		  d_packets_sent_for_batch += 1; 
-	  }
+      tx_pilot = true;
+  }
+  else if(d_null_symbol_cnt < NULL_SYMBOL_COUNT) {
+      d_null_symbol_cnt++;  // to test sync send - send null ofdm symbol //
   }
   else
   {
+      assert(d_null_symbol_cnt == NULL_SYMBOL_COUNT);
        // offline analysis //
       if(!d_init_log) {
            assert(open_log());
@@ -674,8 +696,9 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	   memset(t_out, 0, sizeof(gr_complex) * d_fft_length);
 
 	   generateOFDMSymbolData(t_out, k);
+
 	   symbols_vec.push_back(t_out);
-	   //logNativeTxSymbols(t_out);
+	   logNativeTxSymbols(t_out);
       }
 
       assert(symbols_vec.size() == d_batch_size);
@@ -720,14 +743,17 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	  printf("d_time_pkt_sent: %llu\n", d_time_pkt_sent); fflush(stdout);
       }
 	// etc end //
+      tx_pilot = true;
   }
 
 #ifdef USE_PILOT
+  if(tx_pilot) {
       double cur_pilot = 1.0;
       for(int i = 0; i < d_pilot_carriers.size(); i++) {
          out[d_pilot_carriers[i]] = gr_complex(cur_pilot, 0.0);
          cur_pilot = -cur_pilot;
       }
+  }
 #endif
  
   char *out_flag = 0;
@@ -742,6 +768,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   return 1;  // produced symbol
 }
 
+/* only log the symbols belonging to the 'data carriers'. Ignore the left and right guards, dc tones and pilot tones */
 void
 digital_ofdm_mapper_bcv::logNativeTxSymbols(gr_complex *out)
 {
@@ -764,22 +791,75 @@ digital_ofdm_mapper_bcv::logNativeTxSymbols(gr_complex *out)
   }
   unsigned int half_tones = ceil((float) (d_occupied_carriers/2.0));
   unsigned int zeros_on_left = ceil((float (d_fft_length - d_occupied_carriers))/2.0);
+  unsigned int dc_tones = d_occupied_carriers - (d_data_carriers.size() + d_pilot_carriers.size());
 
-  gr_complex *log_symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
-  memset(log_symbols, 0, sizeof(gr_complex) * d_occupied_carriers);
+  gr_complex *log_symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_data_carriers.size());
+  memset(log_symbols, 0, sizeof(gr_complex) * d_data_carriers.size());
 
   // copy the 1st half of the fft length except left-guard //
+  int index = 0; int offset = 4;
+  for(int i = 0; i < d_all_carriers.size(); i++) {
+     printf("d_all_carriers: %d ", d_all_carriers[i]); fflush(stdout);
+     if(d_all_carriers[i] == 0) {
+	printf("index: %d, zeros_on_left: %d, data_carrier: %d, i: %d", index, zeros_on_left, d_data_carriers[index], i); fflush(stdout);
+	memcpy(log_symbols+index, out+zeros_on_left+d_data_carriers[index]-offset, sizeof(gr_complex));
+	index++;
+     }	
+     printf("\n");
+  }
+  assert(index == d_data_carriers.size());
+
+  /*
   memcpy(log_symbols, out + zeros_on_left, sizeof(gr_complex) * half_tones);
 
   // copy the 2nd half of the fft_length except right-guard //
   memcpy(log_symbols + half_tones, out + zeros_on_left + half_tones, sizeof(gr_complex) * half_tones);
+  */
 
-  int count = fwrite_unlocked(log_symbols, sizeof(gr_complex), d_occupied_carriers, d_fp_native);
-  //printf("count: %d written to native tx_symbols.dat \n", count); fflush(stdout);
+  int count = fwrite_unlocked(log_symbols, sizeof(gr_complex), d_data_carriers.size(), d_fp_native);
+  printf("count: %d written to native tx_symbols.dat, total: %d \n", count, ftell(d_fp_native)); fflush(stdout);
+
 
   free(log_symbols);
 }
 
+void
+digital_ofdm_mapper_bcv::fill_all_carriers_map() {
+  d_all_carriers.resize(d_occupied_carriers);
+
+  unsigned int left_half_fft_guard = (d_fft_length - d_occupied_carriers)/2;
+
+  unsigned int p = 0, d = 0, dc = 0;
+
+  for(unsigned int i = 0; i < d_occupied_carriers; i++) {
+      int carrier_index = left_half_fft_guard + i;
+
+      if(d_data_carriers[d] == carrier_index) {
+         d_all_carriers[i] = 0;
+         d++;
+      }
+      else if(d_pilot_carriers[p] == carrier_index) {
+         d_all_carriers[i] = 1;
+         p++;
+      }
+      else {
+         d_all_carriers[i] = 2;
+         dc++;
+      }
+  }
+
+#ifdef DEBUG
+  printf("fill_all_carriers: --- -\n"); fflush(stdout);
+  for(int i = 0; i < d_all_carriers.size(); i++) {
+	printf("i: %d ----- val: %d\n", i, d_all_carriers[i]); fflush(stdout);
+  }
+  printf(" ---------------------------------------------------- \n"); fflush(stdout);
+#endif
+
+  assert(d == d_data_carriers.size());
+  assert(p == d_pilot_carriers.size());
+  assert(dc == d_occupied_carriers - d_data_carriers.size() - d_pilot_carriers.size());
+}
 
 void 
 digital_ofdm_mapper_bcv::logGeneratedTxSymbols(gr_complex *out) 
@@ -1140,9 +1220,9 @@ digital_ofdm_mapper_bcv::makeHeader()
    d_header.inno_pkts = d_batch_size;
    d_header.factor = 1.0/d_batch_size;
 
-   d_header.lead_sender = 0;
+   d_header.lead_sender = 1;
    d_header.src_id = d_id;         //TODO: remove the hardcoding
-   d_header.prev_hop_id = d_id;
+   d_header.prev_hop_id = 1;
 
    d_header.packetlen = d_packetlen - 1;		// -1 for '55' appended (ref ofdm_packet_utils)
    d_header.batch_number = d_batch_to_send;
@@ -1150,7 +1230,7 @@ digital_ofdm_mapper_bcv::makeHeader()
    d_header.pkt_type = DATA_TYPE;
   
    d_header.pkt_num = d_pkt_num++;
-   d_header.link_id = 0;
+   d_header.link_id = 1;
  
    generateCodeVector();	// also fills up d_header.coeffs
 

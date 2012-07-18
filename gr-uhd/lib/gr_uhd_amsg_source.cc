@@ -37,7 +37,7 @@ public:
     {
         _dev = uhd::usrp::multi_usrp::make(device_addr);
         _amsg_thread =
-            gruel::thread(boost::bind(&uhd_amsg_source_impl::recv_loop, this));
+        gruel::thread(boost::bind(&uhd_amsg_source_impl::recv_loop, this));
     }
 
     ~uhd_amsg_source_impl()

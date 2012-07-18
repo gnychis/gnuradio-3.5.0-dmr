@@ -38,7 +38,7 @@
 
 #include <uhd/usrp/multi_usrp.hpp>
 
-//#define USE_PILOT 0
+#define USE_PILOT 0
 #ifdef HAVE_IO_H
 #include <io.h>
 #endif
@@ -57,7 +57,7 @@
 
 //#define TESTING        0
 
-#define NULL_SYMBOL_COUNT 0
+#define NULL_SYMBOL_COUNT 35
 
 // whitening random tuple (from ofdm_packet_utils.py) //
 unsigned char random_mask_tuple1[] = {
@@ -379,6 +379,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 
   std::vector<int> d_data_carriers;
   std::vector<int> d_pilot_carriers;
+  std::vector<int> d_all_carriers;                      // tracks which are data(0), pilot(1) or dc(2)
 
   int randsym();
 
@@ -402,7 +403,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void generateOFDMSymbol(gr_complex* out, int len);
   void copyOFDMSymbol(gr_complex *out, int len);
 
-  unsigned int d_ofdm_index;
+  int d_ofdm_index;
   bool d_default;
   unsigned int d_source;
 
@@ -482,6 +483,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   FILE *d_fp_log; bool d_log_open;
 
   void logNativeTxSymbols(gr_complex *out);
+  void fill_all_carriers_map();
   FILE *d_fp_native; bool d_log_open_native;
 
 

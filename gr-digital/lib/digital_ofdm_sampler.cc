@@ -37,6 +37,8 @@ double lts_frac_of_secs;
 uint64_t lts_secs;
 uint64_t lts_samples_since;
 
+uint64_t last_sync_sec;
+double last_sync_frac_sec;
 
 #include <digital_ofdm_sampler.h>
 #include <gr_io_signature.h>
@@ -87,6 +89,10 @@ digital_ofdm_sampler::digital_ofdm_sampler (unsigned int fft_length,
 {
   lts_samples_since=0;
   set_relative_rate(1.0/(double) fft_length);   // buffer allocator hint
+
+  last_sync_sec = 0;
+  last_sync_frac_sec = 0.0;
+  d_prev_index = 0;
 
   std::string arg("");
   d_usrp = uhd::usrp::multi_usrp::make(arg);
@@ -150,22 +156,45 @@ digital_ofdm_sampler::general_work (int noutput_items,
 
   outsig[0] = 0; // set output to no signal by default
 
+  unsigned int delta = 0;
+
   // Search for a preamble trigger signal during the next symbol length
   while((d_state != STATE_PREAMBLE) && (index <= (d_symbol_length+d_fft_length))) {
     if(trigger[index]) {
+
+      unsigned int allowed_misalignment = 2;
+      unsigned int gap = 4200;
+      unsigned left_boundary = gap - allowed_misalignment;
+      unsigned right_boundary = gap + allowed_misalignment;
+
+      uint64_t samples_passed = lts_samples_since + index;
+      unsigned int obs_gap = samples_passed - d_prev_index;
+
+      if(obs_gap > left_boundary && obs_gap < right_boundary) {
+	  samples_passed = d_prev_index + gap;
+	  index += (gap - obs_gap);
+	  delta = gap - obs_gap; 
+	  printf("index: %u, gap: %d, obs_gap: %d, delta: %d\n", index, gap, obs_gap, delta); fflush(stdout);
+      }
+
+
+      d_prev_index = samples_passed;
+
+
       outsig[0] = 1; // tell the next block there is a preamble coming
       d_state = STATE_PREAMBLE;
 
       // The analog to digital converter is 400 million samples / sec.  That translates to 
       // 2.5ns of time for every sample.
-
       int decimation = 128;
       double rate = 1.0/decimation;
 
       double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
-      uint64_t samples_passed = lts_samples_since + index;
+      //uint64_t samples_passed = lts_samples_since + index;
       double elapsed = samples_passed * time_per_sample;
-      
+
+      printf("sample index (PREAMBLE): %llu\n", samples_passed); fflush(stdout);      
+
       // Use the last time stamp to calculate the time of the premable synchronization
       uint64_t sync_sec = (int)elapsed + lts_secs;
       double sync_frac_sec = elapsed - (int)elapsed + lts_frac_of_secs;
@@ -173,6 +202,9 @@ digital_ofdm_sampler::general_work (int noutput_items,
         sync_sec += (uint64_t)sync_frac_sec; 
         sync_frac_sec -= (uint64_t)sync_frac_sec;
       }
+
+      uint64_t interval_sec = sync_sec - last_sync_sec;
+      double interval_frac_sec = sync_frac_sec - last_sync_frac_sec;
 
       if(VERBOSE || 1) {
         std::cout << "got a preamble.... calculating timestamp of sync\n";
@@ -182,6 +214,9 @@ digital_ofdm_sampler::general_work (int noutput_items,
         std::cout << "... elapsed: "<< elapsed << "\n";
         std::cout << "... sync_sec: "<< sync_sec << "\n";
         std::cout << "... sync_fs: "<< sync_frac_sec << "\n";
+	if(last_sync_sec != 0) {
+	   std::cout << "... interval_sec: " << interval_sec << "... interval_frac_sec: " << interval_frac_sec << "... last_sync_sec: " << last_sync_sec << "... last_sync_frac_sec: "<< last_sync_frac_sec << std::endl;
+	}
       }
 
       // Pack up our time of synchronization, pass it along using the stream tags

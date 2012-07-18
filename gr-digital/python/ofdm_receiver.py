@@ -130,16 +130,27 @@ class ofdm_receiver(gr.hier_block2):
 	self.connect(self, self.chan_filt)
 	
 	use_chan_filt = options.use_chan_filt
+	correct_freq_offset = 1
+
 	if use_chan_filt == 1:
  	    ##### chan_filt -> SYNC, chan_filt -> SIGMIX ####
 	    self.connect(self.chan_filt, self.ofdm_sync)
-	    self.connect(self.chan_filt, gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))        # apurv++ follow freq offset
-	    #self.connect(self.chan_filt, gr.file_sink(gr.sizeof_gr_complex, "ofdm_receiver-chan_filt_c.dat"))
+	    if correct_freq_offset == 1:
+		# enable if frequency offset correction is required #
+       	    	self.connect(self.chan_filt, gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))        # apurv++ follow freq offset
+	    else:
+		self.connect(self.chan_filt, (self.sampler, 0))
+
+	    self.connect(self.chan_filt, gr.file_sink(gr.sizeof_gr_complex, "ofdm_receiver-chan_filt_c.dat"))
 	elif use_chan_filt == 2: 
 	    #### alternative: chan_filt-> NULL, file_source -> SYNC, file_source -> SIGMIX ####
 	    self.connect(self.chan_filt, gr.null_sink(gr.sizeof_gr_complex))
-	    self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), self.ofdm_sync)
-	    self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))
+	    if correct_freq_offset == 1:
+	        self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), self.ofdm_sync)
+	   	self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))
+	    else:
+		self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), self.ofdm_sync)
+		self.connect(gr.file_source(gr.sizeof_gr_complex, "chan_filt.dat"), (self.sampler, 0))
 	else:
 	    # chan_filt->NULL #
 	    self.connect(self.chan_filt, gr.null_sink(gr.sizeof_gr_complex))
@@ -147,22 +158,29 @@ class ofdm_receiver(gr.hier_block2):
 	method = options.method
 	if method == -1:
 	    ################## for offline analysis, dump sampler input till the frame_sink, using io_signature4 #################
-            self.connect((self.ofdm_sync,0), self.nco, (self.sigmix,1))   					# freq offset (0'ed :/)
-            self.connect(self.sigmix, (self.sampler,0))                   					# corrected output (0'ed FF)
-            self.connect((self.ofdm_sync,1), gr.delay(gr.sizeof_char, fft_length), (self.sampler, 1))           # timing signal
+	    if correct_freq_offset == 1:
+		# enable if frequency offset correction is required #
+            	self.connect((self.ofdm_sync,0), self.nco, (self.sigmix,1))   					# freq offset (0'ed :/)
+	        self.connect(self.sigmix, (self.sampler,0))                   					# corrected output (0'ed FF)
+		self.connect((self.ofdm_sync,1), gr.delay(gr.sizeof_char, fft_length), (self.sampler, 1))           # timing signal
+
+	    else:
+		# disable frequency offset correction completely #
+		self.connect((self.ofdm_sync,0), gr.null_sink(gr.sizeof_float))
+		self.connect((self.ofdm_sync,1), (self.sampler, 1))           # timing signal
+
 
 	    # route received time domain to sink (all-the-way) for offline analysis #
 	    self.connect((self.sampler, 0), (self.ofdm_frame_acq, 2))
 
-	    # some logging #
-            #self.connect(self.sigmix, gr.file_sink(gr.sizeof_gr_complex, "ofdm_rx_ff_corrected_data_c.dat"))
-            #self.connect((self.sigmix, 1), gr.file_sink(gr.sizeof_gr_complex, "ofdm_rx_ff_uncorrected_data_c.dat"))
-            #self.connect((self.sampler, 1), gr.file_sink(gr.sizeof_char*fft_length, "ofdm_sampler_timing.dat"))         #timing
 	elif method == 0:
             # NORMAL functioning #
-       	    self.connect((self.ofdm_sync,0), self.nco, (self.sigmix,1))   # use sync freq. offset output to derotate input signal
-	    self.connect(self.sigmix, (self.sampler,0))                   # sample off timing signal detected in sync alg
-	    self.connect((self.ofdm_sync,1), gr.delay(gr.sizeof_char, fft_length), (self.sampler, 1))		# delay?
+    	    if correct_freq_offset == 1:
+	        self.connect((self.ofdm_sync,0), self.nco, (self.sigmix,1))   # use sync freq. offset output to derotate input signal
+	    	self.connect(self.sigmix, (self.sampler,0))                   # sample off timing signal detected in sync alg
+	    	self.connect((self.ofdm_sync,1), gr.delay(gr.sizeof_char, fft_length), (self.sampler, 1))		# delay?
+	    else:
+		self.connect((self.ofdm_sync,1), (self.sampler, 1))
 
 	    #self.connect((self.sampler, 2), (self.ofdm_frame_acq, 2))	
 	#######################################################################

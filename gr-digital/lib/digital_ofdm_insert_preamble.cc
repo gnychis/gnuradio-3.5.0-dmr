@@ -63,6 +63,7 @@ digital_ofdm_insert_preamble::digital_ofdm_insert_preamble
       throw std::invalid_argument("digital_ofdm_insert_preamble: invalid length for preamble symbol");
   }
 
+  //log_preamble();
   enter_idle();
 }
 
@@ -287,5 +288,39 @@ digital_ofdm_insert_preamble::track_and_modify_timestamp(int output_items) {
      d_p_index += 1;					// for the preamble! 
   } else {
      //std::cerr << "ACQ---- Header received, with no sync timestamp1?\n";
+  }
+}
+
+inline void
+digital_ofdm_insert_preamble::log_preamble() {
+  d_fp = NULL;
+  open_log();
+  assert(d_fp != NULL);
+  int count = ftell(d_fp);
+
+  assert(d_preamble.size() > 0);
+  std::vector<gr_complex> preamble_vec = d_preamble.at(0);
+
+  count = fwrite_unlocked(&preamble_vec[0], sizeof(gr_complex), preamble_vec.size(), d_fp);        // to log preamble
+  fclose(d_fp);
+}
+
+void
+digital_ofdm_insert_preamble::open_log()
+{
+  printf("open_log called\n"); fflush(stdout);
+  int fd;
+  // open the preamble log file //
+  char *filename = "preamble.dat";
+  if ((fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
+     perror(filename);
+     assert(false);
+  }
+  else {
+      if((d_fp = fdopen (fd, true ? "wb" : "w")) == NULL) {
+            fprintf(stderr, "preambles file cannot be opened\n");
+            close(fd);
+            assert(false);
+      }
   }
 }
