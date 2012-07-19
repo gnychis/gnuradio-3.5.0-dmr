@@ -381,6 +381,7 @@ void digital_ofdm_frame_sink::equalize_interpolate_dfe(const gr_complex *in, gr_
   else if(d_hdr_ofdm_index == d_num_hdr_ofdm_symbols-1) {
       d_end_angle[sender_index] = angle;
       d_slope_angle[sender_index] = (d_end_angle[sender_index] - d_start_angle[sender_index])/((float) d_hdr_ofdm_index);	
+      printf("(after header) sender index: %d, d_phase: %f, d_freq: %f\n", sender_index, d_phase[sender_index], d_freq[sender_index]); fflush(stdout);
   }
 }
 
@@ -577,13 +578,13 @@ digital_make_ofdm_frame_sink(const std::vector<gr_complex> &sym_position,
 			unsigned int occupied_carriers, unsigned int fft_length,
                         float phase_gain, float freq_gain, unsigned int id, 
 			unsigned int batch_size, unsigned int decode_flag, 
-			int replay_flag)
+			int fwd_index, int replay_flag)
 {
   return gnuradio::get_initial_sptr(new digital_ofdm_frame_sink(sym_position, sym_value_out,
                                                         target_queue, fwd_queue,
 							occupied_carriers, fft_length,
                                                         phase_gain, freq_gain, id,
-							batch_size, decode_flag, replay_flag));
+							batch_size, decode_flag, fwd_index, replay_flag));
 }
 
 
@@ -593,7 +594,7 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
 				       unsigned int occupied_carriers, unsigned int fft_length,
                                        float phase_gain, float freq_gain, unsigned int id,
 				       unsigned int batch_size, unsigned int decode_flag, 
-				       int replay_flag)
+				       int fwd_index, int replay_flag)
   : gr_sync_block ("ofdm_frame_sink",
                    //gr_make_io_signature2 (2, 2, sizeof(gr_complex)*occupied_carriers, sizeof(char)),  // apurv--
                    gr_make_io_signature4 (2, 4, sizeof(gr_complex)*occupied_carriers, sizeof(char), sizeof(gr_complex)*occupied_carriers, sizeof(gr_complex)*fft_length), //apurv++
@@ -610,7 +611,8 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
     d_pkt_num(0),
     d_id(id),
     d_fft_length(fft_length),
-    d_out_queue(fwd_queue)
+    d_out_queue(fwd_queue),
+    d_fwd_index(fwd_index)
 {
   std::string carriers = "F00F";                //8-DC subcarriers      // apurv++
 
@@ -4384,7 +4386,7 @@ digital_ofdm_frame_sink::matchSymbol(gr_complex x, gr_complex &closest_sym,
 void
 digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
 {
-  printf("demodulate_ILP_2, pkt_no: %d\n", d_pkt_num); fflush(stdout);
+  printf("demodulate_ILP_2, pkt_no: %d, senders: %d\n", d_pkt_num, d_pktInfo->n_senders); fflush(stdout);
   // initialize 'bytes decoded' for every batch //
   vector<unsigned char*> bytes_out_vec;
   for(unsigned int k = 0; k < d_batch_size; k++) {
@@ -4581,9 +4583,10 @@ digital_ofdm_frame_sink::buildMap_pilot(FlowInfo *flowInfo, gr_complex* sym_posi
 					vector<gr_complex>* dfe, gr_complex* carrier, 
 					int subcarrier_index) {
 
-  //printf("buildMap_pilot start\n"); fflush(stdout);
-  int num_senders = 1; //d_pktInfo->n_senders;					// REMOVEEEEEEE
+  int num_senders = d_pktInfo->n_senders;					// REMOVEEEEEEE
   int subcarrier = d_data_carriers[subcarrier_index];
+
+  //printf("buildMap_pilot start, num_senders: %d\n", num_senders); fflush(stdout);
 
   gr_complex coeffs[5];
   for(unsigned int j = 0; j < d_batch_size; j++)
@@ -4631,7 +4634,7 @@ void digital_ofdm_frame_sink::track_pilot_dfe(gr_complex *in, int sender,
 					  gr_complex& carrier, vector<gr_complex>& dfe_pilot) {
   gr_complex phase_error = 0.0;
   float cur_pilot = 1.0;
-  gr_complex *estimates = d_pktInfo->hestimates[0];   				// FIXME!! - different pilots for different senders, eh?
+  gr_complex *estimates = d_pktInfo->hestimates[sender]; 			// FIXME!! - different pilots for different senders, eh?
 
   for (unsigned int i = 0; i < d_pilot_carriers.size(); i++) {
     gr_complex pilot_sym(cur_pilot, 0.0);
@@ -4661,6 +4664,7 @@ void digital_ofdm_frame_sink::track_pilot_dfe(gr_complex *in, int sender,
     if (norm(sigeq)> 0.001)
       dfe_pilot[i] += d_eq_gain * (pilot_sym/sigeq - dfe_pilot[i]);
   }
+  d_end_angle[sender] = angle;
 }
 
 inline void
@@ -4705,6 +4709,8 @@ unsigned int
 digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
                                               FlowInfo *flowInfo, vector<gr_complex>* dfe_pilot, 
 					      vector<gr_complex*> interpolated_coeffs) {
+  printf("digital_ofdm_frame_sink::demapper_ILP_2_pilot, senders: %d\n", d_nsenders); fflush(stdout);
+
   unsigned int bytes_produced = 0;
   assert(d_batch_size <= MAX_BATCH_SIZE);
 
@@ -4725,7 +4731,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
   for(unsigned int s = 0; s < d_nsenders; s++) {
 
      /* using slope of angle1, estimate the angle after the *gap*, and deduce d_phase and d_freq */
-     if(ofdm_symbol_index == 0 && NULL_OFDM_SYMBOLS != 0) {
+     if(ofdm_symbol_index == 0 && NULL_OFDM_SYMBOLS != 0 && s==0 && d_nsenders > 1) {	// only for lead forwarder, and multiple senders //
         int gap = NULL_OFDM_SYMBOLS;
 
         float est_angle = d_slope_angle[s] * gap + d_end_angle[s];
@@ -4738,10 +4744,29 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
 
         d_phase[s] = est_phase; d_freq[s] = est_freq;                   // get the d_phase1 and d_freq1 values after the gap, to compare with the actual d_phase and d_freq values
 
-        printf("estimated angle: %f, d_phase: %f, d_freq: %f\n", est_angle, est_phase, est_freq); fflush(stdout);
+        //printf("sender: %d, estimated angle: %f, d_phase: %f, d_freq: %f\n", s, est_angle, est_phase, est_freq); fflush(stdout);
      }
 
-     track_pilot_dfe(sym_vec, s, carrier[s], dfe_pilot[s]);
+     /* if multiple senders: then odd pilots belong to the lead forwarder, and even pilots to the slave forwarder */
+     if(d_nsenders == 1 || (s==0 && (ofdm_symbol_index+1)%2==1) || (s==1 && (ofdm_symbol_index+1)%2==0)) {
+	printf("track_pilot_dfe, sender: %d, ofdm_symbol_index: %d\n", s, (ofdm_symbol_index+1)); fflush(stdout);
+     	track_pilot_dfe(sym_vec, s, carrier[s], dfe_pilot[s]);
+     }
+     else {
+	// calculate the updated angle based on the slope (gap of 2 symbols), and consequently derive d_phase and d_freq for the sender //
+	int gap = 2;
+	float est_angle = d_slope_angle[s] * gap + d_end_angle[s];
+	float est_freq = d_freq[s] - d_freq_gain * est_angle;
+	float est_phase = d_phase[s] + est_freq - d_phase_gain * est_angle;
+	if(est_phase >= 2*M_PI) est_phase -= 2*M_PI;
+	if(est_phase < 0) est_phase += 2*M_PI;
+	d_phase[s] = est_phase; d_freq[s] = est_freq;
+	d_end_angle[s] = est_angle;
+	carrier[s] = gr_expj(-est_angle);
+     }	
+
+     printf("sender: %d, d_end_angle: %f, d_phase: %f, d_freq: %f\n", s, d_end_angle[s], d_phase[s], d_freq[s]); fflush(stdout);
+
      interpolate_data_dfe(dfe_pilot[s], dfe_data[s]);
      assert(dfe_data[s].size() == n_data_carriers); 
   }
@@ -5099,10 +5124,12 @@ digital_ofdm_frame_sink::test_sync_send(CreditInfo *creditInfo) {
   int d_symbols = 7;
   int n_actual_symbols = d_symbols * d_data_carriers.size();
 
+  /*
   gr_complex *out_symbols = (gr_complex*) malloc(sizeof(gr_complex) * n_actual_symbols);
   int count = fread_unlocked(out_symbols, sizeof(gr_complex), n_actual_symbols, d_fp_sync_symbols);
 
   assert(count == n_actual_symbols);
+  */
 
   /* pick new random <coeff> and encode the data symbols */
   assert(d_batch_size == 1);
@@ -5111,7 +5138,7 @@ digital_ofdm_frame_sink::test_sync_send(CreditInfo *creditInfo) {
   float amp = 1.0;
   gr_complex coeff = amp * gr_expj(phase * M_PI/180);
   for(int i = 0; i < n_actual_symbols; i++) {
-	out_symbols[i] *= coeff;
+	//out_symbols[i] *= coeff;
   }
 
   /* make header */
@@ -5141,16 +5168,16 @@ digital_ofdm_frame_sink::test_sync_send(CreditInfo *creditInfo) {
   makeHeader(header, header_bytes, flow_info, creditInfo->nextLink.linkId);
   //debugHeader(header_bytes); 
 
-  /* the outgoing message */
+  /* the outgoing message 
   gr_message_sptr out_msg = gr_make_message(DATA_TYPE, 0, 0, HEADERBYTELEN + (n_actual_symbols * sizeof(gr_complex)));
   memcpy(out_msg->msg(), header_bytes, HEADERBYTELEN);
 
   int offset = HEADERBYTELEN;
-  memcpy(out_msg->msg() + HEADERBYTELEN, out_symbols, sizeof(gr_complex) * n_actual_symbols);
+  memcpy(out_msg->msg() + HEADERBYTELEN, out_symbols, sizeof(gr_complex) * n_actual_symbols); */
 
-  /* just send the header for now (no payload)  
+  /* just send the header for now (no payload)  */
   gr_message_sptr out_msg = gr_make_message(DATA_TYPE, 0, 0, HEADERBYTELEN);
-  memcpy(out_msg->msg(), header_bytes, HEADERBYTELEN); */ 
+  memcpy(out_msg->msg(), header_bytes, HEADERBYTELEN);  
   
 
   /* set the outgoing timestamp */
@@ -5165,8 +5192,13 @@ digital_ofdm_frame_sink::test_sync_send(CreditInfo *creditInfo) {
   int null_ofdm_symbols = 4000;
 
   int cp_length = d_fft_length/4;
-  //uint32_t num_samples = (d_num_hdr_ofdm_symbols+1+null_ofdm_symbols) * (d_fft_length+cp_length);
-  uint32_t num_samples = (null_ofdm_symbols) * (d_fft_length+cp_length);
+
+  /* if lead forwarder, then go after the 'guard' duration, else wait for lead sender's header+preamble */
+  uint32_t num_samples = (d_num_hdr_ofdm_symbols+1+null_ofdm_symbols) * (d_fft_length+cp_length);
+  if(d_fwd_index == 2) {
+      num_samples += (d_num_hdr_ofdm_symbols+1) * (d_fft_length+cp_length);
+  }
+
   double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
   double duration = num_samples * time_per_sample; 
   printf("RX timestamp (%llu, %f), duration: %f\n", sync_secs, sync_frac_of_secs, duration); fflush(stdout);

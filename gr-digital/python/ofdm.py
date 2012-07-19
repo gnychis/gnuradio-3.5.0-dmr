@@ -115,7 +115,8 @@ class ofdm_mod(gr.hier_block2):
         self._pkt_input = digital_swig.ofdm_mapper_bcv(rotated_const, msgq_limit,
                                              options.occupied_tones, options.fft_length, 
 		  			     options.id, options.src,
-					     options.batch_size, options.encode_flag)
+					     options.batch_size, options.encode_flag,
+					     options.fwd)
         
 
         self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, padded_preambles)
@@ -224,6 +225,8 @@ class ofdm_mod(gr.hier_block2):
 			  help="refer ofdm.py (mod) param [default=%default]")
 	expert.add_option("", "--ack", type="intx", default=0,
 			  help="enables ACK on ethernet [default=%default]")
+	expert.add_option("", "--fwd", type="intx", default=0,
+                          help="forwarder ranking (1:lead forwarder, 2: 2nd slave, 3:3rd slave, etc [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation
@@ -335,6 +338,7 @@ class ofdm_demod(gr.hier_block2):
                                              self._occupied_tones, self._fft_length,
                                              phgain, frgain, self._id,
 					     self._batch_size, self._decode_flag, 
+					     options.fwd, 
 					     options.replay)
 
         self.connect(self, self.ofdm_recv)
@@ -411,6 +415,8 @@ class ofdm_demod(gr.hier_block2):
         expert.add_option("", "--use-chan-filt", type="intx", default=1,
                           help="refer ofdm_receiver.py param [default=%default]")
 
+	expert.add_option("", "--fwd", type="intx", default=0,
+                          help="forwarder ranking (1:lead forwarder, 2: 2nd slave, 3:3rd slave, etc [default=%default]")
         # apurv++ end #
 
     # Make a static method to call before instantiation

@@ -76,7 +76,8 @@ digital_make_ofdm_frame_sink (const std::vector<gr_complex> &sym_position,
 			 gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 			 unsigned int occupied_tones, unsigned int fft_length,
 			 float phase_gain=0.25, float freq_gain=0.25*0.25/4.0, unsigned int id=1, 
-			 unsigned int batch_size=1, unsigned int decode_flag=1, int replay_flag=0);
+			 unsigned int batch_size=1, unsigned int decode_flag=1, 
+			 int fwd_index=0, int replay_flag=0);
 
 typedef complex<double> comp_d;
 
@@ -424,7 +425,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   unsigned int occupied_tones, unsigned int fft_length,
 			   float phase_gain, float freq_gain, unsigned int id, 
 			   unsigned int batch_size, unsigned int decode_flag,
-			   int replay_flag);
+			   int fwd_index, int replay_flag);
 
  private:
   enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_HEADER};
@@ -481,7 +482,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 		     gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 		     unsigned int occupied_tones, unsigned int fft_length,
 		     float phase_gain, float freq_gain, unsigned int id, 
-		     unsigned int batch_size, unsigned int decode_flag, int replay_flag);
+		     unsigned int batch_size, unsigned int decode_flag, 
+		     int fwd_index, int replay_flag);
 
   void enter_search();
   void enter_have_sync();
@@ -775,7 +777,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   /* usrp instance */
   uhd::usrp::multi_usrp::sptr d_usrp;
-  
+
+  int d_fwd_index;  
  
 };
 

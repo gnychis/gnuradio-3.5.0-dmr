@@ -55,9 +55,10 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsi
                          unsigned int occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source,
 			 unsigned int batch_size,
-			 unsigned int encode_flag)
+			 unsigned int encode_flag,
+			 int fwd_index)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag));
+  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index));
 }
 
 // Consumes 1 packet and produces as many OFDM symbols of fft_length to hold the full packet
@@ -65,7 +66,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 					unsigned int occupied_carriers, unsigned int fft_length, unsigned int id,
 					unsigned int source,
 					unsigned int batch_size,
-					unsigned int encode_flag)
+					unsigned int encode_flag,
+					int fwd_index)
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
 		   gr_make_io_signature2 (1, 2, sizeof(gr_complex)*fft_length, sizeof(char))),
@@ -86,7 +88,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_encode_flag(encode_flag),
     d_sock_opened(false),
     d_time_tag(false),
-    d_trigger_sock_opened(false) 
+    d_trigger_sock_opened(false),
+    d_fwd_index(fwd_index)
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
@@ -254,7 +257,8 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 
   if(!d_msg[0]) {
     d_msg[0] = d_msgq->delete_head();			   // block, waiting for a message
-    d_ofdm_index = 0;
+    d_hdr_ofdm_index = 0;
+    d_data_ofdm_index = 0;
     d_msg_offset[0] = 0;
     d_bit_offset[0] = 0;
     d_nresid[0] = 0;
@@ -341,28 +345,27 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
            d_time_tag = true;
         }
 	tx_pilot = true;
+	d_hdr_ofdm_index++;
      }
-     else if(d_null_symbol_cnt < NULL_SYMBOL_COUNT) {
+     else if(d_fwd_index == 1 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT)) {	// lead_fwder: send NULL symbols to accomodate slave fwders
 	d_null_symbol_cnt++;
      }
      else {
 	/* header has already been modulated, just send the payload *symbols* as it is */
 	gr_complex *t_out = (gr_complex*) malloc(sizeof(gr_complex) * d_data_carriers.size());
 
-	int _offset = (d_ofdm_index-34-NULL_SYMBOL_COUNT) * d_data_carriers.size() * sizeof(gr_complex) + HEADERBYTELEN;
-	printf("_offset: %d, d_ofdm_index: %d\n", _offset, d_ofdm_index); fflush(stdout);
-	memcpy(t_out, d_msg[0]->msg() + _offset, sizeof(gr_complex) * d_data_carriers.size());
-
-	logGeneratedTxSymbols(t_out);
-
  	copyOFDMSymbol(out, d_msg[0]->length());		
 	//logNativeTxSymbols(out);
-	free(t_out);
 	//printf("data--------- offset: %d\n", d_msg_offset[0]); fflush(stdout);
-	tx_pilot = true;
-     }  
+	d_data_ofdm_index+=1;
 
-     d_ofdm_index+=1; 
+	/* if multiple forwarders (fwd_index>0) , then pilot subcarriers need to be shared */
+	switch(d_fwd_index) {
+	    case 0: tx_pilot = true; break;						// single fwder //
+	    case 1: tx_pilot = (d_data_ofdm_index % 2 == 1)?true:false; break;		// lead: odd symbols //
+	    case 2: tx_pilot = (d_data_ofdm_index % 2 == 0)?true:false; break;		// slave: even symbols //
+	}
+     }  
   }
 
 #ifdef USE_PILOT
@@ -378,7 +381,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
   /* complete message modulated */
   if(d_msg_offset[0] == d_msg[0]->length()) {
       d_msg[0].reset();
-      printf("num_ofdm_symbols: %d\n", d_ofdm_index); fflush(stdout); 
+      printf("num_ofdm_symbols: %d\n", d_hdr_ofdm_index + d_data_ofdm_index); fflush(stdout); 
       d_pending_flag = 2;						// marks the last OFDM data symbol (for burst tagger trigger) //
       d_time_tag = false;
   }
@@ -675,12 +678,11 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       generateOFDMSymbolHeader(out); 					// send the header symbols out first //
       tx_pilot = true;
   }
-  else if(d_null_symbol_cnt < NULL_SYMBOL_COUNT) {
+  else if(d_fwd_index == 1 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT)) {
       d_null_symbol_cnt++;  // to test sync send - send null ofdm symbol //
   }
   else
   {
-      assert(d_null_symbol_cnt == NULL_SYMBOL_COUNT);
        // offline analysis //
       if(!d_init_log) {
            assert(open_log());
@@ -729,6 +731,14 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       assert(d_ofdm_symbol_index < d_num_ofdm_symbols);
       d_ofdm_symbol_index++;
 
+      // REMOVEEEEEEEE -- just testing //
+      switch(d_fwd_index) {
+          case 0: tx_pilot = true; break;                                             // single fwder //
+          case 1: tx_pilot = (d_data_ofdm_index % 2 == 1)?true:false; break;          // lead: odd symbols //
+          case 2: tx_pilot = (d_data_ofdm_index % 2 == 0)?true:false; break;          // slave: even symbols //
+      }
+      // end //
+
       if(d_modulated)
       {
 	  d_pending_flag = 2;                                             // marks the last OFDM data symbol (for burst tagger trigger) //
@@ -747,6 +757,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   }
 
 #ifdef USE_PILOT
+  printf("ofdm_symbol_index: %d, tx_pilot: %d\n", d_ofdm_symbol_index, tx_pilot); fflush(stdout);
   if(tx_pilot) {
       double cur_pilot = 1.0;
       for(int i = 0; i < d_pilot_carriers.size(); i++) {

@@ -327,7 +327,7 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsi
 			 unsigned occupied_carriers, unsigned int fft_length, unsigned int id=1,
 			 unsigned int source_flag=0,
 			 unsigned int batch_size=1,
-		 	 unsigned int encode_flag=1);
+		 	 unsigned int encode_flag=1, int fwd_index=0);
 
 /*!
  * \brief take a stream of bytes in and map to a vector of complex
@@ -343,12 +343,12 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
 			   unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			   unsigned int source_flag,
-			   unsigned int batch_size, unsigned int encode_flag);
+			   unsigned int batch_size, unsigned int encode_flag, int fwd_index);
  protected:
   digital_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
 		         unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source_flag,
-			 unsigned int batch_size, unsigned int encode_flag);
+			 unsigned int batch_size, unsigned int encode_flag, int fwd_index);
 
  private:
   /* data */
@@ -403,7 +403,6 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void generateOFDMSymbol(gr_complex* out, int len);
   void copyOFDMSymbol(gr_complex *out, int len);
 
-  int d_ofdm_index;
   bool d_default;
   unsigned int d_source;
 
@@ -515,7 +514,9 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void make_time_tag1();  
 
   void test_socket(); 
- 
+
+  int d_fwd_index;
+  int d_data_ofdm_index, d_hdr_ofdm_index; 
 /* apurv++ ends */
 };
 
