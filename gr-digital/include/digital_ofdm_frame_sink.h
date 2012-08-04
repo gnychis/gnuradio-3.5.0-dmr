@@ -61,6 +61,11 @@
 //#define USE_HEADER_PLL 0
 
 #define NULL_OFDM_SYMBOLS 35
+#define MAX_OFDM_SYMBOLS 170
+#define MAX_OCCUPIED_CARRIERS 88
+
+//#define MAX_OCCUPIED_CARRIERS 64
+//#define MAX_DATA_CARRIERS 48
 
 // apurv for logging ends //
 
@@ -77,7 +82,8 @@ digital_make_ofdm_frame_sink (const std::vector<gr_complex> &sym_position,
 			 unsigned int occupied_tones, unsigned int fft_length,
 			 float phase_gain=0.25, float freq_gain=0.25*0.25/4.0, unsigned int id=1, 
 			 unsigned int batch_size=1, unsigned int decode_flag=1, 
-			 int fwd_index=0, int replay_flag=0);
+			 int fwd_index=0, int replay_flag=0,
+			 int exp_size=400, int fec_n=0, int fec_k=0);
 
 typedef complex<double> comp_d;
 
@@ -425,7 +431,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   unsigned int occupied_tones, unsigned int fft_length,
 			   float phase_gain, float freq_gain, unsigned int id, 
 			   unsigned int batch_size, unsigned int decode_flag,
-			   int fwd_index, int replay_flag);
+			   int fwd_index, int replay_flag,
+			   int exp_size, int fec_n, int fec_k);
 
  private:
   enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_HEADER};
@@ -483,7 +490,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 		     unsigned int occupied_tones, unsigned int fft_length,
 		     float phase_gain, float freq_gain, unsigned int id, 
 		     unsigned int batch_size, unsigned int decode_flag, 
-		     int fwd_index, int replay_flag);
+		     int fwd_index, int replay_flag,
+		     int exp_size, int fec_n, int fec_k);
 
   void enter_search();
   void enter_have_sync();
@@ -686,7 +694,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void buildIdealPosMap(FlowInfo *flowInfo, vector<comp_d> &ideal_map);
 
 
-  void packCoefficientsInHeader(MULTIHOP_HDR_TYPE& header, gr_complex* coeffs, FlowInfo *flowInfo);
+  void packCoefficientsInHeader(MULTIHOP_HDR_TYPE& header, gr_complex* coeffs, int, FlowInfo *flowInfo);
   void interpolate_coeffs(gr_complex* in_coeffs, gr_complex *out_coeffs);   
 
   /* fwder: possibly change outgoing signal to closest symbols */
@@ -726,7 +734,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   /* alternative way of doing ILP, more incremental in nature */
   //float **d_euclid_dist;						// [subcarrier][2^batch_size]; records the euclid dist seen on each subcarrier, for each possibility in the table! //
-  float d_euclid_dist[170][72][4];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
+  float d_euclid_dist[MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS][4];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
   unsigned int demapper_ILP_2(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
                       vector<gr_complex*> batched_sym_position, FlowInfo *flowInfo,
                       vector<gr_complex> dfe_vec);
@@ -743,7 +751,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   unsigned int demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
                                               FlowInfo *flowInfo, vector<gr_complex>* dfe_pilot,
                                               vector<gr_complex*> interpolated_coeffs);
-  void interpolate_data_dfe(vector<gr_complex> dfe_pilot, vector<gr_complex>& dfe_data);
+  void interpolate_data_dfe(vector<gr_complex> dfe_pilot, vector<gr_complex>& dfe_data, bool correct, gr_complex *in, gr_complex carrier);
   void track_pilot_dfe(gr_complex *in, int sender, gr_complex& carrier, vector<gr_complex>& dfe_vec);
   void buildMap_pilot(FlowInfo *flowInfo, gr_complex* sym_position,
                                         vector<gr_complex*> interpolated_coeffs,
@@ -751,7 +759,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
                                         int subcarrier_index);
 
   void test_decode_signal(gr_complex *in, vector<gr_complex*> interpolated_coeffs);
-  bool crc_check(std::string msg);
+  bool crc_check(std::string msg, std::string&);
 
   int d_null_symbol_count;
 #ifdef USE_PILOT
@@ -779,7 +787,16 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   uhd::usrp::multi_usrp::sptr d_usrp;
 
   int d_fwd_index;  
- 
+  void calc_outgoing_timestamp(uint64_t &sync_secs, double &sync_frac_of_secs); 
+  void reduceCoefficients(FlowInfo *flowInfo);
+  bool do_carrier_correction();
+
+  void interpolate_coeffs_lerp(gr_complex* in_coeffs, gr_complex *out_coeffs);
+
+  void print_msg(std::string); 
+  int d_expected_size, d_fec_n, d_fec_k;
+  int d_total_batches_received, d_correct_batches;
+  double d_avg_evm_error;			// measure the evm error per batch //   
 };
 
 

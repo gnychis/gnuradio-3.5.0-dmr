@@ -30,6 +30,9 @@
 #define PADDING_SIZE    2
 #define ACK_PADDING_SIZE 2 
 
+#define MAX_DATA_CARRIERS 72
+#define COMPRESSION_FACTOR 4
+
 #define DATA_TYPE       1 //0
 #define ACK_TYPE        2 //1
 #define TRIGGER_TYPE    3
@@ -65,7 +68,10 @@ typedef struct multihop_hdr_type {
   //gr_complex coeffs[MAX_BATCH_SIZE];
   //COEFF coeffs[MAX_BATCH_SIZE*2];
   // 36 * 2 * 4 =  288
-  COEFF coeffs[MAX_BATCH_SIZE * 36];
+  //COEFF coeffs[MAX_BATCH_SIZE * 36];
+
+  // 24 * 2 * 4 = 192
+  COEFF coeffs[MAX_BATCH_SIZE * (MAX_DATA_CARRIERS/COMPRESSION_FACTOR)];
 
   // 1
   unsigned char link_id;                             // composite link id

@@ -130,7 +130,7 @@ class ofdm_receiver(gr.hier_block2):
 	self.connect(self, self.chan_filt)
 	
 	use_chan_filt = options.use_chan_filt
-	correct_freq_offset = 1
+	correct_freq_offset = 0
 
 	if use_chan_filt == 1:
  	    ##### chan_filt -> SYNC, chan_filt -> SIGMIX ####

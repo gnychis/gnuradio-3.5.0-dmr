@@ -33,7 +33,7 @@ typedef boost::shared_ptr<digital_ofdm_sampler> digital_ofdm_sampler_sptr;
 
 DIGITAL_API digital_ofdm_sampler_sptr digital_make_ofdm_sampler (unsigned int fft_length, 
 					   unsigned int symbol_length,
-					   unsigned int timeout=1000);
+					   unsigned int timeout=100);
 
 /*!
  * \brief does the rest of the OFDM stuff
@@ -77,7 +77,7 @@ class DIGITAL_API digital_ofdm_sampler : public gr_block
 
   uint64_t d_prev_index;
   uhd::usrp::multi_usrp::sptr d_usrp;
- 
+  bool d_joint_rx_on; 
 };
 
 #endif

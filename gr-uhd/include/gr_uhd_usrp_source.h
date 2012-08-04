@@ -108,8 +108,8 @@ GR_UHD_API boost::shared_ptr<uhd_usrp_source> uhd_make_usrp_source(
 
 GR_UHD_API boost::shared_ptr<uhd_usrp_source> get_usrp_source_instance();
 
-boost::shared_ptr<uhd_usrp_source> _instance;
-bool _created = false;
+static boost::shared_ptr<uhd_usrp_source> _instance;
+static bool _created = false;
 
 class GR_UHD_API uhd_usrp_source : virtual public gr_sync_block{
 public:

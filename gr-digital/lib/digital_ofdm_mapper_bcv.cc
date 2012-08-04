@@ -56,9 +56,9 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsi
 			 unsigned int source,
 			 unsigned int batch_size,
 			 unsigned int encode_flag,
-			 int fwd_index)
+			 int fwd_index, unsigned int dst_id)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index));
+  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id));
 }
 
 // Consumes 1 packet and produces as many OFDM symbols of fft_length to hold the full packet
@@ -67,7 +67,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 					unsigned int source,
 					unsigned int batch_size,
 					unsigned int encode_flag,
-					int fwd_index)
+					int fwd_index, unsigned int dst_id)
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
 		   gr_make_io_signature2 (1, 2, sizeof(gr_complex)*fft_length, sizeof(char))),
@@ -89,7 +89,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_sock_opened(false),
     d_time_tag(false),
     d_trigger_sock_opened(false),
-    d_fwd_index(fwd_index)
+    d_fwd_index(fwd_index),
+    d_dst_id(dst_id)
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
@@ -102,15 +103,17 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   d_trigger_src_ip_addr = "128.83.141.213";
   d_trigger_src_sock_port = 9001;
   d_trigger_sock = -1;
+#endif
   std::string arg("");
   d_usrp = uhd::usrp::multi_usrp::make(arg);
-#endif
+  d_last_pkt_time = uhd::time_spec_t(0.0);
 
   // this is not the final form of this solution since we still use the occupied_tones concept,
   // which would get us into trouble if the number of carriers we seek is greater than the occupied carriers.
   // Eventually, we will get rid of the occupied_carriers concept.
   std::string carriers = "F00F";		// apurv++,  8 DC subcarriers
-
+  //std::string carriers = "FC3F";              // apurv++,  4 DC subcarriers
+ 
   // A bit hacky to fill out carriers to occupied_carriers length
   int diff = (d_occupied_carriers - 4*carriers.length()); 
   while(diff > 7) {
@@ -155,6 +158,15 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   unsigned int count = 0;			     // tracks the total # of carriers added
   unsigned int pilot_gap = 11; //7; //18;
   unsigned int start_offset = 0; //8;
+#if 0
+  /* pilot configuration */ 
+  int num_pilots = 4;
+  unsigned int pilot_index = 0;                      // tracks the # of pilots carriers added   
+  unsigned int data_index = 0;                       // tracks the # of data carriers added
+  unsigned int count = 0;                            // tracks the total # of carriers added
+  unsigned int pilot_gap = 14; 
+  unsigned int start_offset = 2;
+#endif
 #endif
 
   unsigned int i,j,k;
@@ -600,7 +612,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 
   // timekeeping, etc //
   if(d_modulated) {
-      while(1) {
+      while(0) {
          struct timeval now;
          gettimeofday(&now, 0);
          uint64_t timeNow = (now.tv_sec * 1e6) + now.tv_usec;
@@ -657,8 +669,8 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	     printf("TRIGGER: recv needs to be blocking!! \n"); fflush(stdout);
 	     assert(false);
      }
-     d_time_tag = false;
 #endif
+     d_time_tag = false;
      d_null_symbol_cnt = 0;
   }
 
@@ -669,12 +681,11 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   memset(out, 0, sizeof(gr_complex) * d_fft_length);
 
   if(d_hdr_byte_offset < HEADERBYTELEN) {
-#ifdef TRIGGER_ON_ETHERNET
       if(!d_time_tag) {
            make_time_tag1();
            d_time_tag = true;
         }
-#endif
+
       generateOFDMSymbolHeader(out); 					// send the header symbols out first //
       tx_pilot = true;
   }
@@ -700,7 +711,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	   generateOFDMSymbolData(t_out, k);
 
 	   symbols_vec.push_back(t_out);
-	   logNativeTxSymbols(t_out);
+	   //logNativeTxSymbols(t_out);
       }
 
       assert(symbols_vec.size() == d_batch_size);
@@ -757,7 +768,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   }
 
 #ifdef USE_PILOT
-  printf("ofdm_symbol_index: %d, tx_pilot: %d\n", d_ofdm_symbol_index, tx_pilot); fflush(stdout);
+  //printf("ofdm_symbol_index: %d, tx_pilot: %d\n", d_ofdm_symbol_index, tx_pilot); fflush(stdout);
   if(tx_pilot) {
       double cur_pilot = 1.0;
       for(int i = 0; i < d_pilot_carriers.size(); i++) {
@@ -1146,7 +1157,7 @@ void
 digital_ofdm_mapper_bcv::generateCodeVector()
 {
   // for each subcarrier, record 'd_batch_size' coeffs //
-  int num_carriers = d_data_carriers.size()/2;
+  int num_carriers = d_data_carriers.size()/COMPRESSION_FACTOR;
 
   for(unsigned int k = 0; k < d_batch_size; k++) {
       float cv = rand() % 360 + 1;				// degree
@@ -1192,7 +1203,7 @@ digital_ofdm_mapper_bcv::normalizeSignal(gr_complex* out, int k)
 #ifdef SCALE
      out[d_data_carriers[i]] /= (gr_complex(k)*gr_complex(SCALE));
 #else
-     out[d_data_carriers[i]] /= gr_complex(k);
+     out[d_data_carriers[i]] /= gr_complex(sqrt(k));
 #endif
      //printf("(%f, %f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
   }
@@ -1226,10 +1237,10 @@ digital_ofdm_mapper_bcv::makeHeader()
 {
    printf("makeHeader for pkt: %d\n", d_pkt_num); fflush(stdout);
    memset(&d_header, 0, sizeof(d_header));
-   d_header.dst_id = 2;		//TODO: same as above
+   d_header.dst_id = d_dst_id;
    d_header.flow_id = 0;
    d_header.inno_pkts = d_batch_size;
-   d_header.factor = 1.0/d_batch_size;
+   d_header.factor = 1.0/sqrt(d_batch_size);
 
    d_header.lead_sender = 1;
    d_header.src_id = d_id;         //TODO: remove the hardcoding
@@ -1241,7 +1252,7 @@ digital_ofdm_mapper_bcv::makeHeader()
    d_header.pkt_type = DATA_TYPE;
   
    d_header.pkt_num = d_pkt_num++;
-   d_header.link_id = 1;
+   d_header.link_id = 0;
  
    generateCodeVector();	// also fills up d_header.coeffs
 
@@ -1515,7 +1526,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   int decimation = 128;
   double rate = 1.0/decimation;
  
-  int num_ofdm_symbols_to_wait = 117; //35 + 120;
+  int num_ofdm_symbols_to_wait = 5500;
 
   int cp_length = d_fft_length/4;
   uint32_t num_samples = num_ofdm_symbols_to_wait * (d_fft_length+cp_length);
@@ -1524,19 +1535,31 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
 
   uint64_t sync_secs = (uint64_t) duration;
   double sync_frac_of_secs = duration - (uint64_t) duration;
+  uhd::time_spec_t duration_time = uhd::time_spec_t(sync_secs, sync_frac_of_secs);
 
-  uhd::time_spec_t c_time = d_usrp->get_time_now();
-  //uhd::time_spec_t out_time = c_time + uhd::time_spec_t(sync_secs, sync_frac_of_secs);
-  uhd::time_spec_t out_time = d_trigger_rx_time + uhd::time_spec_t(sync_secs, sync_frac_of_secs);
+  uhd::time_spec_t c_time = d_usrp->get_time_now();           // current time //
+  uhd::time_spec_t out_time = c_time + duration_time;         // scheduled out time //
 
-  printf("timestamp: trigger_rx (%llu, %f), curr_secs: %llu, curr_fracs: %f, out_secs: %llu, out_fracs: %f\n", (uint64_t) d_trigger_rx_time.get_full_secs(), d_trigger_rx_time.get_frac_secs(), (uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), (uint64_t) out_time.get_full_secs(), out_time.get_frac_secs()); fflush(stdout);
+  /* check if the interval from the last packet sent is atleast the duration */
+  uhd::time_spec_t interval_time = out_time - d_last_pkt_time;    // interval between the transmissions //
+  if(interval_time < duration_time) {
+     uhd::time_spec_t extra_gap_time = duration_time - interval_time;
+     out_time += extra_gap_time;
+     interval_time += extra_gap_time;
+  }
+
+  uint64_t interval_samples = (interval_time.get_frac_secs() * 1e8)/decimation;
+
+  //printf("timestamp: curr (%llu, %f), out (%llu, %f) , last_time (%llu, %f), interval(%lld, %f), interval_samples(%llu), duration(%llu, %f)\n", (uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), (uint64_t) out_time.get_full_secs(), out_time.get_frac_secs(), (uint64_t) d_last_pkt_time.get_full_secs(), d_last_pkt_time.get_frac_secs(), (int64_t) interval_time.get_full_secs(), interval_time.get_frac_secs(), interval_samples, sync_secs, sync_frac_of_secs); fflush(stdout);
+
+  d_last_pkt_time = out_time;
 
   const pmt::pmt_t key = pmt::pmt_string_to_symbol("tx_time");
   const pmt::pmt_t value = pmt::pmt_make_tuple(
-                  pmt::pmt_from_uint64((uint64_t) out_time.get_full_secs()),
-                  pmt::pmt_from_double(out_time.get_frac_secs())
-                  );
+		  pmt::pmt_from_uint64((uint64_t) out_time.get_full_secs()),
+		  pmt::pmt_from_double(out_time.get_frac_secs())
+		  );
   const pmt::pmt_t srcid = pmt::pmt_string_to_symbol(this->name());
   add_item_tag(1/*chan0*/, nitems_written(1), key, value, srcid);
   printf("(MAPPER) make_time_tag, at offset: %llu\n", nitems_written(1)); fflush(stdout);
-}
+} 

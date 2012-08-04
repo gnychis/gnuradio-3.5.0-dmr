@@ -116,7 +116,7 @@ class ofdm_mod(gr.hier_block2):
                                              options.occupied_tones, options.fft_length, 
 		  			     options.id, options.src,
 					     options.batch_size, options.encode_flag,
-					     options.fwd)
+					     options.fwd, options.dst_id)
         
 
         self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, padded_preambles)
@@ -169,6 +169,9 @@ class ofdm_mod(gr.hier_block2):
                                                      "ofdm_cp_adder_c.dat"))
 
 	#self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex, "ofdm_cp_adder_c.dat"))
+
+        self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "ofdm_preambles.dat"))
+        self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 
     def send_pkt(self, payload, type=0, eof=False):
         """
@@ -227,6 +230,8 @@ class ofdm_mod(gr.hier_block2):
 			  help="enables ACK on ethernet [default=%default]")
 	expert.add_option("", "--fwd", type="intx", default=0,
                           help="forwarder ranking (1:lead forwarder, 2: 2nd slave, 3:3rd slave, etc [default=%default]")
+	expert.add_option("", "--dst-id", type="intx", default=2,
+                          help="the destination id [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation
@@ -339,7 +344,8 @@ class ofdm_demod(gr.hier_block2):
                                              phgain, frgain, self._id,
 					     self._batch_size, self._decode_flag, 
 					     options.fwd, 
-					     options.replay)
+					     options.replay,
+					     self._size, self._fec_n, self._fec_k)
 
         self.connect(self, self.ofdm_recv)
 	

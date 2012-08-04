@@ -96,6 +96,7 @@ digital_ofdm_sampler::digital_ofdm_sampler (unsigned int fft_length,
 
   std::string arg("");
   d_usrp = uhd::usrp::multi_usrp::make(arg);
+  d_joint_rx_on = false;
 }
 
 void
@@ -160,7 +161,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
 
   // Search for a preamble trigger signal during the next symbol length
   while((d_state != STATE_PREAMBLE) && (index <= (d_symbol_length+d_fft_length))) {
-    if(trigger[index]) {
+    if(trigger[index] && !d_joint_rx_on) {
 
       unsigned int allowed_misalignment = 2;
       unsigned int gap = 4200;
@@ -175,6 +176,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
 	  index += (gap - obs_gap);
 	  delta = gap - obs_gap; 
 	  printf("index: %u, gap: %d, obs_gap: %d, delta: %d\n", index, gap, obs_gap, delta); fflush(stdout);
+	  d_joint_rx_on = true;						// hack: to disallow the false spikes when multiple senders are involved in this tx //
       }
 
 
@@ -298,6 +300,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
     consume_each(index-d_fft_length); // consume everything we've gone through so far leaving the fft length history
     lts_samples_since += index-d_fft_length;
     ret = 0;
+    d_joint_rx_on = false;
     break;
   }
 
