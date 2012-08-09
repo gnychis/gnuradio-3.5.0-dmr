@@ -583,14 +583,14 @@ digital_make_ofdm_frame_sink(const std::vector<gr_complex> &sym_position,
                         float phase_gain, float freq_gain, unsigned int id, 
 			unsigned int batch_size, unsigned int decode_flag, 
 			int fwd_index, int replay_flag,
-			int exp_size, int fec_n, int fec_k)
+			int exp_size, int fec_n, int fec_k, int degree)
 {
   return gnuradio::get_initial_sptr(new digital_ofdm_frame_sink(sym_position, sym_value_out,
                                                         target_queue, fwd_queue,
 							occupied_carriers, fft_length,
                                                         phase_gain, freq_gain, id,
 							batch_size, decode_flag, fwd_index, replay_flag,
-							exp_size, fec_n, fec_k));
+							exp_size, fec_n, fec_k, degree));
 }
 
 
@@ -601,7 +601,7 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
                                        float phase_gain, float freq_gain, unsigned int id,
 				       unsigned int batch_size, unsigned int decode_flag, 
 				       int fwd_index, int replay_flag,
-				       int exp_size, int fec_n, int fec_k)
+				       int exp_size, int fec_n, int fec_k, int degree)
   : gr_sync_block ("ofdm_frame_sink",
                    //gr_make_io_signature2 (2, 2, sizeof(gr_complex)*occupied_carriers, sizeof(char)),  // apurv--
                    gr_make_io_signature4 (2, 4, sizeof(gr_complex)*occupied_carriers, sizeof(char), sizeof(gr_complex)*occupied_carriers, sizeof(gr_complex)*fft_length), //apurv++
@@ -622,7 +622,8 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
     d_fwd_index(fwd_index),
     d_expected_size(exp_size),
     d_fec_n(fec_n),
-    d_fec_k(fec_k)
+    d_fec_k(fec_k),
+    d_degree(degree)
 {
   std::string carriers = "F00F";                //8-DC subcarriers      // apurv++
   //std::string carriers = "FC3F";		  // 4-dc
@@ -1197,7 +1198,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
     /* normalization is only performed for dst. Since we collect the fwder traces in the dst mode, 
        norm did not be done *again* when fwder traces are replayed */
     if(d_dst && d_replay_flag == -1) {
-	printf("denormalizing the signal, factor: %f\n", d_header.factor); fflush(stdout);
+	//printf("denormalizing the signal, factor: %f\n", d_header.factor); fflush(stdout);
 	int n_data_carriers = d_data_carriers.size();
         for(unsigned int i = 0; i < n_data_carriers; i++)
             in[d_data_carriers[i]] /= gr_complex(d_header.factor);
@@ -2120,6 +2121,50 @@ digital_ofdm_frame_sink::save_coefficients()
   printf("hestimates end ------------------------------------------------------------ \n"); fflush(stdout);
 #endif
 
+#ifdef LSQ_COMPRESSION
+  int num_carriers = d_data_carriers.size();                 // each header will have lsq_coeffs of batch1, batch2 and so on..
+  gr_complex *coeffs = (gr_complex*) malloc(sizeof(gr_complex) * d_batch_size * num_carriers);
+
+  if(d_header.src_id == d_header.prev_hop_id) {
+     // if packet is received directly from the source, then no need to do any LSQ //
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+	for(unsigned int s = 0; s < num_carriers; s++) {
+	    int index = k*num_carriers + s;
+	    COEFF hdr_coeff = d_header.coeffs[k];
+	    coeffs[index] = ToPhase_c(hdr_coeff);
+	}
+     }
+  }
+  else {
+     gr_complex lsq_coeffs[MAX_DEGREE * MAX_BATCH_SIZE];
+     assert(d_degree+1 <= MAX_DEGREE);
+
+     // convert the COEFF into gr_complex //
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+         for(unsigned int i = 0; i < d_degree+1; i++) {
+	     int index = k*(d_degree+1) + i;
+	     lsq_coeffs[index] = ToPhase_c(d_header.coeffs[index]);
+	 }
+     }
+
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+        unpackCoefficients_LSQ(&lsq_coeffs[k*(d_degree+1)], &coeffs[k*num_carriers], num_carriers, d_degree);
+     }
+  }
+
+#if 1
+  printf("degree: %d\n", d_degree); fflush(stdout);
+  for(unsigned i = 0; i < num_carriers; i++) {
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+	int index = i + k*num_carriers;
+	float amp = abs(coeffs[index]);
+	float phase = ToPhase_f(coeffs[index]);
+	printf("(A: %f, P: %f) <-> (%f, %f)", amp, phase, coeffs[index].real(), coeffs[index].imag());
+     }
+  }
+#endif
+
+#else
   // for each subcarrier, record 'd_batch_size' coeffs //
   int num_carriers = d_data_carriers.size()/COMPRESSION_FACTOR;
   gr_complex *coeffs = (gr_complex*) malloc(sizeof(gr_complex) * d_batch_size * num_carriers);
@@ -2143,6 +2188,7 @@ digital_ofdm_frame_sink::save_coefficients()
      }
   }
   fflush(stdout); printf("\n"); 
+#endif
 
   d_pktInfo->senders.push_back(sender_id);
   d_pktInfo->coeffs.push_back(coeffs);
@@ -2321,8 +2367,8 @@ digital_ofdm_frame_sink::interpolate_coeffs_lerp(gr_complex* in_coeffs, gr_compl
 
    for(unsigned int k = 0; k < d_batch_size; k++) {
       int start = 0;
-      int x_a = d_data_carriers[start];
-      int x_b = d_data_carriers[start];
+      int x_a = 0;
+      int x_b = 0;
       float denom = 1.0/(x_b - x_a);
 
       unsigned int index = 1;
@@ -2334,24 +2380,24 @@ digital_ofdm_frame_sink::interpolate_coeffs_lerp(gr_complex* in_coeffs, gr_compl
           int di = d_data_carriers[i];
           printf("di: %d, x_a: %d, x_b: %d\n", di, x_a, x_b); fflush(stdout);
 
-          if(di == x_a || di == x_b) {
-             out_coeffs[di*d_batch_size+k] = in_coeffs[(i/4) * d_batch_size + k];
+          if(i == x_a || i == x_b) {
+             out_coeffs[di*d_batch_size+k] = in_coeffs[(i/COMPRESSION_FACTOR) * d_batch_size + k];
              //printf("\t\tout_coeffs: (%f, %f)\n", out_coeffs[di].real(), out_coeffs[di].imag()); fflush(stdout);
           }
           else {
-             if(di > x_b) {
+             if(i > x_b) {
                 x_a = x_b; y_a = y_b;
                 if(index < carrier_entries) {
-                     x_b = d_data_carriers[index * COMPRESSION_FACTOR];
+                     x_b = index * COMPRESSION_FACTOR;
                      y_b = in_coeffs[index*d_batch_size+k];
                      index++;
                  }
                  else {
-                     x_b = d_data_carriers[d_data_carriers.size() - 1];
+                     x_b = d_data_carriers.size() - 1;
                  }
              }
              denom = 1.0/(x_b - x_a);
-             float alpha = float(di - x_a) * denom;               // (x - x_a)/(x_b - x_a)
+             float alpha = float(i - x_a) * denom;               // (x - x_a)/(x_b - x_a)
              out_coeffs[di*d_batch_size+k] = y_a + alpha * (y_b - y_a);
              //printf("\t\tout_coeffs: (%f, %f)\n", out_coeffs[di].real(), out_coeffs[di].imag()); fflush(stdout);
           }
@@ -3421,6 +3467,20 @@ digital_ofdm_frame_sink::do_carrier_correction() {
   return true;
 }
 
+inline float
+digital_ofdm_frame_sink::getAvgAmplificationFactor(vector<gr_complex*> hestimates)
+{
+  unsigned int n_data_carriers = d_data_carriers.size();
+  float avg_atten = 0.0;
+  gr_complex *hest = hestimates[0];
+  for(unsigned int i = 0; i < n_data_carriers; i++) {
+     avg_atten += abs(hest[d_data_carriers[i]]);
+  }
+  avg_atten /= (float)n_data_carriers;
+
+  return avg_atten;             // attenuation //
+}
+
 void
 digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
 {
@@ -3461,7 +3521,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      memcpy(symbols, pInfo->symbols, sizeof(gr_complex) * n_symbols);
 
      phase[i] = rand() % 360 + 1;
-     float amp = 20.0;
+     float amp = getAvgAmplificationFactor(pInfo->hestimates);;
      coeffs[i] = amp * gr_expj(phase[i] * M_PI/180);
 
 #ifndef DEBUG
@@ -4683,18 +4743,25 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
      fill(dfe_pilot[i].begin(), dfe_pilot[i].end(), gr_complex(1.0,0.0));
   }
 
-  /* get the interpolated coefficients  */
-  int num_senders = d_pktInfo->n_senders;
   vector<gr_complex*> interpolated_coeffs;
+  int num_senders = d_pktInfo->n_senders;
+#ifdef LSQ_COMPRESSION
+  // coefficients are already complete for each sender on all subcarriers at d_pktInfo->coeffs //
+  for(int k = 0; k < num_senders; k++) {
+      gr_complex *rx_coeffs = d_pktInfo->coeffs.at(k);
+      interpolated_coeffs.push_back(rx_coeffs);
+  }
+#else
+  /* get the interpolated coefficients  */
   for(int k = 0; k < num_senders; k++) {
       gr_complex *rx_coeffs = d_pktInfo->coeffs.at(k);
       gr_complex *out_coeffs = (gr_complex*) malloc(sizeof(gr_complex) * d_batch_size * d_occupied_carriers);
       memset(out_coeffs, 0, sizeof(gr_complex) *  d_batch_size * d_occupied_carriers);
 
       interpolate_coeffs_lerp(rx_coeffs, out_coeffs);
-      //interpolate_coeffs(rx_coeffs, out_coeffs); 
       interpolated_coeffs.push_back(out_coeffs);
-  }  
+  }
+#endif  
 #else
   // contains the map for each subcarrier
   // each map has 'n_entries = 2^batch_size' entries
@@ -4798,11 +4865,13 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
   } 
 
 #ifdef USE_PILOT
+#ifndef LSQ_COMPRESSION
   for(int i = 0; i < num_senders; i++) {
       gr_complex *out_coeffs = interpolated_coeffs.at(i);
       free(out_coeffs);
   }
   interpolated_coeffs.clear();
+#endif
 #else
   /* cleaning */
   for(unsigned int i = 0; i < d_batch_size; i++) {
@@ -4895,13 +4964,18 @@ digital_ofdm_frame_sink::buildMap_pilot(FlowInfo *flowInfo, gr_complex* sym_posi
 
   int num_senders = d_pktInfo->n_senders;
   int subcarrier = d_data_carriers[subcarrier_index];
+  int n_data_carriers = d_data_carriers.size();
 
   //printf("buildMap_pilot start, num_senders: %d\n", num_senders); fflush(stdout);
 
   gr_complex coeffs[5];
   for(unsigned int j = 0; j < d_batch_size; j++)
   {
-      int coeff_index = subcarrier * d_batch_size + j;
+#ifdef LSQ_COMPRESSION
+      int coeff_index = j * n_data_carriers + subcarrier_index;			// for LSQ, arrangement of coeffs is different: for all batches(sub1, sub2 .. subN)
+#else
+      int coeff_index = subcarrier * d_batch_size + j;				// non LSQ, arrangment is: for all_subcarriers(batch1, batch2 .. batchN)
+#endif
       for(int k = 0; k < num_senders; k++)
       {
           gr_complex *estimates = d_pktInfo->hestimates[k];                    // estimates for 'kth' sender
@@ -5024,7 +5098,7 @@ unsigned int
 digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
                                               FlowInfo *flowInfo, vector<gr_complex>* dfe_pilot, 
 					      vector<gr_complex*> interpolated_coeffs) {
-  printf("digital_ofdm_frame_sink::demapper_ILP_2_pilot, senders: %d\n", d_nsenders); fflush(stdout);
+  //printf("digital_ofdm_frame_sink::demapper_ILP_2_pilot, senders: %d\n", d_nsenders); fflush(stdout);
 
   unsigned int bytes_produced = 0;
   assert(d_batch_size <= MAX_BATCH_SIZE);
@@ -5064,7 +5138,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
 
      /* if multiple senders: then odd pilots belong to the lead forwarder, and even pilots to the slave forwarder */
      if(d_nsenders == 1 || (s==0 && (ofdm_symbol_index+1)%2==1) || (s==1 && (ofdm_symbol_index+1)%2==0)) {
-	printf("track_pilot_dfe, sender: %d, ofdm_symbol_index: %d\n", s, (ofdm_symbol_index+1)); fflush(stdout);
+	//printf("track_pilot_dfe, sender: %d, ofdm_symbol_index: %d\n", s, (ofdm_symbol_index+1)); fflush(stdout);
      	track_pilot_dfe(sym_vec, s, carrier[s], dfe_pilot[s]);
      }
      else {
@@ -5080,7 +5154,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
 	carrier[s] = gr_expj(-est_angle);
      }	
 
-     printf("sender: %d, d_end_angle: %f, d_phase: %f, d_freq: %f\n", s, d_end_angle[s], d_phase[s], d_freq[s]); fflush(stdout);
+     //printf("sender: %d, d_end_angle: %f, d_phase: %f, d_freq: %f\n", s, d_end_angle[s], d_phase[s], d_freq[s]); fflush(stdout);
 
      interpolate_data_dfe(dfe_pilot[s], dfe_data[s], false, NULL, gr_complex(0.0, 0.0));
      assert(dfe_data[s].size() == n_data_carriers); 
@@ -5122,7 +5196,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
 
      if(byte_offset == 8) {
         for(int k = 0; k < d_batch_size; k++) {
-	    if(d_pkt_num == 2) printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
+	    if(d_pkt_num == 2 && 0) printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
 	    //assert(false);
             out_vec[k][bytes_produced] = partial_byte[k];
             partial_byte[k] = 0;
@@ -5569,3 +5643,111 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
      sync_frac_of_secs -= (uint64_t)sync_frac_of_secs;
   }
 }
+
+#ifdef LSQ_COMPRESSION
+inline void
+digital_ofdm_frame_sink::getCoefficients_LSQ(gr_complex *in_coeffs, COEFF *out_coeffs, unsigned int obs, unsigned int degree) {
+  cx_fmat A = randu<cx_fmat> (degree+1, 1);
+  cx_fmat Y = randu<cx_fmat> (obs, 1);
+  cx_fmat X = randu<cx_fmat> (obs, degree+1);
+
+  // build X //
+  for(unsigned int i = 0; i < obs; i++) {
+     for(unsigned int j = 0; j < degree+1; j++) {
+        X(i, j) = pow(i, j);
+     }
+  }
+
+  // build Y //
+  for(unsigned int i = 0; i < obs; i++) {
+     Y(i, 0) = in_coeffs[i];
+  }
+
+  // get A //
+  A = solve(X, Y);
+
+#ifdef DEBUG
+  A.print("A = "); printf("\n");
+  Y.print("Y = "); printf("\n");
+  X.print("X = "); printf("\n");
+
+  // print calculated y again //
+  for(unsigned int i = 0; i < obs; i++) {
+     gr_complex y(0.0, 0.0);
+     for(unsigned int j = 0; j < degree+1; j++) {
+        y += (A(j, 0) * gr_complex(pow(i, j), 0.0));
+     }
+     //printf("(%.3f, %.3f) [%.3f]  [%.3f]\n", y.real(), y.imag(), abs(y), arg(y));
+     cout<<i<<" "<<abs(y)<<" "<<arg(y)<<endl;
+  }
+#endif
+
+  for(unsigned int i = 0; i < degree+1; i++) {
+     out_coeffs[i].amplitude = abs(A(i, 0))  * SCALE_FACTOR_AMP;
+     out_coeffs[i].phase = ToPhase_f(A(i, 0)) * SCALE_FACTOR_PHASE;
+  }
+}
+
+inline void
+digital_ofdm_frame_sink::unpackCoefficients_LSQ(gr_complex *in_coeffs, gr_complex *out_coeffs, unsigned int obs, unsigned int degree) {
+   memset(out_coeffs, 0, sizeof(gr_complex) * obs);
+   for(unsigned int i = 0; i < obs; i++) {
+      for(unsigned int j = 0; j < degree+1; j++) {
+	  out_coeffs[i] += (in_coeffs[j] * gr_complex(pow(i, j), 0.0));
+      }
+   }
+}
+
+inline void
+digital_ofdm_frame_sink::packCoefficientsInHeader_LSQ(MULTIHOP_HDR_TYPE& header, gr_complex* coeffs, int num_inno_pkts, FlowInfo *flowInfo) {
+  printf("packCoefficientsInHeader_LSQ\n"); fflush(stdout);
+  reduceCoefficients_LSQ(flowInfo);                                                 // fill up flowInfo->reduced_coeff //
+
+  /* now reduce the coefficients w.r.t. the new selected coeffs */
+  int num_carriers = d_data_carriers.size();
+  COEFF lsq_coeffs[MAX_BATCH_SIZE*MAX_DEGREE];
+
+  for(unsigned int k = 0; k < d_batch_size; k++) {
+      gr_complex new_coeffs[MAX_DATA_CARRIERS];
+      for(unsigned int s = 0; s < num_carriers; s++) {
+	 for(int j = 0; j < num_inno_pkts; j++) {
+	    gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[j];  		// reduced coeffs for this inno pkt //
+	    new_coeffs[s] += (coeffs[j] * pkt_coeffs[s + k*num_carriers]);
+	 }	 
+      }
+
+      getCoefficients_LSQ(new_coeffs, &lsq_coeffs[k*(d_degree+1)], num_carriers, d_degree);
+  }
+
+  memcpy(header.coeffs, lsq_coeffs, sizeof(COEFF) * (d_degree+1) * d_batch_size);
+  printf("packCoefficientsInHeader end\n"); fflush(stdout);
+}
+
+inline void
+digital_ofdm_frame_sink::reduceCoefficients_LSQ(FlowInfo *flowInfo) {
+
+  int num_senders = d_pktInfo->n_senders;
+  printf("reduceCoefficients_LSQ begin :: senders: %d\n", num_senders); fflush(stdout);
+
+  /* now perform the reduction */
+  unsigned int num_carriers = d_data_carriers.size();
+
+  gr_complex *coeff = (gr_complex*) malloc(sizeof(gr_complex) * d_batch_size * num_carriers);
+  memset(coeff, 0, sizeof(gr_complex) * d_batch_size * num_carriers);
+  flowInfo->reduced_coeffs.push_back(coeff);
+
+  for(unsigned int k = 0; k < d_batch_size; k++) {
+      for(unsigned int i = 0; i < num_carriers; i++) {
+	  unsigned int di = d_data_carriers[i];
+	  int index = i + k*num_carriers;
+	  for(unsigned int j = 0; j < num_senders; j++) {
+	      gr_complex *estimates = d_pktInfo->hestimates[k];                    // estimates for 'kth' sender
+	      gr_complex *rx_coeffs = d_pktInfo->coeffs.at(j);
+
+	      coeff[index] += ((gr_complex(1.0, 0.0)/estimates[di]) * rx_coeffs[index]);
+	  }
+      }
+  }
+  printf("reduceCoeffients end\n"); fflush(stdout);
+}
+#endif

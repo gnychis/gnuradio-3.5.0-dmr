@@ -56,9 +56,9 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsi
 			 unsigned int source,
 			 unsigned int batch_size,
 			 unsigned int encode_flag,
-			 int fwd_index, unsigned int dst_id)
+			 int fwd_index, unsigned int dst_id, unsigned int degree)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id));
+  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree));
 }
 
 // Consumes 1 packet and produces as many OFDM symbols of fft_length to hold the full packet
@@ -67,7 +67,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 					unsigned int source,
 					unsigned int batch_size,
 					unsigned int encode_flag,
-					int fwd_index, unsigned int dst_id)
+					int fwd_index, unsigned int dst_id, unsigned int degree)
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
 		   gr_make_io_signature2 (1, 2, sizeof(gr_complex)*fft_length, sizeof(char))),
@@ -90,7 +90,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_time_tag(false),
     d_trigger_sock_opened(false),
     d_fwd_index(fwd_index),
-    d_dst_id(dst_id)
+    d_dst_id(dst_id),
+    d_degree(degree)
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
@@ -245,6 +246,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 
   d_log_open = false;
   d_log_open_native = false;
+  printf("NULL_SYMBOL_COUNT: %d\n", NULL_SYMBOL_COUNT); fflush(stdout);
 }
 
 digital_ofdm_mapper_bcv::~digital_ofdm_mapper_bcv(void)
@@ -1167,16 +1169,26 @@ digital_ofdm_mapper_bcv::generateCodeVector()
       d_header.coeffs[k].phase = cv * SCALE_FACTOR_PHASE;
       d_header.coeffs[k].amplitude = SCALE_FACTOR_AMP;
   }
- 
+
+#ifdef LSQ_COMPRESSION
+  // source just blindly copies the coefficients, no point doing LSQ at the source //
+  for(unsigned int s = 1; s < d_degree; s++) {
+      for(unsigned int k = 0; k < d_batch_size; k++) {
+          int index = s * d_batch_size + k;
+          d_header.coeffs[index].phase = d_header.coeffs[k].phase;
+          d_header.coeffs[index].amplitude = d_header.coeffs[k].amplitude;
+      }
+  }
+#else
   // for now copy the <d_batch_size> coeffs for all the coeff entries for the header //
   for(unsigned int s = 1; s < num_carriers; s++) {
       for(unsigned int k = 0; k < d_batch_size; k++) {
-	  int index = s * d_batch_size + k;
+          int index = s * d_batch_size + k;
           d_header.coeffs[index].phase = d_header.coeffs[k].phase;
-	  d_header.coeffs[index].amplitude = d_header.coeffs[k].amplitude;
+          d_header.coeffs[index].amplitude = d_header.coeffs[k].amplitude;
       }
   }
- 
+#endif
   printf("\n");
 }
 

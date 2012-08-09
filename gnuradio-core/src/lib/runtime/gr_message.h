@@ -25,13 +25,21 @@
 #include <gr_types.h>
 #include <string>
 
+#define MAX_DATA_CARRIERS 72
+#define COMPRESSION_FACTOR 8
+
+#define LSQ_COMPRESSION 0
+#define MAX_DEGREE 5
+
 /* apurv++ define header type */
 #define MAX_BATCH_SIZE     2 
-#define PADDING_SIZE    2
-#define ACK_PADDING_SIZE 2 
+#ifdef LSQ_COMPRESSION
+#define PADDING_SIZE       7
+#else
+#define PADDING_SIZE       2
+#endif
 
-#define MAX_DATA_CARRIERS 72
-#define COMPRESSION_FACTOR 4
+#define ACK_PADDING_SIZE 2
 
 #define DATA_TYPE       1 //0
 #define ACK_TYPE        2 //1
@@ -70,8 +78,11 @@ typedef struct multihop_hdr_type {
   // 36 * 2 * 4 =  288
   //COEFF coeffs[MAX_BATCH_SIZE * 36];
 
-  // 24 * 2 * 4 = 192
+#ifdef LSQ_COMPRESSION
+  COEFF coeffs[MAX_BATCH_SIZE * MAX_DEGREE];
+#else
   COEFF coeffs[MAX_BATCH_SIZE * (MAX_DATA_CARRIERS/COMPRESSION_FACTOR)];
+#endif
 
   // 1
   unsigned char link_id;                             // composite link id
@@ -80,7 +91,6 @@ typedef struct multihop_hdr_type {
   // 4
   unsigned int hdr_crc;
 
-  // 6
   unsigned char pad[PADDING_SIZE];                 // to ensure size % (occupied_carriers-dc_carriers) = 0
 
 } MULTIHOP_HDR_TYPE;

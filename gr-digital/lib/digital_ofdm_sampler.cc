@@ -46,6 +46,7 @@ double last_sync_frac_sec;
 #include <cstdio>
 #include <boost/math/special_functions/trunc.hpp>
 #include <math.h>
+#include <gr_message.h>
 
 // apurv for logging the preamble //
 #include <sys/types.h>
@@ -164,7 +165,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
     if(trigger[index] && !d_joint_rx_on) {
 
       unsigned int allowed_misalignment = 2;
-      unsigned int gap = 4200;
+      unsigned int gap = (((sizeof(MULTIHOP_HDR_TYPE) * 8)/MAX_DATA_CARRIERS)+1) * (d_symbol_length);
       unsigned left_boundary = gap - allowed_misalignment;
       unsigned right_boundary = gap + allowed_misalignment;
 

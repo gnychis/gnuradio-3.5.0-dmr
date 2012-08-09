@@ -60,7 +60,7 @@
 #define MAX_SENDERS 4
 //#define USE_HEADER_PLL 0
 
-#define NULL_OFDM_SYMBOLS 35
+#define NULL_OFDM_SYMBOLS (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1
 #define MAX_OFDM_SYMBOLS 170
 #define MAX_OCCUPIED_CARRIERS 88
 
@@ -83,7 +83,7 @@ digital_make_ofdm_frame_sink (const std::vector<gr_complex> &sym_position,
 			 float phase_gain=0.25, float freq_gain=0.25*0.25/4.0, unsigned int id=1, 
 			 unsigned int batch_size=1, unsigned int decode_flag=1, 
 			 int fwd_index=0, int replay_flag=0,
-			 int exp_size=400, int fec_n=0, int fec_k=0);
+			 int exp_size=400, int fec_n=0, int fec_k=0, int degree=4);
 
 typedef complex<double> comp_d;
 
@@ -432,7 +432,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   float phase_gain, float freq_gain, unsigned int id, 
 			   unsigned int batch_size, unsigned int decode_flag,
 			   int fwd_index, int replay_flag,
-			   int exp_size, int fec_n, int fec_k);
+			   int exp_size, int fec_n, int fec_k, int degree);
 
  private:
   enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_HEADER};
@@ -491,7 +491,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 		     float phase_gain, float freq_gain, unsigned int id, 
 		     unsigned int batch_size, unsigned int decode_flag, 
 		     int fwd_index, int replay_flag,
-		     int exp_size, int fec_n, int fec_k);
+		     int exp_size, int fec_n, int fec_k, int degree);
 
   void enter_search();
   void enter_have_sync();
@@ -797,6 +797,17 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   int d_expected_size, d_fec_n, d_fec_k;
   int d_total_batches_received, d_correct_batches;
   double d_avg_evm_error;			// measure the evm error per batch //   
+
+  float getAvgAmplificationFactor(vector<gr_complex*>);
+
+#ifdef LSQ_COMPRESSION
+  void getCoefficients_LSQ(gr_complex*, COEFF*, unsigned int, unsigned int);
+  void reduceCoefficients_LSQ(FlowInfo*);
+  void packCoefficientsInHeader_LSQ(MULTIHOP_HDR_TYPE&, gr_complex*, int, FlowInfo*);
+  void unpackCoefficients_LSQ(gr_complex*, gr_complex*, unsigned int, unsigned int);
+  unsigned int d_degree;
+  gr_complex d_lsq_coeffs[MAX_BATCH_SIZE * MAX_DEGREE];
+#endif
 };
 
 

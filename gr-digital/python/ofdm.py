@@ -116,7 +116,7 @@ class ofdm_mod(gr.hier_block2):
                                              options.occupied_tones, options.fft_length, 
 		  			     options.id, options.src,
 					     options.batch_size, options.encode_flag,
-					     options.fwd, options.dst_id)
+					     options.fwd, options.dst_id, options.degree)
         
 
         self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, padded_preambles)
@@ -232,6 +232,8 @@ class ofdm_mod(gr.hier_block2):
                           help="forwarder ranking (1:lead forwarder, 2: 2nd slave, 3:3rd slave, etc [default=%default]")
 	expert.add_option("", "--dst-id", type="intx", default=2,
                           help="the destination id [default=%default]")
+        expert.add_option("", "--degree", type="intx", default=4,
+                          help="LSQ degree (if applicable) [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation
@@ -345,7 +347,7 @@ class ofdm_demod(gr.hier_block2):
 					     self._batch_size, self._decode_flag, 
 					     options.fwd, 
 					     options.replay,
-					     self._size, self._fec_n, self._fec_k)
+					     self._size, self._fec_n, self._fec_k, options.degree)
 
         self.connect(self, self.ofdm_recv)
 	
@@ -423,6 +425,8 @@ class ofdm_demod(gr.hier_block2):
 
 	expert.add_option("", "--fwd", type="intx", default=0,
                           help="forwarder ranking (1:lead forwarder, 2: 2nd slave, 3:3rd slave, etc [default=%default]")
+        expert.add_option("", "--degree", type="intx", default=4,
+                          help="LSQ degree (if applicable) [default=%default]")
         # apurv++ end #
 
     # Make a static method to call before instantiation

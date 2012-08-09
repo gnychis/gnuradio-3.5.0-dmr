@@ -57,7 +57,7 @@
 
 //#define TESTING        0
 
-#define NULL_SYMBOL_COUNT 35
+#define NULL_SYMBOL_COUNT (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1 
 
 // whitening random tuple (from ofdm_packet_utils.py) //
 unsigned char random_mask_tuple1[] = {
@@ -327,7 +327,7 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsi
 			 unsigned occupied_carriers, unsigned int fft_length, unsigned int id=1,
 			 unsigned int source_flag=0,
 			 unsigned int batch_size=1,
-		 	 unsigned int encode_flag=1, int fwd_index=0, unsigned int dst_id=2);
+		 	 unsigned int encode_flag=1, int fwd_index=0, unsigned int dst_id=2, unsigned int degree=4);
 
 /*!
  * \brief take a stream of bytes in and map to a vector of complex
@@ -343,12 +343,12 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
 			   unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			   unsigned int source_flag,
-			   unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id);
+			   unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree);
  protected:
   digital_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
 		         unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source_flag,
-			 unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id);
+			 unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree);
 
  private:
   /* data */
@@ -520,6 +520,10 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   int d_data_ofdm_index, d_hdr_ofdm_index; 
   unsigned int d_dst_id;
 /* apurv++ ends */
+
+#ifdef LSQ_COMPRESSION
+  unsigned int d_degree;
+#endif
 };
 
 #endif
