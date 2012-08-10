@@ -873,6 +873,9 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   reset_demapper();
 
   fill_all_carriers_map();   
+  d_coeff_open = false;
+  d_fp_coeff_y = NULL;
+  d_fp_coeff_y1 = NULL;
 }
 
 void
@@ -2134,6 +2137,18 @@ digital_ofdm_frame_sink::save_coefficients()
 	    coeffs[index] = ToPhase_c(hdr_coeff);
 	}
      }
+#if 1
+  printf("degree: %d\n", d_degree); fflush(stdout);
+  for(unsigned i = 0; i < 1; i++) {
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+        int index = i + k*num_carriers;
+        float amp = abs(coeffs[index]);
+        float phase = ToPhase_f(coeffs[index]);
+        printf("(A: %f, P: %f) <-> (%f, %f)\n", amp, phase, coeffs[index].real(), coeffs[index].imag());
+     }
+  }
+#endif
+
   }
   else {
      gr_complex lsq_coeffs[MAX_DEGREE * MAX_BATCH_SIZE];
@@ -2150,20 +2165,18 @@ digital_ofdm_frame_sink::save_coefficients()
      for(unsigned int k = 0; k < d_batch_size; k++) {
         unpackCoefficients_LSQ(&lsq_coeffs[k*(d_degree+1)], &coeffs[k*num_carriers], num_carriers, d_degree);
      }
-  }
-
 #if 1
   printf("degree: %d\n", d_degree); fflush(stdout);
   for(unsigned i = 0; i < num_carriers; i++) {
      for(unsigned int k = 0; k < d_batch_size; k++) {
-	int index = i + k*num_carriers;
-	float amp = abs(coeffs[index]);
-	float phase = ToPhase_f(coeffs[index]);
-	printf("(A: %f, P: %f) <-> (%f, %f)", amp, phase, coeffs[index].real(), coeffs[index].imag());
+        int index = i + k*num_carriers;
+        float amp = abs(coeffs[index]);
+        float phase = ToPhase_f(coeffs[index]);
+        printf("(A: %f, P: %f) <-> (%f, %f)", amp, phase, coeffs[index].real(), coeffs[index].imag());
      }
   }
 #endif
-
+  }
 #else
   // for each subcarrier, record 'd_batch_size' coeffs //
   int num_carriers = d_data_carriers.size()/COMPRESSION_FACTOR;
@@ -3457,7 +3470,7 @@ digital_ofdm_frame_sink::do_carrier_correction() {
      gr_complex *rx_symbols = &(d_pktInfo->symbols[index]);
 
      track_pilot_dfe(rx_symbols, 0, carrier, dfe_pilot);
-     printf("ofdm_index: %d, d_end_angle: %f, d_phase: %f, d_freq: %f\n", i+1, d_end_angle[0], d_phase[0], d_freq[0]);
+     //printf("ofdm_index: %d, d_end_angle: %f, d_phase: %f, d_freq: %f\n", i+1, d_end_angle[0], d_phase[0], d_freq[0]);
      fflush(stdout);
 
      interpolate_data_dfe(dfe_pilot, dfe_data, true, rx_symbols, carrier); 
@@ -3525,7 +3538,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      coeffs[i] = amp * gr_expj(phase[i] * M_PI/180);
 
 #ifndef DEBUG
-     printf("[%f] <-> (%f, %f)\n", phase[i], coeffs[i].real(), coeffs[i].imag()); fflush(stdout);
+     printf("[A: %f, P: %f] <-> (%f, %f)\n", amp, phase[i], coeffs[i].real(), coeffs[i].imag()); fflush(stdout);
 #endif
      encodeSignal(symbols, coeffs[i]);
      combineSignal(out_symbols, symbols);
@@ -3542,7 +3555,11 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   MULTIHOP_HDR_TYPE header;
   memset(&header, 0, sizeof(MULTIHOP_HDR_TYPE));
 
+#ifdef LSQ_COMPRESSION
+  packCoefficientsInHeader_LSQ(header, coeffs, n_innovative_pkts, flow_info);
+#else
   packCoefficientsInHeader(header, coeffs, n_innovative_pkts, flow_info);
+#endif
 
   header.inno_pkts = n_innovative_pkts;
   header.factor = factor;
@@ -5660,17 +5677,25 @@ digital_ofdm_frame_sink::getCoefficients_LSQ(gr_complex *in_coeffs, COEFF *out_c
 
   // build Y //
   for(unsigned int i = 0; i < obs; i++) {
-     Y(i, 0) = in_coeffs[i];
+     Y(i, 0) = in_coeffs[i] * gr_complex(1e3, 0.0);			     // scaling phase 1
   }
 
   // get A //
   A = solve(X, Y);
-
+  //A(3, 0) = gr_complex(0.0, 0.0);
+  //A(4, 0) = gr_complex(0.0, 0.0);
+  //A.print("A = "); printf("\n");
+  printf("---- A ---- \n"); fflush(stdout);
+  for(unsigned int i = 0; i < degree+1; i++) {
+     printf(" (A:: %f, P:: %f) ==== (%f, %f)\n", abs(A(i, 0)), ToPhase_f(A(i, 0)), A(i, 0).real(), A(i, 0).imag());
+  }
 #ifdef DEBUG
-  A.print("A = "); printf("\n");
   Y.print("Y = "); printf("\n");
   X.print("X = "); printf("\n");
+#endif
 
+#if 1
+  printf("Y' = \n"); fflush(stdout);
   // print calculated y again //
   for(unsigned int i = 0; i < obs; i++) {
      gr_complex y(0.0, 0.0);
@@ -5678,15 +5703,82 @@ digital_ofdm_frame_sink::getCoefficients_LSQ(gr_complex *in_coeffs, COEFF *out_c
         y += (A(j, 0) * gr_complex(pow(i, j), 0.0));
      }
      //printf("(%.3f, %.3f) [%.3f]  [%.3f]\n", y.real(), y.imag(), abs(y), arg(y));
-     cout<<i<<" "<<abs(y)<<" "<<arg(y)<<endl;
+     cout<<i<<" "<<y<<"\t\t"<<abs(y)<<" "<<arg(y)<<endl;
   }
+  printf(" ----------------------------- \n"); fflush(stdout);
 #endif
-
+ 
+  printf("LSQ coefficients, degree: %d\n", d_degree); 
   for(unsigned int i = 0; i < degree+1; i++) {
-     out_coeffs[i].amplitude = abs(A(i, 0))  * SCALE_FACTOR_AMP;
+     out_coeffs[i].amplitude = abs(A(i, 0)) * pow(10, i+1);			// differential scaling is needed!
      out_coeffs[i].phase = ToPhase_f(A(i, 0)) * SCALE_FACTOR_PHASE;
+
+#if 1
+     printf("(A: %d, P: %d) ===== (%.3f, %.3f)\n", out_coeffs[i].amplitude, out_coeffs[i].phase, A(i, 0).real(), A(i, 0).imag());
+     fflush(stdout);
+#endif
   }
+
+  // dump the in_coeffs in a file and check the LSQ curve fitting //
+  dumpCoeffs_LSQ(in_coeffs, obs, A);
 }
+
+inline void
+digital_ofdm_frame_sink::dumpCoeffs_LSQ(gr_complex *coeff, int n, cx_fmat A) {
+   // dump the coeff first //
+   if(!d_coeff_open) {
+      const char *filename = "coeff.dat";
+      int fd;
+      if ((fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
+         perror(filename);
+         assert(false);
+      }
+      else {
+         if((d_fp_coeff_y = fdopen (fd, true ? "wb" : "w")) == NULL) {
+            fprintf(stderr, "coeff file cannot be opened\n");
+            close(fd);
+            assert(false);
+         }
+      }
+
+      const char *filename1 = "coeff-y.dat";
+      int fd1;
+      if ((fd1 = open (filename1, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
+         perror(filename1);
+         assert(false);
+      }
+      else {
+         if((d_fp_coeff_y1 = fdopen (fd1, true ? "wb" : "w")) == NULL) {
+            fprintf(stderr, "coeff file cannot be opened\n");
+            close(fd1);
+            assert(false);
+         }
+      }
+      d_coeff_open = true;
+   }
+
+   assert(d_fp_coeff_y);
+   int count = ftell(d_fp_coeff_y);
+   count = fwrite_unlocked(&coeff[0], sizeof(gr_complex), n, d_fp_coeff_y);
+   assert(count == n);
+
+   // now dump the LSQ curve fitting points //
+   gr_complex *y = (gr_complex*) malloc(sizeof(gr_complex) * n);
+   memset(y, 0, sizeof(gr_complex) * n);
+   for(unsigned int i = 0; i < n; i++) {
+      for(unsigned int j = 0; j < d_degree+1; j++) {
+	  y[i] += (A(j, 0) * gr_complex(pow(i, j), 0.0));
+      }
+   }   
+
+   assert(d_fp_coeff_y1);
+   count = ftell(d_fp_coeff_y1);
+   count = fwrite_unlocked(&y[0], sizeof(gr_complex), n, d_fp_coeff_y1);
+   assert(count == n);
+
+   free(y);
+}
+
 
 inline void
 digital_ofdm_frame_sink::unpackCoefficients_LSQ(gr_complex *in_coeffs, gr_complex *out_coeffs, unsigned int obs, unsigned int degree) {
@@ -5713,6 +5805,7 @@ digital_ofdm_frame_sink::packCoefficientsInHeader_LSQ(MULTIHOP_HDR_TYPE& header,
 	 for(int j = 0; j < num_inno_pkts; j++) {
 	    gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[j];  		// reduced coeffs for this inno pkt //
 	    new_coeffs[s] += (coeffs[j] * pkt_coeffs[s + k*num_carriers]);
+ 	    printf("(%.3f, %.3f) = (%.3f, %.3f) * (%.3f, %.3f)\n", new_coeffs[s].real(), new_coeffs[s].imag(), coeffs[j].real(), coeffs[j].imag(), pkt_coeffs[s + k*num_carriers].real(), pkt_coeffs[s + k*num_carriers].imag()); fflush(stdout);
 	 }	 
       }
 
@@ -5741,13 +5834,26 @@ digital_ofdm_frame_sink::reduceCoefficients_LSQ(FlowInfo *flowInfo) {
 	  unsigned int di = d_data_carriers[i];
 	  int index = i + k*num_carriers;
 	  for(unsigned int j = 0; j < num_senders; j++) {
-	      gr_complex *estimates = d_pktInfo->hestimates[k];                    // estimates for 'kth' sender
+	      gr_complex *estimates = d_pktInfo->hestimates[j];                    // estimates for 'kth' sender
 	      gr_complex *rx_coeffs = d_pktInfo->coeffs.at(j);
 
 	      coeff[index] += ((gr_complex(1.0, 0.0)/estimates[di]) * rx_coeffs[index]);
 	  }
       }
   }
+
+#ifdef DEBUG
+  // debug //
+  printf("reduced coefficients LSQ\n"); fflush(stdout);
+  for(unsigned int k = 0; k < d_batch_size; k++) {
+      for(unsigned int i = 0; i < num_carriers; i++) {
+	 int index = i + k*num_carriers;
+	 printf(" (%f, %f) \n", coeff[index].real(), coeff[index].imag()); 
+	 fflush(stdout);
+      }
+  }
+#endif
+
   printf("reduceCoeffients end\n"); fflush(stdout);
 }
 #endif

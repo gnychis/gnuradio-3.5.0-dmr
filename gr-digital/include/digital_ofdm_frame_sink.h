@@ -807,6 +807,11 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void unpackCoefficients_LSQ(gr_complex*, gr_complex*, unsigned int, unsigned int);
   unsigned int d_degree;
   gr_complex d_lsq_coeffs[MAX_BATCH_SIZE * MAX_DEGREE];
+
+  void dumpCoeffs_LSQ(gr_complex *coeff, int n, cx_fmat A);
+  bool d_coeff_open;
+  FILE *d_fp_coeff_y;
+  FILE *d_fp_coeff_y1;
 #endif
 };
 
