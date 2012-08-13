@@ -756,7 +756,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void buildMap_pilot(FlowInfo *flowInfo, gr_complex* sym_position,
                                         vector<gr_complex*> interpolated_coeffs,
                                         vector<gr_complex>* dfe, gr_complex* carrier,
-                                        int subcarrier_index);
+                                        int subcarrier_index, int o);
 
   void test_decode_signal(gr_complex *in, vector<gr_complex*> interpolated_coeffs);
   bool crc_check(std::string msg, std::string&);
@@ -807,6 +807,10 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void unpackCoefficients_LSQ(gr_complex*, gr_complex*, unsigned int, unsigned int);
   unsigned int d_degree;
   gr_complex d_lsq_coeffs[MAX_BATCH_SIZE * MAX_DEGREE];
+
+  // log - debugging //
+  bool d_coeff_unpacked_open;
+  FILE *d_fp_coeff_unpacked;
 
   void dumpCoeffs_LSQ(gr_complex *coeff, int n, cx_fmat A);
   bool d_coeff_open;
