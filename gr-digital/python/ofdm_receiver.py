@@ -172,6 +172,7 @@ class ofdm_receiver(gr.hier_block2):
 
 	    # route received time domain to sink (all-the-way) for offline analysis #
 	    self.connect((self.sampler, 0), (self.ofdm_frame_acq, 2))
+	    self.connect((self.sampler, 1), gr.file_sink(gr.sizeof_char*fft_length, "sampler_timing.dat"))
 
 	elif method == 0:
             # NORMAL functioning #
