@@ -817,6 +817,10 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   FILE *d_fp_coeff_y;
   FILE *d_fp_coeff_y1;
 #endif
+
+#ifdef SRC_PILOT
+  void equalizePilot(gr_complex*);
+#endif
 };
 
 

@@ -1253,7 +1253,10 @@ digital_ofdm_frame_sink::work (int noutput_items,
 #endif
 	if(d_fwd) 
 	{
-	   bool isCarrierCorrected = do_carrier_correction();
+	   bool isCarrierCorrected = false;
+#ifndef SRC_PILOT
+	   isCarrierCorrected = do_carrier_correction();
+#endif
 	   if(isCarrierCorrected) {
 	      printf("Carrier correction done on the **current** packet\n"); fflush(stdout);
 	   } else {
@@ -2610,10 +2613,12 @@ digital_ofdm_frame_sink::getFlowInfo(bool create, unsigned char flowId)
 void
 digital_ofdm_frame_sink::encodeSignal(gr_complex *symbols, gr_complex coeff)
 {
+  int n_data_carriers = d_data_carriers.size();
   printf("encodeSignal start\n"); fflush(stdout);
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
-     for(unsigned int j = 0; j < d_occupied_carriers; j++) {
-	 unsigned int index = (i*d_occupied_carriers) + j;
+     for(unsigned int j = 0; j < n_data_carriers; j++) {
+	 //unsigned int index = (i*d_occupied_carriers) + j;
+	 unsigned int index = (i*d_occupied_carriers) + d_data_carriers[j];
 #ifdef SCALE
 	 symbols[index] *= (coeff * gr_complex(SCALE));
 #else
@@ -2629,16 +2634,16 @@ digital_ofdm_frame_sink::combineSignal(gr_complex *out, gr_complex* symbols)
 {
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++)
      for(unsigned int j = 0; j < d_occupied_carriers; j++) {
-         unsigned int index = (i*d_occupied_carriers) + j;
-	 //out[index] += symbols[index];
-	 gr_complex t = out[index] + symbols[index];
-	 //if(i == 0 && j == 0) 
-	 if(0)
-	 {
+	 if(d_all_carriers[j] < 2) {
+            unsigned int index = (i*d_occupied_carriers) + j;
+	    gr_complex t = out[index] + symbols[index];
+	    if(0)
+	    {
 		printf("o: %d, sc: %d, (%f, %f) = (%f, %f) + (%f, %f)\n", i, j, t.real(), t.imag(), out[index].real(), out[index].imag(), symbols[index].real(), symbols[index].imag()); 
 		fflush(stdout);
-	 }
-	 out[index] = t;
+	    }
+	    out[index] = t;
+	}
      }
 
 }
@@ -2669,6 +2674,7 @@ inline float
 digital_ofdm_frame_sink::normalizeSignal(gr_complex* out, int k)
 {
   int num_data_carriers = d_data_carriers.size();
+#if 0
   float avg_energy = 0.0;
   for(unsigned int j = 0; j < num_data_carriers; j++) {
       avg_energy += abs(out[d_data_carriers[j]]);
@@ -2676,7 +2682,9 @@ digital_ofdm_frame_sink::normalizeSignal(gr_complex* out, int k)
   avg_energy /= (float)(num_data_carriers);			   // ignore the DC tones //
 
   float factor = 0.9/avg_energy;
-  factor = 1.0/sqrt(k);						   // TODO: unsure of what factor to use :| //
+#endif
+
+  float factor = 1.0/sqrt(k);						   // TODO: unsure of what factor to use :| //
   printf("norm factor: %f\n", factor); fflush(stdout);
 
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++)
@@ -3518,6 +3526,49 @@ digital_ofdm_frame_sink::getAvgAmplificationFactor(vector<gr_complex*> hestimate
   return avg_atten[0];             // attenuation //
 }
 
+#ifdef SRC_PILOT
+/* just remove the channel effect from pilot and ensure it has a magnitude of 1.0 */
+inline void
+digital_ofdm_frame_sink::equalizePilot(gr_complex *in) {
+  printf("equalizePilot \n"); fflush(stdout);
+  gr_complex *estimates = d_pktInfo->hestimates[0];
+
+  int n_pilots = d_pilot_carriers.size();
+  for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
+     for(unsigned int j = 0; j < n_pilots; j++) {
+         unsigned int index = (i*d_occupied_carriers) + d_pilot_carriers[j];
+         in[index] *= (estimates[d_pilot_carriers[j]]);			// equalize the pilot
+
+	 float amp = 1.0/abs(in[index]);
+	 gr_complex factor = amp * gr_expj(0.0);
+	 //std::cout << "old pilot: " << in[index] << " old angle: " << arg(in[index]) << "\t\t";
+	 in[index] *= factor;						// amplify to mangitude of 1.0
+	 //std::cout << "new pilot: " << in[index] << " new angle: " << arg(in[index]) << endl;
+     }
+  }
+
+#if 0
+  // retain the rotation, but with fresh pilots //
+  int n_pilots = d_pilot_carriers.size();
+  for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
+     float cur_pilot = 1.0;
+     for(unsigned int j = 0; j < n_pilots; j++) {
+	
+	 // the ideal pilot at this pos //
+	 gr_complex pilot_sym(cur_pilot, 0.0);
+	 cur_pilot = -cur_pilot;
+
+	 // rotate the ideal pilot to capture the carrier rotation from the source //
+	 unsigned int index = (i*d_occupied_carriers) + d_pilot_carriers[j];
+	 in[index] = pilot_sym * gr_expj(arg(in[index])); 
+         //std::cout<<"new pilot: "<<in[index]<<" angle new: "<<arg(in[index])<<endl;
+     }
+  }
+#endif
+  printf(" --------------- equalizePilot ends --------------- \n"); fflush(stdout);
+}
+#endif
+
 void
 digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
 {
@@ -3565,8 +3616,11 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      printf("[A: %f, P: %f] <-> (%f, %f)\n", amp, phase[i], coeffs[i].real(), coeffs[i].imag()); fflush(stdout);
 #endif
      encodeSignal(symbols, coeffs[i]);
-     combineSignal(out_symbols, symbols);
 
+#ifdef SRC_PILOT
+     equalizePilot(symbols);			// equalize the pilot tones to remove the channel effect //
+#endif
+     combineSignal(out_symbols, symbols);
      free(symbols);
   }
   printf("--------------------------------------------------------------------- \n"); fflush(stdout);
@@ -3593,25 +3647,49 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
 
   /* final message (type: 1-coded) */
   /* DO NOT include the DC tones */
-  unsigned int n_actual_symbols = d_num_ofdm_symbols * d_data_carriers.size();
+  unsigned int n_actual_symbols = d_num_ofdm_symbols * d_occupied_carriers;
   gr_message_sptr out_msg = gr_make_message(DATA_TYPE, 0, 0, HEADERBYTELEN + (n_actual_symbols * sizeof(gr_complex)));
   memcpy(out_msg->msg(), header_bytes, HEADERBYTELEN);					            // copy header bytes
 
   //printf("here, d_packetlen: %d, HEADERBYTELEN: %d, n_actual_symbols: %d\n", d_packetlen, HEADERBYTELEN, n_actual_symbols); fflush(stdout);
 
   int offset = HEADERBYTELEN;
+  //memcpy(out_msg->msg() + offset, &out_symbols, n_actual_symbols * sizeof(gr_complex));
 
-#ifdef USE_PILOT
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
      unsigned int index = i * d_occupied_carriers;
-     for(unsigned int j = 0; j < d_all_carriers.size(); j++) {
+     for(unsigned int j = 0; j < d_occupied_carriers; j++) {
+	 if(d_all_carriers[j] == 1) {
+	    std::cout<<"pilot: "<<j<<" -- "<< out_symbols[index+j]<<endl;
+	 }
+	 memcpy((out_msg->msg() + offset), (out_symbols + index + j), sizeof(gr_complex));
+	 offset += sizeof(gr_complex);
+     }
+  }
+
+
+/*
+#ifdef USE_PILOT
+  printf("pilots first: \n"); fflush(stdout);
+  assert(d_all_carriers.size() == d_occupied_carriers);
+  for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
+     unsigned int index = i * d_occupied_carriers;
+     for(unsigned int j = 0; j < d_occupied_carriers; j++) {
+#ifdef SRC_PILOT
+	if(1) {
+#else
 	if(d_all_carriers[j] == 0) {
+#endif
 	    memcpy((out_msg->msg() + offset), (out_symbols + index + j), sizeof(gr_complex));
+	    if(d_all_carriers[j] == 1) {
+		std::cout<<out_symbols[index+j]<<" offset: "<<offset<<endl;
+	    }
 	    offset += sizeof(gr_complex);
 	}
      }
   }
 #endif
+*/
 
 #if 0
   int dc_tones = d_occupied_carriers - d_data_carriers.size();
@@ -5711,7 +5789,7 @@ digital_ofdm_frame_sink::getCoefficients_LSQ(gr_complex *in_coeffs, COEFF *out_c
 
   // build Y //
   for(unsigned int i = 0; i < obs; i++) {
-     Y(i, 0) = in_coeffs[i];
+     Y(i, 0) = in_coeffs[i] * gr_complex(1e3, 0.0);		// scaling phase 1
   }
 
   // get A //
@@ -5734,7 +5812,8 @@ digital_ofdm_frame_sink::getCoefficients_LSQ(gr_complex *in_coeffs, COEFF *out_c
 #endif
 
   for(unsigned int i = 0; i < degree+1; i++) {
-     out_coeffs[i].amplitude = abs(A(i, 0))  * SCALE_FACTOR_AMP;
+     //out_coeffs[i].amplitude = abs(A(i, 0))  * SCALE_FACTOR_AMP;
+     out_coeffs[i].amplitude = abs(A(i, 0)) * pow(10, i+1);      // scaling phase 2
      out_coeffs[i].phase = ToPhase_f(A(i, 0)) * SCALE_FACTOR_PHASE;
   }
 }

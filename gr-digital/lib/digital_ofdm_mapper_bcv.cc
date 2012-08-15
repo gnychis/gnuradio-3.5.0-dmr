@@ -365,9 +365,8 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 	d_null_symbol_cnt++;
      }
      else {
-	/* header has already been modulated, just send the payload *symbols* as it is */
-	gr_complex *t_out = (gr_complex*) malloc(sizeof(gr_complex) * d_data_carriers.size());
 
+	/* header has already been modulated, just send the payload *symbols* as it is */
  	copyOFDMSymbol(out, d_msg[0]->length());		
 	//logNativeTxSymbols(out);
 	//printf("data--------- offset: %d\n", d_msg_offset[0]); fflush(stdout);
@@ -375,9 +374,12 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 
 	/* if multiple forwarders (fwd_index>0) , then pilot subcarriers need to be shared */
 	switch(d_fwd_index) {
+#ifndef SRC_PILOT
 	    case 0: tx_pilot = true; break;						// single fwder //
+#endif
 	    case 1: tx_pilot = (d_data_ofdm_index % 2 == 1)?true:false; break;		// lead: odd symbols //
 	    case 2: tx_pilot = (d_data_ofdm_index % 2 == 0)?true:false; break;		// slave: even symbols //
+	    default: break;
 	}
      }  
   }
@@ -407,22 +409,60 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
   return 1;  // produced symbol
 }
 
+/*
 void
 digital_ofdm_mapper_bcv::copyOFDMSymbol(gr_complex *out, int len)
 {
+  printf("copyOfdmsymbol\n"); fflush(stdout);
   unsigned int i = 0;
-  while((d_msg_offset[0] < len) && (i < d_data_carriers.size())) {
-     memcpy(&out[d_data_carriers[i]], d_msg[0]->msg() + d_msg_offset[0], sizeof(gr_complex));
+  unsigned int n_carriers = d_data_carriers.size();
+#ifdef SRC_PILOT
+  n_carriers += d_pilot_carriers.size();
+#endif
+  std::cout<<"ncarriers: "<<n_carriers<<endl;
+
+  int dc = 0, pi = 0;
+  unsigned int dc_tones = d_occupied_carriers - (d_data_carriers.size() + d_pilot_carriers.size());
+
+  while((d_msg_offset[0] < len) && (i < n_carriers)) {
+     if(d_all_carriers[i] == 0) {
+	 cout<<"data offset: "<<d_msg_offset[0]<<" pos: "<<d_data_carriers[dc]<<endl;
+         memcpy(&out[d_data_carriers[dc++]], d_msg[0]->msg() + d_msg_offset[0], sizeof(gr_complex));
+     }
+     else if(d_all_carriers[i] == 1) {
+	 cout<<"pilot offset: "<<d_msg_offset[0]<<" pos: "<<d_pilot_carriers[pi]<<endl;
+	 memcpy(&out[d_pilot_carriers[pi++]], d_msg[0]->msg() + d_msg_offset[0], sizeof(gr_complex));
+     }
      d_msg_offset[0] += sizeof(gr_complex);
      i++;
   }
 
   if(d_msg_offset[0] == len) {
-    while(i < d_data_carriers.size()) {   // finish filling out the symbol
+    while(i < n_carriers) {   // finish filling out the symbol
+#ifdef SRC_PILOT
+    assert(false);
+#endif
       out[d_data_carriers[i]] = d_constellation[randsym()];
       i++;
     }
   }
+}
+*/
+
+void
+digital_ofdm_mapper_bcv::copyOFDMSymbol(gr_complex *out, int len)
+{
+  unsigned int start_offset = d_data_carriers[0];
+  unsigned int n_bytes = sizeof(gr_complex) * d_occupied_carriers;
+
+  assert(d_msg_offset[0] + n_bytes <= len);
+
+#ifdef USE_PILOT
+  start_offset = (d_data_carriers[0] < d_pilot_carriers[0]) ? d_data_carriers[0]:d_pilot_carriers[0];
+#endif
+  //printf("start_offset: %d, msg_offset: %d, d: %d, p: %d\n", start_offset, d_msg_offset[0], d_data_carriers[0], d_pilot_carriers[0]); fflush(stdout);
+  memcpy(&out[start_offset], d_msg[0]->msg() + d_msg_offset[0], n_bytes);
+  d_msg_offset[0] += n_bytes;
 }
 
 /* builds a single OFDM symbol */

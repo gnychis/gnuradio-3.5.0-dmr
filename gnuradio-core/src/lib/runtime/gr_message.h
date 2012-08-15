@@ -40,6 +40,7 @@
 #endif
 
 #define ACK_PADDING_SIZE 2
+//#define SRC_PILOT 0 				// enable if only the source pilots are relayed throughout //
 
 #define DATA_TYPE       1 //0
 #define ACK_TYPE        2 //1
