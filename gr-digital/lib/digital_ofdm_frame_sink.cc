@@ -4925,6 +4925,10 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
   gr_message_sptr msg[MAX_BATCH_SIZE];
   std::string decoded_msg[MAX_BATCH_SIZE];
 
+#ifdef SRC_PILOT
+  reset_demapper();
+#endif
+
   for(unsigned int o = 0; o < d_num_ofdm_symbols; o++) {
 #ifdef USE_PILOT
       unsigned int bytes_decoded = demapper_ILP_2_pilot(o, bytes_out_vec, flowInfo, dfe_pilot, interpolated_coeffs);   // same # of bytes decoded/batch
