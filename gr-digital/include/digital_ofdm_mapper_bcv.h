@@ -419,7 +419,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   unsigned int d_encode_flag;		
   int d_batch_to_send;				// will only be set at the digital layer, when tx reqd //  
   bool d_modulated;				// set when complete pkt has been modulated (not used) //
-  bool d_send_null;
+  bool d_send_null;				// enable if a null ofdm symbol needs to be sent at the end of a packet //
 
   // header related //
   MULTIHOP_HDR_TYPE d_header;     

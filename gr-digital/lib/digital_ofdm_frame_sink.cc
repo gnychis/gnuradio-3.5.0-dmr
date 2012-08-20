@@ -1254,9 +1254,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 	if(d_fwd) 
 	{
 	   bool isCarrierCorrected = false;
-#ifndef SRC_PILOT
 	   isCarrierCorrected = do_carrier_correction();
-#endif
 	   if(isCarrierCorrected) {
 	      printf("Carrier correction done on the **current** packet\n"); fflush(stdout);
 	   } else {
@@ -2630,11 +2628,15 @@ digital_ofdm_frame_sink::encodeSignal(gr_complex *symbols, gr_complex coeff)
 }
 
 void
-digital_ofdm_frame_sink::combineSignal(gr_complex *out, gr_complex* symbols)
+digital_ofdm_frame_sink::combineSignal(gr_complex *out, gr_complex* symbols, int n)
 {
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++)
      for(unsigned int j = 0; j < d_occupied_carriers; j++) {
+#if 0
 	 if(d_all_carriers[j] < 2) {
+#else
+	 if(d_all_carriers[j] == 0 || (d_all_carriers[j] == 1 && n == 0)) {
+#endif
             unsigned int index = (i*d_occupied_carriers) + j;
 	    gr_complex t = out[index] + symbols[index];
 	    if(0)
@@ -3486,6 +3488,49 @@ digital_ofdm_frame_sink::do_carrier_correction() {
      return false;
   }
 
+#ifdef SRC_PILOT
+  /* if I'm part of synchronized forwarders for this packet, I need to introduce an extra 
+     rotation corresponding to (t'-t) in all the symbols for this packet */
+  if(d_fwd_index > 0) {
+     int gap = NULL_OFDM_SYMBOLS;               // t'-t
+
+     for(int i = 0; i < d_num_ofdm_symbols; i++) {
+        // get the delta rotation for (t'-t) gap //
+        float est_angle = d_slope_angle[0] * gap + d_end_angle[0];
+        gr_complex carrier = gr_expj(est_angle - d_end_angle[0]);
+
+        // add the extra rotation now //
+        int index = i * d_occupied_carriers;
+        gr_complex *rx_symbols = &(d_pktInfo->symbols[index]);
+
+#ifndef DEBUG
+        float cur_pilot = 1.0;
+	gr_complex phase_error = 0.0;
+	gr_complex *hestimates = d_pktInfo->hestimates[0];
+#endif
+
+        for(int j = 0; j < d_occupied_carriers; j++) {
+
+#ifndef DEBUG
+	   if(d_all_carriers[j] == 1) {
+	      gr_complex pilot_sym(cur_pilot, 0.0);
+	      cur_pilot = -cur_pilot;
+	      phase_error += ((rx_symbols[j] * hestimates[j]) * conj(pilot_sym));
+	   }
+#endif
+           rx_symbols[j] = rx_symbols[j] * carrier; 
+        }
+
+#ifndef DEBUG
+	printf("o: %d, rotation: %.3f\n", i, arg(phase_error));
+#endif
+
+        gap++;
+     }
+  } 
+  return true;
+#endif
+
   vector<gr_complex> dfe_pilot;
   dfe_pilot.resize(d_pilot_carriers.size());
   fill(dfe_pilot.begin(), dfe_pilot.end(), gr_complex(1.0, 0.0)); 
@@ -3529,42 +3574,43 @@ digital_ofdm_frame_sink::getAvgAmplificationFactor(vector<gr_complex*> hestimate
 #ifdef SRC_PILOT
 /* just remove the channel effect from pilot and ensure it has a magnitude of 1.0 */
 inline void
-digital_ofdm_frame_sink::equalizePilot(gr_complex *in) {
+digital_ofdm_frame_sink::equalizePilot(gr_complex *in, gr_complex *estimates) {
   printf("equalizePilot \n"); fflush(stdout);
-  gr_complex *estimates = d_pktInfo->hestimates[0];
 
   int n_pilots = d_pilot_carriers.size();
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
+
+     float cur_pilot = 1.0;
+     gr_complex phase_error = 0.0;
+
      for(unsigned int j = 0; j < n_pilots; j++) {
          unsigned int index = (i*d_occupied_carriers) + d_pilot_carriers[j];
+	 printf("i: %d, j: %d, sym: (%.3f, %.3f)\n", i, j, in[index].real(), in[index].imag()); fflush(stdout);
          in[index] *= (estimates[d_pilot_carriers[j]]);			// equalize the pilot
 
 	 float amp = 1.0/abs(in[index]);
 	 gr_complex factor = amp * gr_expj(0.0);
-	 //std::cout << "old pilot: " << in[index] << " old angle: " << arg(in[index]) << "\t\t";
 	 in[index] *= factor;						// amplify to mangitude of 1.0
-	 //std::cout << "new pilot: " << in[index] << " new angle: " << arg(in[index]) << endl;
-     }
-  }
 
-#if 0
-  // retain the rotation, but with fresh pilots //
-  int n_pilots = d_pilot_carriers.size();
-  for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
-     float cur_pilot = 1.0;
-     for(unsigned int j = 0; j < n_pilots; j++) {
-	
-	 // the ideal pilot at this pos //
+	 // debug //
+#if 1
 	 gr_complex pilot_sym(cur_pilot, 0.0);
-	 cur_pilot = -cur_pilot;
+	 phase_error += ((in[index]) * conj(pilot_sym));
 
-	 // rotate the ideal pilot to capture the carrier rotation from the source //
-	 unsigned int index = (i*d_occupied_carriers) + d_pilot_carriers[j];
-	 in[index] = pilot_sym * gr_expj(arg(in[index])); 
-         //std::cout<<"new pilot: "<<in[index]<<" angle new: "<<arg(in[index])<<endl;
-     }
-  }
+	 float angle = arg(in[index]) * 180/M_PI;			// rotation after equalization //
+	 if(angle < 0) angle += 360.0;
+	
+	 float perfect_angle = arg(pilot_sym) * 180/M_PI;	 
+	 cur_pilot = -cur_pilot;
+	 float delta_rotation = perfect_angle - angle;
+	 //printf("pilot %d, A=%.3f, P=%.3f, delta_P=%.3f\n", d_pilot_carriers[j], abs(in[index]), angle, delta_rotation); fflush(stdout);
+	 //printf("(%d, rot=%.2f)  ", d_pilot_carriers[j], delta_rotation); fflush(stdout);
 #endif
+     }
+     float end_angle = arg(phase_error);
+     printf("\nangle: %.3f", end_angle);
+     printf("\n"); fflush(stdout);
+  }
   printf(" --------------- equalizePilot ends --------------- \n"); fflush(stdout);
 }
 #endif
@@ -3618,9 +3664,10 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      encodeSignal(symbols, coeffs[i]);
 
 #ifdef SRC_PILOT
-     equalizePilot(symbols);			// equalize the pilot tones to remove the channel effect //
+     equalizePilot(symbols, pInfo->hestimates[0]);			// equalize the pilot tones to remove the channel effect //
 #endif
-     combineSignal(out_symbols, symbols);
+     combineSignal(out_symbols, symbols, i);
+
      free(symbols);
   }
   printf("--------------------------------------------------------------------- \n"); fflush(stdout);
@@ -3647,7 +3694,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
 
   /* final message (type: 1-coded) */
   /* DO NOT include the DC tones */
-  unsigned int n_actual_symbols = d_num_ofdm_symbols * d_occupied_carriers;
+  unsigned int n_actual_symbols = (d_num_ofdm_symbols+1) * d_occupied_carriers;		// extra for NULL symbol at the end
   gr_message_sptr out_msg = gr_make_message(DATA_TYPE, 0, 0, HEADERBYTELEN + (n_actual_symbols * sizeof(gr_complex)));
   memcpy(out_msg->msg(), header_bytes, HEADERBYTELEN);					            // copy header bytes
 
@@ -3659,14 +3706,18 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
      unsigned int index = i * d_occupied_carriers;
      for(unsigned int j = 0; j < d_occupied_carriers; j++) {
+#if 0
 	 if(d_all_carriers[j] == 1) {
 	    std::cout<<"pilot: "<<j<<" -- "<< out_symbols[index+j]<<endl;
 	 }
+#endif
 	 memcpy((out_msg->msg() + offset), (out_symbols + index + j), sizeof(gr_complex));
 	 offset += sizeof(gr_complex);
      }
   }
-
+  
+  // extra for null symbol at the end //
+  memset((out_msg->msg() + offset), 0, d_occupied_carriers/8);
 
 /*
 #ifdef USE_PILOT
@@ -4931,13 +4982,14 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
 
   for(unsigned int o = 0; o < d_num_ofdm_symbols; o++) {
 #ifdef USE_PILOT
-      unsigned int bytes_decoded = demapper_ILP_2_pilot(o, bytes_out_vec, flowInfo, dfe_pilot, interpolated_coeffs);   // same # of bytes decoded/batch
 
-      /* some test verification 
-      memcpy(sym_vec, &rx_symbols_this_batch[o * d_occupied_carriers], sizeof(gr_complex) * d_occupied_carriers);
-      test_decode_signal(sym_vec, interpolated_coeffs);
-      unsigned int bytes_decoded = demapper_pilot(sym_vec, bytes_out_vec[0]); */
+#ifdef SRC_PILOT
+      unsigned int bytes_decoded = demapper_ILP_2_pilot_SRC(o, bytes_out_vec, flowInfo, dfe_pilot[0], interpolated_coeffs);   // same # of bytes decoded/batch
 #else
+      unsigned int bytes_decoded = demapper_ILP_2_pilot(o, bytes_out_vec, flowInfo, dfe_pilot, interpolated_coeffs);   // same # of bytes decoded/batch
+#endif
+
+#else	// no pilots //
       unsigned int bytes_decoded = demapper_ILP_2(o, bytes_out_vec, batched_sym_position, flowInfo, dfe_vec);   // same # of bytes decoded/batch 
 #endif
 
@@ -4975,12 +5027,14 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
   }
 
   int num_inno_pkts = flowInfo->innovative_pkts.size();
-  printf("***** Active Batch: %d Batch OK: %d evm_error: %f, Innovative Pkts: %d, Total Batches: %d Correct Batches: %d******** \n", d_active_batch, batch_correct, d_avg_evm_error, num_inno_pkts, d_total_batches_received, d_correct_batches); fflush(stdout);
+  printf("***** Active Batch: %d Batch OK: %d, Innovative Pkts: %d, evm_error: %f, Total Batches: %d Correct Batches: %d******** \n", d_active_batch, batch_correct, num_inno_pkts, d_avg_evm_error, d_total_batches_received, d_correct_batches); fflush(stdout);
+
+  d_avg_evm_error = 0.0;
 
   // escalate the decoded msgs up //
   assert(batch_decoded);
   for(unsigned int k = 0; k < d_batch_size; k++) {
-      printf("decoded batch: %d, pkt: %d\n", d_active_batch, k); fflush(stdout);
+      printf("decoded batch: %d, pkt: %d\t", d_active_batch, k); fflush(stdout);
       print_msg(decoded_msg[k]);
       printf("\n"); fflush(stdout);
       //if(batch_correct) d_target_queue->insert_tail(msg[k]);
@@ -5147,6 +5201,7 @@ digital_ofdm_frame_sink::buildMap_pilot(FlowInfo *flowInfo, gr_complex* sym_posi
   //printf("buildMap_pilot end\n"); fflush(stdout);
 }
 
+// normal version used when (1) pairwise pilot correction is done, and (2) each pilot symbol corresponds to a particular sender //
 void digital_ofdm_frame_sink::track_pilot_dfe(gr_complex *in, int sender,
 					  gr_complex& carrier, vector<gr_complex>& dfe_pilot) {
   gr_complex phase_error = 0.0;
@@ -5158,6 +5213,16 @@ void digital_ofdm_frame_sink::track_pilot_dfe(gr_complex *in, int sender,
     cur_pilot = -cur_pilot;
     int di = d_pilot_carriers[i];
     in[di] *= estimates[di];							// equalize the pilot! 
+
+    // some debugging //
+#if 1
+    float angle = arg(in[di]) * 180/M_PI;                       // rotation after equalization //
+    if(angle < 0) angle += 360.0;
+    float perfect_angle = arg(pilot_sym) * 180/M_PI; 	
+    float delta_rotation = perfect_angle - angle;
+    printf("pilot %d, A=%.3f, P=%.3f, delta_P=%.3f\n", di, abs(in[di]), angle, delta_rotation); fflush(stdout);
+#endif
+
     phase_error += (in[di] * conj(pilot_sym));
   }
 
@@ -5287,6 +5352,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
 	carrier[s] = gr_expj(-est_angle);
      }	
 
+     printf("d_end_angle: %.3f\n", d_end_angle[s]); fflush(stdout);
      //printf("sender: %d, d_end_angle: %f, d_phase: %f, d_freq: %f\n", s, d_end_angle[s], d_phase[s], d_freq[s]); fflush(stdout);
 
      interpolate_data_dfe(dfe_pilot[s], dfe_data[s], false, NULL, gr_complex(0.0, 0.0));
@@ -5755,9 +5821,11 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
 
   /* if lead forwarder, then go after the 'guard' duration, else wait for lead sender's header+preamble */
   uint32_t num_samples = (null_ofdm_symbols * (d_fft_length+cp_length));
+#ifndef SRC_PILOT
   if(d_fwd_index == 2) {
       num_samples += (d_num_hdr_ofdm_symbols+1) * (d_fft_length+cp_length);
   }
+#endif
 
   double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
   double duration = num_samples * time_per_sample;
@@ -5981,5 +6049,214 @@ digital_ofdm_frame_sink::reduceCoefficients_LSQ(FlowInfo *flowInfo) {
 #endif
 
   printf("reduceCoeffients end\n"); fflush(stdout);
+}
+#endif
+
+#ifdef SRC_PILOT
+// demapper version where only the pilot rotation from source is used //
+inline void
+digital_ofdm_frame_sink::buildMap_pilot_SRC(FlowInfo *flowInfo, gr_complex* sym_position,
+                                        vector<gr_complex*> interpolated_coeffs,
+                                        vector<gr_complex> dfe, gr_complex carrier,
+                                        int subcarrier_index, int o) {
+
+  int num_senders = d_pktInfo->n_senders;
+  int subcarrier = d_data_carriers[subcarrier_index];
+  int n_data_carriers = d_data_carriers.size();
+
+  //printf("buildMap_pilot start, num_senders: %d\n", num_senders); fflush(stdout);
+
+  gr_complex coeffs[5];
+  for(unsigned int j = 0; j < d_batch_size; j++)
+  {
+#ifdef LSQ_COMPRESSION
+      int coeff_index = j * n_data_carriers + subcarrier_index;                 // for LSQ, arrangement of coeffs is different: for all batches(sub1, sub2 .. subN)
+#else
+      int coeff_index = subcarrier * d_batch_size + j;                          // non LSQ, arrangment is: for all_subcarriers(batch1, batch2 .. batchN)
+#endif
+      for(int k = 0; k < num_senders; k++)
+      {
+          gr_complex *estimates = d_pktInfo->hestimates[k];                    // estimates for 'kth' sender
+          gr_complex *in_coeffs = interpolated_coeffs[k];                      // interpolated coeffs for 'kth' sender
+
+          gr_complex coeff = (gr_complex(1.0, 0.0)/(estimates[subcarrier])) * in_coeffs[coeff_index];
+          if(k == 0) coeffs[j] = coeff;
+          else coeffs[j] += coeff;
+      }
+      coeffs[j] *= (gr_complex(1.0, 0.0)/(carrier * dfe[subcarrier_index]));
+  }
+  //if(o == 0) printf("\n"); fflush(stdout);
+
+  if(d_batch_size == 1) {
+         int j = 0;
+         sym_position[j++] = ((coeffs[0] *  d_sym_position[0]));
+         sym_position[j++] = ((coeffs[0] *  d_sym_position[1]));;
+  }
+  if(d_batch_size == 2) {
+         int j = 0;
+         sym_position[j++] = (((coeffs[0] *  d_sym_position[0])) + (coeffs[1] *  d_sym_position[0]));
+         sym_position[j++] = (((coeffs[0] *  d_sym_position[0])) + (coeffs[1] *  d_sym_position[1]));
+         sym_position[j++] = (((coeffs[0] *  d_sym_position[1])) + (coeffs[1] *  d_sym_position[0]));
+         sym_position[j++] = (((coeffs[0] *  d_sym_position[1])) + (coeffs[1] *  d_sym_position[1]));
+  }
+  else if (d_batch_size == 3) {
+         int j = 0;
+         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[1];
+  }
+  //printf("buildMap_pilot end\n"); fflush(stdout);
+}
+
+unsigned int
+digital_ofdm_frame_sink::demapper_ILP_2_pilot_SRC(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
+	                                          FlowInfo *flowInfo, vector<gr_complex> dfe_pilot,
+        	                                  vector<gr_complex*> interpolated_coeffs) {
+
+  unsigned int bytes_produced = 0;
+  assert(d_batch_size <= MAX_BATCH_SIZE);
+
+  InnovativePktInfoVector innovativePkts = flowInfo->innovative_pkts;
+  int pkt_index = innovativePkts.size() - 1;
+
+  // get the current packet //
+  PktInfo *pInfo = innovativePkts[pkt_index];
+  gr_complex *rx_symbols_this_batch = pInfo->symbols;
+
+  gr_complex *sym_vec = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
+  memcpy(sym_vec, &rx_symbols_this_batch[ofdm_symbol_index * d_occupied_carriers], sizeof(gr_complex) * d_occupied_carriers);
+
+  gr_complex carrier;
+  vector<gr_complex> dfe_data;
+
+  int n_data_carriers = d_data_carriers.size();
+  track_pilot_dfe_SRC(sym_vec, pInfo->hestimates, carrier, dfe_pilot, ofdm_symbol_index);
+  interpolate_data_dfe(dfe_pilot, dfe_data, false, NULL, gr_complex(0.0, 0.0));
+
+  int n_entries = pow(2.0, double(d_batch_size));
+  gr_complex sigrot, closest_sym;
+
+  /* for every packet of the batch, 'd_batch_size' # of partial bytes and bits will be decoded */
+  unsigned int partial_byte[MAX_BATCH_SIZE];
+  unsigned char bits[MAX_BATCH_SIZE];
+  memset(partial_byte, 0, sizeof(unsigned int) * MAX_BATCH_SIZE);
+  memset(bits, 0, sizeof(unsigned char) * MAX_BATCH_SIZE);
+
+  unsigned int byte_offset = 0;
+
+  // symbol position map needs to be built each time, because of DFE tracking //
+  gr_complex *sym_position = (gr_complex*) malloc(sizeof(gr_complex) * n_entries);
+
+  for(unsigned int i = 0; i < n_data_carriers; i++) {
+
+     // demodulate 1-byte at a time //
+     if (byte_offset < 8) {
+
+        // build the map for each subcarrier //
+         buildMap_pilot_SRC(flowInfo, sym_position, interpolated_coeffs, dfe_data, carrier, i, ofdm_symbol_index);
+
+         // slice it //
+         sigrot = sym_vec[d_data_carriers[i]];
+         slicer_ILP_2(sigrot, closest_sym, bits, sym_position, ofdm_symbol_index, i);
+
+         assert((8 - byte_offset) >= d_nbits);
+
+         for(unsigned int k = 0; k < d_batch_size; k++)
+              partial_byte[k] |= bits[k] << (byte_offset);
+
+         byte_offset += d_nbits;
+     }
+
+     if(byte_offset == 8) {
+        for(int k = 0; k < d_batch_size; k++) {
+            if(d_pkt_num == 2 && 0) printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
+            //assert(false);
+            out_vec[k][bytes_produced] = partial_byte[k];
+            partial_byte[k] = 0;
+        }
+        bytes_produced++;
+        byte_offset = 0;
+     }
+  }
+
+  free(sym_position);
+  assert(byte_offset == 0);
+
+  return bytes_produced;
+}
+
+// used (1) only the pilot from the source is considered, everyone relays the pilots (2) multiple senders info is used to equalize the pilots //
+/* Note - 
+   1. When multiple senders are present, it gets a little tricky w.r.t the lead sender involved in the transmission. The symbol 'x', which 
+      would have undergone a rotation at position "t" from the source, is now instead at position "t'". So, simple technique of cancelling the 
+      intermediate node's frequency offset does not quite work. We first need to remove the effect of rotation at the new location of "t'" and then only 
+      the rotation from the source at position "t" would be left
+*/
+void digital_ofdm_frame_sink::track_pilot_dfe_SRC(gr_complex *in, vector<gr_complex*> hestimates,
+                                          gr_complex& carrier, vector<gr_complex>& dfe_pilot, int o) {
+  gr_complex phase_error = 0.0;
+  float cur_pilot = 1.0;
+
+  int n_senders = hestimates.size();
+  int sender = 0;										// basically the source //
+
+  for (unsigned int i = 0; i < d_pilot_carriers.size(); i++) {
+    gr_complex pilot_sym(cur_pilot, 0.0);
+    cur_pilot = -cur_pilot;
+    int di = d_pilot_carriers[i];
+
+    gr_complex total_H(0.0, 0.0);
+    assert(n_senders <= 2);
+    //for(unsigned int j = 0; j < n_senders; j++) {
+    for(unsigned int j = 0; j < 1; j++) {		// REMOVEEEEEEEE
+        gr_complex *estimates = hestimates[j];
+	in[di] *= estimates[di];
+	total_H += estimates[di];
+    }
+    if(n_senders == 2 && 0) {			// REMOVEEEEEEEEEEE
+	in[di] = in[di]/total_H;
+    }
+
+    // some debugging //
+#if 1
+    float angle = arg(in[di]) * 180/M_PI;                       // rotation after equalization //
+    if(angle < 0) angle += 360.0;
+    float perfect_angle = arg(pilot_sym) * 180/M_PI;
+    float delta_rotation = perfect_angle - angle;
+    //printf("pilot %d, delta_P=%.3f\t", di, delta_rotation); fflush(stdout);
+    printf("(%d, rot=%.2f)  ", di, delta_rotation); fflush(stdout);
+#endif
+
+    phase_error += (in[di] * conj(pilot_sym));
+  }
+
+  // update phase equalizer
+  float angle = arg(phase_error);
+  carrier = gr_expj(-angle);
+
+#if 1
+  // dump the frequency offset value //
+  float freq_offset = angle/(2 * M_PI * (o+NULL_OFDM_SYMBOLS));
+  printf("(@f: %.5f)  ", freq_offset); fflush(stdout);
+#endif
+
+  // update DFE based on pilots
+  cur_pilot = 1.0;
+  for (unsigned int i = 0; i < d_pilot_carriers.size(); i++) {
+    gr_complex pilot_sym(cur_pilot, 0.0);
+    cur_pilot = -cur_pilot;
+    int di = d_pilot_carriers[i];
+    gr_complex sigeq = in[di] * carrier * dfe_pilot[i];
+    // FIX THE FOLLOWING STATEMENT
+    if (norm(sigeq)> 0.001)
+      dfe_pilot[i] += d_eq_gain * (pilot_sym/sigeq - dfe_pilot[i]);
+  }
+  d_end_angle[sender] = angle;
+  printf("  d_end_angle: %f\n", d_end_angle[sender]); fflush(stdout);
 }
 #endif

@@ -566,7 +566,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   /* encoding the signal */
   void encodeSignal(gr_complex *symbols, gr_complex coeff);
-  void combineSignal(gr_complex *out, gr_complex* symbols);
+  void combineSignal(gr_complex *out, gr_complex* symbols, int);
   float normalizeSignal(gr_complex* out, int k);
   void generateCodeVector(MULTIHOP_HDR_TYPE &header);
 
@@ -819,7 +819,16 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 #endif
 
 #ifdef SRC_PILOT
-  void equalizePilot(gr_complex*);
+  void equalizePilot(gr_complex*, gr_complex*);
+  unsigned int demapper_ILP_2_pilot_SRC(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
+                                                  FlowInfo *flowInfo, vector<gr_complex> dfe_pilot,
+                                                  vector<gr_complex*> interpolated_coeffs);
+  void track_pilot_dfe_SRC(gr_complex*, vector<gr_complex*>, gr_complex&, vector<gr_complex>&, int);
+  void buildMap_pilot_SRC(FlowInfo *flowInfo, gr_complex* sym_position,
+                                        vector<gr_complex*> interpolated_coeffs,
+                                        vector<gr_complex> dfe, gr_complex carrier,
+                                        int subcarrier_index, int o);
+
 #endif
 };
 

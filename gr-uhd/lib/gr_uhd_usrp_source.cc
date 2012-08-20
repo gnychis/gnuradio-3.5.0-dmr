@@ -100,7 +100,8 @@ public:
     uhd::tune_result_t set_center_freq(
         const uhd::tune_request_t tune_request, size_t chan
     ){
-        return _dev->set_rx_freq(tune_request, chan);
+	uhd::tune_request_t tune_req(tune_request.target_freq, 100e6/32);		// apurv
+        return _dev->set_rx_freq(tune_req, chan);					// apurv
     }
 
     double get_center_freq(size_t chan){

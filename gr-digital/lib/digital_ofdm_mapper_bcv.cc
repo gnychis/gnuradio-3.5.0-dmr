@@ -313,35 +313,6 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
   if(output_items.size() == 2)
     out_flag = (char *) output_items[1];
   
-/* testing the co-sender scenario - in this case, the co-sender blocks until it receives a trigger
-     from the lead sender */
-#ifdef TRIGGER_ON_ETHERNET
-   // TODO: need to make it more robust! //
-  if(d_trigger_sock == -1)
-      create_trigger_sock();
-
-   int trigger_len = sizeof(TRIGGER_MSG_TYPE);
-   memset(d_trigger_buf, 0, trigger_len);
-   int nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_PEEK);
-   if(nbytes >= 0) {
-	if(nbytes == trigger_len) {
-	    nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, 0);
-	}
-	else {
-	    nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_WAITALL);	
-	}
-	printf(" $$$$$$$$$$$$$$$$$$$$$$$$$$$$$ received nbytes: %d as TRIGGER $$$$$$$$$$$$$$$$$$$$$\n", nbytes);
-	fflush(stdout);
-
-	TRIGGER_MSG_TYPE trigger_msg;
-	memcpy(&trigger_msg, d_trigger_buf, trigger_len);
-	printf("TRIGGER details, batch: %d, flow: %d, lead sender: %d\n", trigger_msg.batch, trigger_msg.flow_id, trigger_msg.src_id); fflush(stdout);
-   } else {
-	printf("TRIGGER: recv needs to be blocking!! \n"); fflush(stdout);
-	assert(false);
-   }
-#endif
-
   bool tx_pilot = false;
 
   /* single OFDM symbol: Initialize all bins to 0 to set unused carriers */
@@ -351,6 +322,20 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
      generateOFDMSymbol(out, d_msg[0]->length());  			// entire msg needs to be modulated for ACK
   }
   else if(d_data) {
+
+#ifdef SRC_PILOT
+     // slave fwd will transmit NULL symbols prior to the header, so that by the time data is sent out, both the senders
+     // are at the same offset (to counter the fine offset rotation) 
+     if(d_fwd_index == 2 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT)) {
+        d_null_symbol_cnt++;
+	d_pending_flag = 0;
+	if(!d_time_tag) {
+	   make_time_tag(d_msg[0]);
+	   d_time_tag = true;
+	}
+     }
+     else
+#endif
 	/* data */
      if(d_msg_offset[0] < HEADERBYTELEN) {
 	generateOFDMSymbol(out, HEADERBYTELEN);
@@ -359,6 +344,11 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
            d_time_tag = true;
         }
 	tx_pilot = true;
+#ifdef SRC_PILOT
+	if(d_hdr_ofdm_index == 0) {
+	   d_pending_flag = 1;
+	}
+#endif
 	d_hdr_ofdm_index++;
      }
      else if(d_fwd_index == 1 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT)) {	// lead_fwder: send NULL symbols to accomodate slave fwders
@@ -376,9 +366,9 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 	switch(d_fwd_index) {
 #ifndef SRC_PILOT
 	    case 0: tx_pilot = true; break;						// single fwder //
-#endif
 	    case 1: tx_pilot = (d_data_ofdm_index % 2 == 1)?true:false; break;		// lead: odd symbols //
 	    case 2: tx_pilot = (d_data_ofdm_index % 2 == 0)?true:false; break;		// slave: even symbols //
+#endif
 	    default: break;
 	}
      }  
@@ -392,6 +382,13 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
          cur_pilot = -cur_pilot;
       }
   }
+#ifndef SRC_PILOT
+  if(!tx_pilot) {
+     for(int i = 0; i < d_pilot_carriers.size(); i++) {
+	out[d_pilot_carriers[i]] = gr_complex(0.0, 0.0);
+     }
+  }
+#endif
 #endif
 
   /* complete message modulated */
@@ -596,12 +593,6 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   }
 #endif
 
-#ifdef TESTING 
-  /* send out only when triggered from ofdm.py mod */
-  while(d_batch_to_send == -1)
-     continue;
-#endif
-
   //int packetlen = 0;		//only used for make_header//
 
 #ifndef ACK_ON_ETHERNET
@@ -620,11 +611,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
      1. dequeue the fresh K pkts from the msgQ
      2. reset the flags
   */
-#ifdef TESTING
-  if(d_batch_q_num != d_batch_to_send || d_modulated) 
-#else
   if(d_batch_q_num != d_batch_to_send)
-#endif
   {
 	printf("start batch: %d, d_batch_q_num: %d\n", d_batch_to_send, d_batch_q_num); fflush(stdout);
 	flushBatchQ();
@@ -642,7 +629,6 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	d_pending_flag = 1;				// start of packet flag //
 	d_batch_q_num = d_batch_to_send;
   }
-#ifndef TESTING
   else if(d_modulated)
   {
 	printf("continue batch: %d, pkts sent: %d\n", d_batch_to_send, d_packets_sent_for_batch); fflush(stdout);
@@ -650,24 +636,8 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	initializeBatchParams();
 	d_pending_flag = 1;				// start of packet flag //
   }
-#endif
 
-  // timekeeping, etc //
-  if(d_modulated) {
-      while(0) {
-         struct timeval now;
-         gettimeofday(&now, 0);
-         uint64_t timeNow = (now.tv_sec * 1e6) + now.tv_usec;
-         uint64_t interval = timeNow - d_time_pkt_sent;
-
-	 if(interval > 1e4) {
-	     printf("timeNow: %llu, d_time_pkt_sent: %llu, interval: %llu\n", timeNow, d_time_pkt_sent, interval); fflush(stdout);
-	     break;
-	 }
-     }
-     d_modulated = false;
-  }
-
+  d_modulated = false;
 
   // if start of a packet: then add a header and whiten the entire packet //
   if(d_pending_flag == 1)
@@ -683,35 +653,6 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
      makeHeader();
      initHeaderParams();
 
-
-	  /* testing the co-sender scenario - in this case, the co-sender blocks until it receives a trigger from the lead sender */
-#ifdef TRIGGER_ON_ETHERNET
-     // TODO: need to make it more robust! //
-     if(d_trigger_sock == -1)
-	     create_trigger_sock();
-
-     int trigger_len = sizeof(TRIGGER_MSG_TYPE);
-     memset(d_trigger_buf, 0, trigger_len);
-     int nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_PEEK);
-     if(nbytes >= 0) {
-	     if(nbytes == trigger_len) {
-		     nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, 0);
-	     }
-	     else {
-		     nbytes = recv(d_trigger_sock, d_trigger_buf, trigger_len, MSG_WAITALL);
-	     }
-	     d_trigger_rx_time = d_usrp->get_time_now();
-	     printf(" $$$$$$$$$$$$$$$$$$$$$$$$$$$$$ received nbytes: %d as TRIGGER $$$$$$$$$$$$$$$$$$$$$\n", nbytes);
-	     fflush(stdout);
-
-	     TRIGGER_MSG_TYPE trigger_msg;
-	     memcpy(&trigger_msg, d_trigger_buf, trigger_len);
-	     printf("TRIGGER details, batch: %d, flow: %d, lead sender: %d\n", trigger_msg.batch, trigger_msg.flow_id, trigger_msg.src_id); fflush(stdout);
-     } else {
-	     printf("TRIGGER: recv needs to be blocking!! \n"); fflush(stdout);
-	     assert(false);
-     }
-#endif
      d_time_tag = false;
      d_null_symbol_cnt = 0;
   }
@@ -731,11 +672,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       generateOFDMSymbolHeader(out); 					// send the header symbols out first //
       tx_pilot = true;
   }
-  else if(d_fwd_index == 1 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT)) {
-      d_null_symbol_cnt++;  // to test sync send - send null ofdm symbol //
-  }
-  else
-  {
+  else if(!d_send_null) {
        // offline analysis //
       if(!d_init_log) {
            assert(open_log());
@@ -762,9 +699,6 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       for(unsigned int k = 0; k < d_batch_size; k++)
       {
 	   gr_complex *symbols = symbols_vec.at(k);
-#ifdef TESTING
-	   memcpy(out, symbols, sizeof(gr_complex) * d_fft_length);
-#else
 	   if(d_encode_flag)
 		encodeSignal(symbols, k); 
 
@@ -772,7 +706,6 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	      memcpy(out, symbols, sizeof(gr_complex) * d_fft_length);
 	   else
 	      combineSignal(out, symbols);
-#endif
 	   free(symbols);
       }
       /* encoding process ends */
@@ -784,14 +717,8 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       assert(d_ofdm_symbol_index < d_num_ofdm_symbols);
       d_ofdm_symbol_index++;
 
-      // REMOVEEEEEEEE -- just testing //
-      switch(d_fwd_index) {
-          case 0: tx_pilot = true; break;                                             // single fwder //
-          case 1: tx_pilot = (d_data_ofdm_index % 2 == 1)?true:false; break;          // lead: odd symbols //
-          case 2: tx_pilot = (d_data_ofdm_index % 2 == 0)?true:false; break;          // slave: even symbols //
-      }
-      // end //
-
+#if 0
+      // uncomment if need to disable sending a NULL symbol at the end //
       if(d_modulated)
       {
 	  d_pending_flag = 2;                                             // marks the last OFDM data symbol (for burst tagger trigger) //
@@ -805,9 +732,22 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	  d_time_pkt_sent = (now.tv_sec * 1e6) + now.tv_usec;
 	  printf("d_time_pkt_sent: %llu\n", d_time_pkt_sent); fflush(stdout);
       }
+#endif
 	// etc end //
       tx_pilot = true;
   }
+
+#if 1
+  // comment if need to disable sending a NULL symbol at the end //
+  else if (d_send_null) {
+      d_pending_flag = 2;
+      d_packets_sent_for_batch += 1;
+      assert(d_ofdm_symbol_index == d_num_ofdm_symbols);
+      d_ofdm_symbol_index = 0;
+      d_send_null = false;
+      d_modulated = true;
+  }
+#endif
 
 #ifdef USE_PILOT
   //printf("ofdm_symbol_index: %d, tx_pilot: %d\n", d_ofdm_symbol_index, tx_pilot); fflush(stdout);
@@ -1070,8 +1010,8 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolData(gr_complex* out, int k)
     }
 
     //printf("complete pkt modulated\n"); fflush(stdout);
-    d_modulated = true;		// complete msg has been demodulated //
-    //d_send_null = true;
+    //d_modulated = true;		// complete msg has been demodulated //
+    d_send_null = true;			// send a null symbol at the end //
 
     assert(d_bit_offset[k] == 0);
 
