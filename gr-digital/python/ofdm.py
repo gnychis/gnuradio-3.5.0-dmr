@@ -119,7 +119,7 @@ class ofdm_mod(gr.hier_block2):
 					     options.fwd, options.dst_id, options.degree)
         
 
-        self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, padded_preambles)
+        self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, options.fwd, padded_preambles)
         self.ifft = gr.fft_vcc(self._fft_length, False, win, True)
 
         self.cp_adder = digital_swig.ofdm_cyclic_prefixer(self._fft_length, symbol_length)

@@ -435,7 +435,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   int exp_size, int fec_n, int fec_k, int degree);
 
  private:
-  enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_HEADER};
+  enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_NULL, STATE_HAVE_HEADER};
 
   static const int MAX_PKT_LEN    = 4096;
 
@@ -829,7 +829,18 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
                                         vector<gr_complex> dfe, gr_complex carrier,
                                         int subcarrier_index, int o);
 
+  void getResidualRotations(float*);
+  void debug_carrier_correction();
+  int d_null_symbols;
 #endif
+
+  /* post DFT approach to calculate the freq offset */
+  void calculate_fine_offset(); 
+  gr_complex d_training_symbols[8*MAX_OCCUPIED_CARRIERS];
+  FILE *d_fp_training; 
+  bool d_training_log_open;
+
+  void adjust_H_estimate(int);
 };
 
 

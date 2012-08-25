@@ -23,13 +23,13 @@
 GR_SWIG_BLOCK_MAGIC(digital,ofdm_insert_preamble);
 
 digital_ofdm_insert_preamble_sptr
-digital_make_ofdm_insert_preamble(int fft_length,
+digital_make_ofdm_insert_preamble(int fft_length, unsigned int fwd_index,
 			     const std::vector<std::vector<gr_complex> > &preamble);
 
 
 class digital_ofdm_insert_preamble : public gr_block
 {
  protected:
-  digital_ofdm_insert_preamble(int fft_length,
+  digital_ofdm_insert_preamble(int fft_length, unsigned int fwd_index,
 			  const std::vector<std::vector<gr_complex> > &preamble);
 };

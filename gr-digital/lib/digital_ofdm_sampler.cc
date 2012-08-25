@@ -83,7 +83,7 @@ digital_ofdm_sampler::digital_ofdm_sampler (unsigned int fft_length,
 				  unsigned int symbol_length,
 				  unsigned int timeout)
   : gr_block ("ofdm_sampler",
-	      gr_make_io_signature3 (2, 3, sizeof (gr_complex), sizeof(char), sizeof(gr_complex)),
+	      gr_make_io_signature3 (2, 3, sizeof (gr_complex), sizeof(char), sizeof(float)),
 	      gr_make_io_signature3 (2, 3, sizeof (gr_complex)*fft_length, sizeof(char)*fft_length, sizeof(gr_complex)*fft_length)),
     d_state(STATE_NO_SIG), d_timeout_max(timeout), d_fft_length(fft_length), d_symbol_length(symbol_length),
     d_fp(NULL), d_fd(0), d_file_opened(false) 
@@ -98,6 +98,7 @@ digital_ofdm_sampler::digital_ofdm_sampler (unsigned int fft_length,
   std::string arg("");
   d_usrp = uhd::usrp::multi_usrp::make(arg);
   d_joint_rx_on = false;
+  d_phase = 0;
 }
 
 void
@@ -120,6 +121,11 @@ digital_ofdm_sampler::general_work (int noutput_items,
 {
   gr_complex *iptr = (gr_complex *) input_items[0];
   const char *trigger = (const char *) input_items[1];
+
+  float* freq_offset;
+  if(input_items.size() > 2) {
+     freq_offset = (float*) input_items[2];
+  }
 
   gr_complex *optr = (gr_complex *) output_items[0];
   char *outsig = (char *) output_items[1];
@@ -261,7 +267,9 @@ digital_ofdm_sampler::general_work (int noutput_items,
   unsigned int i, pos, ret;
   switch(d_state) {
   case(STATE_PREAMBLE):
+    printf("Set SYMBOL BOUNDARY here .. freq_offset: %.3f\n", freq_offset[index]); fflush(stdout);
     // When we found a preamble trigger, get it and set the symbol boundary here
+    //correct_freq_offset(&iptr[index-d_symbol_length+1], d_symbol_length, freq_offset[index]);
     for(i = (index - d_fft_length + 1); i <= index; i++) {
       *optr++ = iptr[i];
     }
@@ -282,6 +290,10 @@ digital_ofdm_sampler::general_work (int noutput_items,
 
     // skip over fft length history and cyclic prefix
     pos = d_symbol_length;         // keeps track of where we are in the input buffer
+ 
+    //printf("correct_offset: %.3f\n", freq_offset[pos]); fflush(stdout); 
+    //correct_freq_offset(&iptr[pos-24], d_symbol_length, freq_offset[pos]);
+
     while(pos < d_symbol_length + d_fft_length) {
       *optr++ = iptr[pos++];
     }
@@ -341,4 +353,23 @@ digital_ofdm_sampler::open_log()
       }
   }
   return true;
+}
+
+inline void
+digital_ofdm_sampler::correct_freq_offset(gr_complex *out, int noutput_items, float phase) {
+  float sensitivity = -2.0/((float) d_fft_length);
+  for (int i = 0; i < noutput_items; i++){
+    d_phase = d_phase + sensitivity * phase;
+    float oi, oq;
+    gr_sincosf (d_phase, &oq, &oi);
+    out[i] *= gr_complex (oi, oq);
+  }
+
+  // Limit the phase accumulator to [-16*pi,16*pi]
+  // to avoid loss of precision in the addition above.
+
+  if (fabs (d_phase) > 16 * M_PI){
+    double ii = boost::math::trunc (d_phase / (2 * M_PI));
+    d_phase = d_phase - (ii * 2 * M_PI);
+  }
 }

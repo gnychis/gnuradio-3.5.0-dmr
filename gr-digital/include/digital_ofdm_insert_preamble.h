@@ -53,7 +53,7 @@ class digital_ofdm_insert_preamble;
 typedef boost::shared_ptr<digital_ofdm_insert_preamble> digital_ofdm_insert_preamble_sptr;
 
 DIGITAL_API digital_ofdm_insert_preamble_sptr
-digital_make_ofdm_insert_preamble(int fft_length,
+digital_make_ofdm_insert_preamble(int fft_length, unsigned int fwd_index,
 			     const std::vector<std::vector<gr_complex> > &preamble);
 
 /*!
@@ -89,16 +89,17 @@ digital_make_ofdm_insert_preamble(int fft_length,
 class DIGITAL_API digital_ofdm_insert_preamble : public gr_block
 {
   friend DIGITAL_API digital_ofdm_insert_preamble_sptr
-  digital_make_ofdm_insert_preamble(int fft_length,
+  digital_make_ofdm_insert_preamble(int fft_length, unsigned int fwd_index,
 			       const std::vector<std::vector<gr_complex> > &preamble);
 
 protected:
-  digital_ofdm_insert_preamble(int fft_length,
+  digital_ofdm_insert_preamble(int fft_length, unsigned int fwd_index,
 			  const std::vector<std::vector<gr_complex> > &preamble);
 
 private:
   enum state_t {
     ST_IDLE,
+    ST_NULL_SYMBOLS,
     ST_PREAMBLE,
     ST_FIRST_PAYLOAD,
     ST_PAYLOAD
@@ -132,6 +133,9 @@ public:
   FILE *d_fp;
   void log_preamble();
   void open_log();
+
+  unsigned int d_fwd_index;
+  bool d_timestamp;
 };
 
 #endif /* INCLUDED_GR_OFDM_INSERT_PREAMBLE_H */

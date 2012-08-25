@@ -326,9 +326,9 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 #ifdef SRC_PILOT
      // slave fwd will transmit NULL symbols prior to the header, so that by the time data is sent out, both the senders
      // are at the same offset (to counter the fine offset rotation) 
-     if(d_fwd_index == 2 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT)) {
+     if(d_fwd_index == 2 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT) && 0) {
         d_null_symbol_cnt++;
-	d_pending_flag = 0;
+	d_pending_flag = 3;
 	if(!d_time_tag) {
 	   make_time_tag(d_msg[0]);
 	   d_time_tag = true;

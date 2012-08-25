@@ -140,6 +140,7 @@ class ofdm_receiver(gr.hier_block2):
        	    	self.connect(self.chan_filt, gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))        # apurv++ follow freq offset
 	    else:
 		self.connect(self.chan_filt, (self.sampler, 0))
+		##self.connect(self.chan_filt, gr.delay(gr.sizeof_gr_complex, (fft_length+cp_length)), (self.sampler, 0))		## extra delay
 
 	    self.connect(self.chan_filt, gr.file_sink(gr.sizeof_gr_complex, "ofdm_receiver-chan_filt_c.dat"))
 	elif use_chan_filt == 2: 
@@ -167,7 +168,10 @@ class ofdm_receiver(gr.hier_block2):
 	    else:
 		# disable frequency offset correction completely #
 		self.connect((self.ofdm_sync,0), gr.null_sink(gr.sizeof_float))
-		self.connect((self.ofdm_sync,1), (self.sampler, 1))           # timing signal
+		self.connect((self.ofdm_sync,1), (self.sampler, 1))           # timing signal,	
+
+		#self.connect((self.ofdm_sync,0), (self.sampler, 2))						##added
+		##self.connect((self.ofdm_sync,1), gr.delay(gr.sizeof_char, fft_length+cp_length), (self.sampler, 1))           # timing signal, ##extra delay
 
 
 	    # route received time domain to sink (all-the-way) for offline analysis #

@@ -126,6 +126,7 @@ gr_burst_tagger::modify_timestamp(int output_items, int index) {
      add_item_tag(0/*chan0*/, nitems_written(0)+index, _key, _value, srcid);
 
   } else {
+     assert(false);
      //std::cerr << "ACQ---- Header received, with no sync timestamp1?\n";
   }
 }

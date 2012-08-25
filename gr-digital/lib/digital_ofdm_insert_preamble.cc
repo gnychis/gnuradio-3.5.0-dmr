@@ -30,16 +30,18 @@
 #include <string.h>
 #include <cstdio>
 
+//#define SEND_NULL_SYMBOLS 1
+
 digital_ofdm_insert_preamble_sptr
-digital_make_ofdm_insert_preamble(int fft_length,
+digital_make_ofdm_insert_preamble(int fft_length, unsigned int fwd_index,
 			     const std::vector<std::vector<gr_complex> > &preamble)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_insert_preamble(fft_length,
+  return gnuradio::get_initial_sptr(new digital_ofdm_insert_preamble(fft_length, fwd_index,
 								  preamble));
 }
 
 digital_ofdm_insert_preamble::digital_ofdm_insert_preamble
-       (int fft_length,
+       (int fft_length, unsigned int fwd_index,
 	const std::vector<std::vector<gr_complex> > &preamble)
   : gr_block("ofdm_insert_preamble",
 	     gr_make_io_signature2(2, 2,
@@ -55,7 +57,9 @@ digital_ofdm_insert_preamble::digital_ofdm_insert_preamble
     d_state(ST_IDLE),
     d_nsymbols_output(0),
     d_pending_flag(0),
-    d_p_index(0)
+    d_p_index(0),
+    d_fwd_index(fwd_index),
+    d_timestamp(false)
 {
   // sanity check preamble symbols
   for (size_t i = 0; i < d_preamble.size(); i++){
@@ -120,10 +124,44 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
     case ST_IDLE:
       if ((in_flag[ni] == 1))	// this is first symbol of new payload
 	enter_preamble();
+#ifdef SEND_NULL_SYMBOLS
+      else if(d_fwd_index == 2 && in_flag[ni] == 3) {
+	d_timestamp = true;
+	d_state = ST_NULL_SYMBOLS;
+      }
+#endif
       else
 	ni++;			// eat one input symbol
       break;
-      
+     
+#ifdef SEND_NULL_SYMBOLS
+    case ST_NULL_SYMBOLS:
+      if ((in_flag[ni] == 1)) {  // this is first symbol of new payload
+        enter_preamble();
+      }
+      else {
+        printf("ST_NULL_SYMBOLS\n"); fflush(stdout);
+        memcpy(&out_sym[no * d_fft_length],
+             &in_sym[ni * d_fft_length],
+             d_fft_length * sizeof(gr_complex));
+
+        if(output_items.size() >= 2) {
+           burst_trigger[no] = 1;
+        }
+
+        if (output_items.size() >= 3){
+          memset(&out_signal[no * d_fft_length], 0, sizeof(char) * d_fft_length);
+        }
+
+        no++; ni++;
+	if(d_timestamp) {
+	   track_and_modify_timestamp(ni);
+	   d_timestamp = false;
+	}
+      }
+      break;
+#endif
+ 
     case ST_PREAMBLE:
       assert(in_flag[ni] == 1);
 
@@ -152,6 +190,11 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 
 	no++;
 	d_nsymbols_output++;
+#ifdef SEND_NULL_SYMBOLS
+	if(d_fwd_index != 2)
+#else
+	track_and_modify_timestamp(no);
+#endif
       }
       break;
       
@@ -185,7 +228,13 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	enter_preamble();
 	break;
       }
-
+#ifdef SEND_NULL_SYMBOLS
+      else if(d_fwd_index == 2 && in_flag[ni] == 3){
+        d_state = ST_NULL_SYMBOLS;
+	d_timestamp = true;
+        break;
+      }
+#endif
       // copy a symbol from input to output
       memcpy(&out_sym[no * d_fft_length],
 	     &in_sym[ni * d_fft_length],
@@ -217,8 +266,6 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       enter_idle();
     }
   }
-
-  track_and_modify_timestamp(ni);
 
   consume_each(ni);
   return no;
