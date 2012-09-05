@@ -80,7 +80,11 @@ public:
         uint64_t sync_secs = (uint64_t) c_time.get_full_secs();
         double sync_frac_of_secs = c_time.get_frac_secs();
 
-        printf("----- ASYNC_MSG: event_code: %d, m_full_secs: %lld, m_frac_secs: %f, curr_full_secs: %llu, curr_frac_secs: %f----- \n", _event_code, (long long) _time_spec.get_full_secs(), _time_spec.get_frac_secs(), sync_secs, sync_frac_of_secs);
+	if(_event_code == 8 || _event_code == 2) {
+	    printf("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx event_code: 8 *************************************\n", _event_code); fflush(stdout);
+        }
+
+        //printf("----- ASYNC_MSG: event_code: %d, m_full_secs: %lld, m_frac_secs: %f, curr_full_secs: %llu, curr_frac_secs: %f----- \n", _event_code, (long long) _time_spec.get_full_secs(), _time_spec.get_frac_secs(), sync_secs, sync_frac_of_secs);
         fflush(stdout);
         msg.reset();
     }

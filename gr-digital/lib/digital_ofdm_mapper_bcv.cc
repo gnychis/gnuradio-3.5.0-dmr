@@ -306,6 +306,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
       d_data = false;
     }
 
+    d_send_null = false;
     d_null_symbol_cnt = 0;
   }
 
@@ -354,7 +355,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
      else if(d_fwd_index == 1 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT)) {	// lead_fwder: send NULL symbols to accomodate slave fwders
 	d_null_symbol_cnt++;
      }
-     else {
+     else if(!d_send_null) {
 
 	/* header has already been modulated, just send the payload *symbols* as it is */
  	copyOFDMSymbol(out, d_msg[0]->length());		
@@ -371,6 +372,29 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 #endif
 	    default: break;
 	}
+#ifdef SRC_PILOT
+#if 0
+	// testing //
+        bool test_pilot = false;
+	switch(d_fwd_index) {
+	   case 0: test_pilot = true; break;
+	   case 1: test_pilot = (d_data_ofdm_index % 2 == 0)?true:false; break;		// lead: even //
+	   case 2: test_pilot = (d_data_ofdm_index % 2 == 1)?true:false; break;		// slave: odd //
+	}
+	
+	if(!test_pilot) {
+	    for(int i = 0; i < d_pilot_carriers.size(); i++) {
+		out[d_pilot_carriers[i]] = gr_complex(0.0, 0.0);
+	    }
+	}
+#else
+ 	if(d_fwd_index == 1 && 0) {
+	    for(int i = 0; i < d_pilot_carriers.size(); i++) {
+        	out[d_pilot_carriers[i]] = gr_complex(0.0, 0.0);
+     	    }
+	}
+#endif
+#endif
      }  
   }
 
@@ -390,13 +414,20 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
   }
 #endif
 #endif
-
-  /* complete message modulated */
-  if(d_msg_offset[0] == d_msg[0]->length()) {
+  
+  if(d_send_null) {
       d_msg[0].reset();
-      printf("num_ofdm_symbols: %d\n", d_hdr_ofdm_index + d_data_ofdm_index); fflush(stdout); 
-      d_pending_flag = 2;						// marks the last OFDM data symbol (for burst tagger trigger) //
+      d_pending_flag = 2;                                               // marks the last OFDM data symbol (for burst tagger trigger) //
       d_time_tag = false;
+      d_send_null = false;
+  }
+  /* complete message modulated */
+  else if(d_msg_offset[0] == d_msg[0]->length()) {
+      //d_msg[0].reset();
+      printf("num_ofdm_symbols: %d\n", d_hdr_ofdm_index + d_data_ofdm_index); fflush(stdout); 
+      //d_pending_flag = 2;						// marks the last OFDM data symbol (for burst tagger trigger) //
+      //d_time_tag = false;
+      d_send_null = true;
   }
 
   if (out_flag)
@@ -1141,13 +1172,26 @@ digital_ofdm_mapper_bcv::generateCodeVector()
   // for each subcarrier, record 'd_batch_size' coeffs //
   int num_carriers = d_data_carriers.size()/COMPRESSION_FACTOR;
 
+  float cv = 0.0;
   for(unsigned int k = 0; k < d_batch_size; k++) {
-      float cv = rand() % 360 + 1;				// degree
-      //d_header.coeffs[k] = ToPhase_c(cv); 
+#if 1
+      if(k > 0)
+        cv += 90;
+      else
+        cv = rand() % 360 + 1;
+#else
+      float cv = rand() % 360 + 1;                              // degree
+#endif
 
       // store the scaled versions in header (space constraints) //
       d_header.coeffs[k].phase = cv * SCALE_FACTOR_PHASE;
       d_header.coeffs[k].amplitude = SCALE_FACTOR_AMP;
+
+#ifndef DEBUG
+          float rad = cv * M_PI/180;
+          gr_complex t_coeff = ToPhase_c(rad);
+          printf("cv: %f degrees <-> %f radians <-> (%f, %f) \n", cv, rad, t_coeff.real(), t_coeff.imag()); fflush(stdout);
+#endif
   }
 
 #ifdef LSQ_COMPRESSION
@@ -1232,7 +1276,7 @@ digital_ofdm_mapper_bcv::makeHeader()
    d_header.dst_id = d_dst_id;
    d_header.flow_id = 0;
    d_header.inno_pkts = d_batch_size;
-   d_header.factor = 1.0/sqrt(d_batch_size);
+   d_header.factor = 1.0;
 
    d_header.lead_sender = 1;
    d_header.src_id = d_id;         //TODO: remove the hardcoding

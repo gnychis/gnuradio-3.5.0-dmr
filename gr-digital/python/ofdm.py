@@ -79,7 +79,12 @@ class ofdm_mod(gr.hier_block2):
 
         # Use freq domain to get doubled-up known symbol for correlation in time domain
         zeros_on_left = int(math.ceil((self._fft_length - self._occupied_tones)/2.0))
-        ksfreq = known_symbols_4512_3[0:self._occupied_tones]
+
+        # apurv: use the preamble as a function of hop number #
+        #ksfreq = known_symbols_4512_3[0:self._occupied_tones]
+        start_index = (options.hop) * self._occupied_tones
+        ksfreq = known_symbols_4512_3[start_index:start_index + self._occupied_tones]
+
         for i in range(len(ksfreq)):
             if((zeros_on_left + i) & 1):
                 ksfreq[i] = 0
@@ -170,8 +175,8 @@ class ofdm_mod(gr.hier_block2):
 
 	#self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex, "ofdm_cp_adder_c.dat"))
 
-        self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "ofdm_preambles.dat"))
-        self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
+        #self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "ofdm_preambles.dat"))
+        #self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 
     def send_pkt(self, payload, type=0, eof=False):
         """
@@ -234,6 +239,8 @@ class ofdm_mod(gr.hier_block2):
                           help="the destination id [default=%default]")
         expert.add_option("", "--degree", type="intx", default=4,
                           help="LSQ degree (if applicable) [default=%default]")
+	expert.add_option("", "--hop", type="intx", default=0,
+                          help="hop number (for preamble) [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation
@@ -306,7 +313,12 @@ class ofdm_demod(gr.hier_block2):
 
         # Use freq domain to get doubled-up known symbol for correlation in time domain
         zeros_on_left = int(math.ceil((self._fft_length - self._occupied_tones)/2.0))
-        ksfreq = known_symbols_4512_3[0:self._occupied_tones]
+
+	# apurv: use the preamble as a function of hop number #
+        #ksfreq = known_symbols_4512_3[0:self._occupied_tones]
+	start_index = (options.hop-1) * self._occupied_tones
+	ksfreq = known_symbols_4512_3[start_index:start_index + self._occupied_tones]
+
         for i in range(len(ksfreq)):
             if((zeros_on_left + i) & 1):
                 ksfreq[i] = 0
@@ -427,6 +439,8 @@ class ofdm_demod(gr.hier_block2):
                           help="forwarder ranking (1:lead forwarder, 2: 2nd slave, 3:3rd slave, etc [default=%default]")
         expert.add_option("", "--degree", type="intx", default=4,
                           help="LSQ degree (if applicable) [default=%default]")
+        expert.add_option("", "--hop", type="intx", default=0,
+                          help="hop number (for preamble) [default=%default]")
         # apurv++ end #
 
     # Make a static method to call before instantiation

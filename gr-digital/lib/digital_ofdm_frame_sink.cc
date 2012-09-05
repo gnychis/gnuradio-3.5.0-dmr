@@ -971,6 +971,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
     fprintf(stderr,">>> Entering state machine, d_state: %d\n", d_state);
 
   unsigned int bytes=0;
+  unsigned int n_data_carriers = d_data_carriers.size();
   switch(d_state) {
 
   case STATE_SYNC_SEARCH:    // Look for flag indicating beginning of pkt
@@ -1132,7 +1133,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		if(isInnovative()) {	// last header: innovative check
 #endif
                      d_state = STATE_HAVE_HEADER;
-		     // d_state = STATE_HAVE_NULL; d_null_symbols = 0;
+		     //d_state = STATE_HAVE_NULL; d_null_symbols = 0;
 		     d_curr_ofdm_symbol_index = 0;
 		     d_num_ofdm_symbols = ceil(((float) (d_packetlen * 8))/(d_data_carriers.size() * d_nbits));
 		     assert(d_num_ofdm_symbols < MAX_OFDM_SYMBOLS); 				// FIXME - arbitrary '70'.. 
@@ -1183,7 +1184,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
     memcpy(&d_training_symbols[d_null_symbols*MAX_OCCUPIED_CARRIERS], &in[0], sizeof(gr_complex) * d_occupied_carriers);
     d_null_symbols++;
     if(d_null_symbols == NULL_OFDM_SYMBOLS) {
-	calculate_fine_offset();
+	//calculate_fine_offset();
         d_state = STATE_HAVE_HEADER;
     }
     break;
@@ -1207,14 +1208,11 @@ digital_ofdm_frame_sink::work (int noutput_items,
     assert(d_curr_ofdm_symbol_index < d_num_ofdm_symbols);
     assert(d_pending_senders == 0);
 
-    /*
-    for(unsigned int i = 0; i < d_occupied_carriers; i++)
-#ifdef SCALE
-	in[i] *= (gr_complex(d_header.inno_pkts) * gr_complex(SCALE));			// de-normalize
-#else
-	in[i] *= gr_complex(d_header.inno_pkts);
+    /* de-normalize the signal */	
+#if 0
+    for(unsigned int i = 0; i < n_data_carriers; i++)
+        in[d_data_carriers[i]] *= gr_complex(d_header.factor);
 #endif
-    */
 
     /* normalization is only performed for dst. Since we collect the fwder traces in the dst mode, 
        norm did not be done *again* when fwder traces are replayed */
@@ -1222,7 +1220,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 	//printf("denormalizing the signal, factor: %f\n", d_header.factor); fflush(stdout);
 	int n_data_carriers = d_data_carriers.size();
         for(unsigned int i = 0; i < n_data_carriers; i++)
-            in[d_data_carriers[i]] /= gr_complex(d_header.factor);
+            in[d_data_carriers[i]] *= gr_complex(d_header.factor * sqrt(d_batch_size));
     }
 
     storePayload(&in[0], in_sampler);
@@ -2689,7 +2687,7 @@ digital_ofdm_frame_sink::normalizeSignalXXX(gr_complex* out, int k)
 
 /* alternate version: based on the average magnitude seen in 1 OFDM symbol, either amp or de-amp the signal */
 inline float
-digital_ofdm_frame_sink::normalizeSignal(gr_complex* out, int k)
+digital_ofdm_frame_sink::normalizeSignal(gr_complex* out, int k, int num_in_senders)
 {
   int num_data_carriers = d_data_carriers.size();
 #if 0
@@ -2702,13 +2700,13 @@ digital_ofdm_frame_sink::normalizeSignal(gr_complex* out, int k)
   float factor = 0.9/avg_energy;
 #endif
 
-  float factor = 1.0/sqrt(k);						   // TODO: unsure of what factor to use :| //
+  float factor = sqrt(k) * sqrt(num_in_senders);						   // TODO: unsure of what factor to use :| //
   printf("norm factor: %f\n", factor); fflush(stdout);
 
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++)
      for(unsigned int j = 0; j < num_data_carriers; j++) {
          unsigned int index = (i*d_occupied_carriers) + d_data_carriers[j];
-	 out[index] *= gr_complex(factor);
+	 out[index] /= gr_complex(factor);
 
          /*if(i == 0 && j == 0) 
          {
@@ -3965,8 +3963,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   }
   printf("--------------------------------------------------------------------- \n"); fflush(stdout);
 
-  float factor = normalizeSignal(out_symbols, n_innovative_pkts);
-  factor *= (1.0/sqrt(d_batch_size));
+  float factor = normalizeSignal(out_symbols, n_innovative_pkts, ((d_fwd_index==0)?1:2));
 
   /* make header */
   unsigned char header_bytes[HEADERBYTELEN];
@@ -3987,7 +3984,8 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
 
   /* final message (type: 1-coded) */
   /* DO NOT include the DC tones */
-  unsigned int n_actual_symbols = (d_num_ofdm_symbols+1) * d_occupied_carriers;		// extra for NULL symbol at the end
+  //unsigned int n_actual_symbols = (d_num_ofdm_symbols+1) * d_occupied_carriers;		// extra for NULL symbol at the end
+  unsigned int n_actual_symbols = (d_num_ofdm_symbols) * d_occupied_carriers;
   gr_message_sptr out_msg = gr_make_message(DATA_TYPE, 0, 0, HEADERBYTELEN + (n_actual_symbols * sizeof(gr_complex)));
   memcpy(out_msg->msg(), header_bytes, HEADERBYTELEN);					            // copy header bytes
 
@@ -4010,7 +4008,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   }
   
   // extra for null symbol at the end //
-  memset((out_msg->msg() + offset), 0, d_occupied_carriers/8);
+  //memset((out_msg->msg() + offset), 0, d_occupied_carriers/8);
 
 /*
 #ifdef USE_PILOT
@@ -6506,16 +6504,17 @@ void digital_ofdm_frame_sink::track_pilot_dfe_SRC(gr_complex *in, vector<gr_comp
 
     gr_complex total_H(0.0, 0.0);
     assert(n_senders <= 2);
-    for(unsigned int j = 0; j < n_senders; j++) {
+    for(unsigned int j = n_senders-1; j < n_senders; j++) {
     //for(unsigned int j = 0; j < 1; j++) {		// REMOVEEEEEEEE
         gr_complex *estimates = hestimates[j];
 	in[di] *= estimates[di];
 	total_H += estimates[di];
     }
+#if 0 
     if(n_senders == 2) {			// REMOVEEEEEEEEEEE
 	in[di] = in[di]/total_H;
     }
-
+#endif
     // some debugging //
 #if 1
     float angle = arg(in[di]) * 180/M_PI;                       // rotation after equalization //

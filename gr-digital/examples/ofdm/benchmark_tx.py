@@ -102,7 +102,12 @@ def main():
 
     while n < nbytes:
         if options.from_file is None:
-            data = (pkt_size - 2) * chr(pktno & 0xff) 
+            if(pktno % 2 == 0):
+                data = (pkt_size - 2) * chr(3 & 0xff)
+            else:
+                data = (pkt_size - 2) * chr(4 & 0xff)
+            #data = (pkt_size - 2) * chr(pktno & 0xff) 
+            #data = (pkt_size - 2) * chr(0x34)
         else:
             data = source_file.read(pkt_size - 2)
             if data == '':
@@ -115,7 +120,7 @@ def main():
         #if options.discontinuous and pktno % 5 == 4:
         #    time.sleep(1)
         pktno += 1
-	time.sleep(0.3)
+	time.sleep(0.8)
 	#time.sleep(0.1)
 
     send_pkt(eof=True)

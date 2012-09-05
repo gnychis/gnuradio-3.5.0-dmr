@@ -192,9 +192,8 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	d_nsymbols_output++;
 #ifdef SEND_NULL_SYMBOLS
 	if(d_fwd_index != 2)
-#else
-	track_and_modify_timestamp(no);
 #endif
+	track_and_modify_timestamp(no);
       }
       break;
       

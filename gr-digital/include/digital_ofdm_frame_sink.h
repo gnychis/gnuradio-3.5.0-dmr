@@ -567,7 +567,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   /* encoding the signal */
   void encodeSignal(gr_complex *symbols, gr_complex coeff);
   void combineSignal(gr_complex *out, gr_complex* symbols, int);
-  float normalizeSignal(gr_complex* out, int k);
+  float normalizeSignal(gr_complex* out, int k, int num_in_senders);
   void generateCodeVector(MULTIHOP_HDR_TYPE &header);
 
   /* make header and packet */
