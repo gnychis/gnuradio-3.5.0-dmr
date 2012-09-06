@@ -526,6 +526,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   /* apurv start */
   MULTIHOP_HDR_TYPE d_header;
   bool d_save_flag;
+  unsigned int d_save_pkt_num;
   unsigned int d_curr_ofdm_symbol_index;
   unsigned int d_num_ofdm_symbols;
   unsigned int d_num_hdr_ofdm_symbols;

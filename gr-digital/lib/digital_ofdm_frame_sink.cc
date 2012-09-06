@@ -138,7 +138,7 @@ digital_ofdm_frame_sink::reset_demapper() {
 #endif
 
   fill(d_dfe.begin(), d_dfe.end(), gr_complex(1.0,0.0));
-  d_save_flag = false;
+  //d_save_flag = false;
 }
 
 /* extract the header info
@@ -451,20 +451,6 @@ unsigned int digital_ofdm_frame_sink::demapper(const gr_complex *in,
 
   gr_complex accum_error = 0.0;
   gr_complex accum_error1 = 0.0; 
-
-#ifdef USE_HEADER_PLL
-  if(d_log_ofdm_index == 1) {
-     // first OFDM symbol of the header, then record the rotation on each of the subcarriers //
-     memset(d_start_rot_error_phase, 0, sizeof(float) * d_data_carriers.size());
-     memset(d_avg_rot_error_amp, 0, sizeof(float) * d_data_carriers.size());
-     memset(d_slope_rot_error_phase, 0, sizeof(float) * d_data_carriers.size());
-
-     // clear the error vector on each of the subcarriers //
-     for(int i = 0; i < d_data_carriers.size(); i++) {
-	memset(d_error_vec[i], 0, sizeof(float) * d_num_hdr_ofdm_symbols);
-     }
-  }
-#endif
 
   while(i < d_data_carriers.size()) {
     if(d_nresid > 0) {
@@ -820,16 +806,6 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   memset(d_phase1, 0, sizeof(float) * MAX_BATCH_SIZE); 
   memset(d_freq1, 0, sizeof(float) * MAX_BATCH_SIZE); 
 
-#ifdef USE_HEADER_PLL
-  d_start_rot_error_phase = (float*) malloc(sizeof(float) * d_data_carriers.size());
-  d_avg_rot_error_amp = (float*) malloc(sizeof(float) * d_data_carriers.size());
-  d_slope_rot_error_phase = (float*) malloc(sizeof(float) * d_data_carriers.size());
-
-  for(int i = 0; i < d_data_carriers.size(); i++) {
-      d_error_vec[i] = (float*) malloc(sizeof(float) * d_num_hdr_ofdm_symbols);
-  }
-#endif
-
 #ifdef SEND_ACK_ETHERNET
   d_src_ip_addr = "128.83.141.213";
   d_src_sock_port = 9000;
@@ -1066,6 +1042,22 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		break;
 	  }*/
 
+	  /* ensure if I'm in the current session, then the pkt num matches the d_save_pkt_num */
+	  printf("d_save_flag: %d, d_pkt_num: %d, d_save_pkt_num: %d\n", d_save_flag, d_pkt_num, d_save_pkt_num); fflush(stdout);
+	  if(d_save_flag) {
+ 	      if(d_pkt_num != d_save_pkt_num) {
+		 reset_demapper();
+		 resetPktInfo(d_pktInfo);
+		 flowInfo->innovative_pkts.pop_back();
+		 /*
+		 int last_index = d_pktInfo->coeffs.size() - 1;
+		 free((d_pktInfo->hestimates)[last_index]);
+		 free((d_pktInfo->coeffs)[last_index]);
+		 d_pktInfo->hestimates.pop_back();
+		 d_pktInfo->coeffs.pop_back();*/
+ 	      }
+	  }
+
 	  /* first pkt in session should always be from the lead sender */
 	  if(d_lead_sender == 1 && d_pkt_type == DATA_TYPE) 
 	  {
@@ -1107,6 +1099,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		d_pktInfo = createPktInfo();
 		d_pending_senders = d_nsenders;
 		d_save_flag = true;         				// indicates that a session is on, e'one will be saved (haha)
+		d_save_pkt_num = d_pkt_num;
 	  }
 	  else if(d_pkt_type == DATA_TYPE){
 		printf("following sender: %d, pending_senders: %d, nsenders: %d!\n", d_header.src_id, d_pending_senders, d_nsenders); fflush(stdout);
@@ -1129,8 +1122,6 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		2. coefficients have been saved already, post processing (to reduced) is delayed until actual demapping is done */
 		printf("marking inno check as false\n"); fflush(stdout);
 		if(1) {
-#else
-		if(isInnovative()) {	// last header: innovative check
 #endif
                      d_state = STATE_HAVE_HEADER;
 		     //d_state = STATE_HAVE_NULL; d_null_symbols = 0;
@@ -1318,6 +1309,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
         }
 	enter_search();     						// current pkt done, next packet
 	reset_demapper();
+	d_save_flag = false;
         break;
     }
 
@@ -2094,27 +2086,10 @@ digital_ofdm_frame_sink::resetPktInfo(PktInfo* pktInfo) {
      free(pktInfo->coeffs[i]);
      free(pktInfo->hestimates[i]);
   }
-
   
   pktInfo->coeffs.clear();
   pktInfo->hestimates.clear(); 
 
-#ifdef USE_HEADER_PLL
-  /* also clear the PLL records */
-  size = pktInfo->error_rot_slope.size();
-  for(int i = 0; i < size; i++) {
-     free(pktInfo->error_rot_slope[i]);
-     free(pktInfo->error_rot_ref[i]);
-     free(pktInfo->error_amp_avg[i]);
-  }
-  pktInfo->error_rot_slope.clear();
-  pktInfo->error_rot_ref.clear();
-  pktInfo->error_amp_avg.clear();
-
-  pktInfo->pll_slope_vec.clear();
-#endif
-
-  
   if(num_senders > 0 && pktInfo->symbols != NULL)
      free(pktInfo->symbols);
   
@@ -2187,9 +2162,7 @@ digital_ofdm_frame_sink::save_coefficients()
 	     float amp = (float) (d_header.coeffs[index].amplitude)/pow(10.0, i+1);
 	     float ph = (float) (d_header.coeffs[index].phase)/SCALE_FACTOR_PHASE;
 	     lsq_coeffs[index] = amp * gr_expj(ph * M_PI/180); 
-#if 0
-	     printf("batch: %d, i: %d -- [A: %d, P: %d] ---- (%f, %f) \n", k, i, d_header.coeffs[index].amplitude, d_header.coeffs[index].phase, lsq_coeffs[index].real(), lsq_coeffs[index].imag());
-#endif	      
+	     //printf("batch: %d, i: %d -- [A: %d, P: %d] ---- (%f, %f) \n", k, i, d_header.coeffs[index].amplitude, d_header.coeffs[index].phase, lsq_coeffs[index].real(), lsq_coeffs[index].imag());
 	 }
 	 unpackCoefficients_LSQ(&lsq_coeffs[k*(d_degree+1)], &coeffs[k*num_carriers], num_carriers, d_degree);
      }
@@ -2244,50 +2217,6 @@ digital_ofdm_frame_sink::save_coefficients()
    data portion is demodulated */
   d_pktInfo->phase_eq_vec.push_back(d_phase[0]);
   d_pktInfo->freq_eq_vec.push_back(d_freq[0]);
-
-#ifdef USE_HEADER_PLL
-  /* record the error-slope (PLL) obtained after header correction */
-  float *error_rot_slope = (float*) malloc(sizeof(float) * d_data_carriers.size());
-  memcpy(error_rot_slope, d_slope_rot_error_phase, sizeof(float) * d_data_carriers.size());
-  d_pktInfo->error_rot_slope.push_back(error_rot_slope);  
-
-  float *err_rot_ref = (float*) malloc(sizeof(float) * d_data_carriers.size());
-  memcpy(err_rot_ref, d_start_rot_error_phase, sizeof(float) * d_data_carriers.size());
-  d_pktInfo->error_rot_ref.push_back(err_rot_ref);
- 
-  float *avg_error_amp = (float*) malloc(sizeof(float) * d_data_carriers.size());
-  memcpy(avg_error_amp, d_avg_rot_error_amp, sizeof(float) * d_data_carriers.size());
-  d_pktInfo->error_amp_avg.push_back(avg_error_amp);
-
-  for(int i = 0; i < d_data_carriers.size(); i++) {
-     printf("sc: %d, slope: %f, amp: %f\n", i, error_rot_slope[i], avg_error_amp[i]); 
-     fflush(stdout);
-  }
-
-  /* Least squares (diff from above method) */
-  for(int i = 0; i < d_data_carriers.size(); i++) {
-     float sum_x_y = 0.0;
-     float sum_x = 0;
-     float sum_x_square = 0.0;
-     float *symbol_errors = d_error_vec[i];
-     for(int j = 0; j < d_num_hdr_ofdm_symbols; j++) {
-        float error = arg(symbol_errors[j]);
-
-        if(error > arg(symbol_errors[0])) {
-	    error = error + M_PI;
-        }
-
-	sum_x_y += (j*error);
-	sum_x += error;
-	sum_x_square += (error * error);
-     }
-
-     float slope = (sum_x_y - 2*(sum_x))/sum_x_square;
-     d_pktInfo->pll_slope_vec.push_back(slope);
-  }
-  
-  /* recording for PLL ends */  
-#endif
 
   printf("save_coeffs end\n"); fflush(stdout);
   //debugPktInfo(d_pktInfo, sender_id);
@@ -6249,7 +6178,7 @@ digital_ofdm_frame_sink::unpackCoefficients_LSQ(gr_complex *in_coeffs, gr_comple
 	  out_coeffs[i] += (in_coeffs[j] * gr_complex(pow(i, j), 0.0));
       }
       out_coeffs[i] /= gr_complex(1e3, 0.0);					// descaling, phase 2
-      printf("(%f, %f)\n", out_coeffs[i].real(), out_coeffs[i].imag());
+      //printf("(%f, %f)\n", out_coeffs[i].real(), out_coeffs[i].imag());
    }
 
 #if 0
