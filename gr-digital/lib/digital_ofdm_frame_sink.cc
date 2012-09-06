@@ -1258,7 +1258,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 	if(d_fwd) 
 	{
 	   bool isCarrierCorrected = false;
-	   //isCarrierCorrected = do_carrier_correction();
+	   isCarrierCorrected = do_carrier_correction();
 	   //debug_carrier_correction();
 	   if(isCarrierCorrected) {
 	      printf("Carrier correction done on the **current** packet\n"); fflush(stdout);
@@ -3546,6 +3546,7 @@ digital_ofdm_frame_sink::debug_carrier_correction() {
 inline bool
 digital_ofdm_frame_sink::do_carrier_correction() {
   if(d_pktInfo->n_senders > 1) {
+     adjust_H_estimate(0);
      return false;
   }
 
@@ -3794,10 +3795,13 @@ digital_ofdm_frame_sink::getAvgAmplificationFactor(vector<gr_complex*> hestimate
 #ifdef SRC_PILOT
 /* just remove the channel effect from pilot and ensure it has a magnitude of 1.0 */
 inline void
-digital_ofdm_frame_sink::equalizePilot(gr_complex *in, gr_complex *estimates) {
+digital_ofdm_frame_sink::equalizePilot(gr_complex *in, PktInfo *pInfo) {
   //printf("equalizePilot \n"); fflush(stdout);
 
   int n_pilots = d_pilot_carriers.size();
+  int num_senders = pInfo->hestimates.size();
+  gr_complex *estimates = (pInfo->hestimates)[num_senders-1];
+
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
 
      float cur_pilot = 1.0;
@@ -3884,7 +3888,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      encodeSignal(symbols, coeffs[i]);
 
 #ifdef SRC_PILOT
-     equalizePilot(symbols, pInfo->hestimates[0]);			// equalize the pilot tones to remove the channel effect //
+     equalizePilot(symbols, pInfo);			// equalize the pilot tones to remove the channel effect //
 #endif
      combineSignal(out_symbols, symbols, i);
 

@@ -372,28 +372,14 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 #endif
 	    default: break;
 	}
+
 #ifdef SRC_PILOT
-#if 0
-	// testing //
-        bool test_pilot = false;
-	switch(d_fwd_index) {
-	   case 0: test_pilot = true; break;
-	   case 1: test_pilot = (d_data_ofdm_index % 2 == 0)?true:false; break;		// lead: even //
-	   case 2: test_pilot = (d_data_ofdm_index % 2 == 1)?true:false; break;		// slave: odd //
-	}
-	
-	if(!test_pilot) {
-	    for(int i = 0; i < d_pilot_carriers.size(); i++) {
-		out[d_pilot_carriers[i]] = gr_complex(0.0, 0.0);
-	    }
-	}
-#else
- 	if(d_fwd_index == 1 && 0) {
+	// fwd=1 disables sending of pilot //
+ 	if(d_fwd_index == 1) {
 	    for(int i = 0; i < d_pilot_carriers.size(); i++) {
         	out[d_pilot_carriers[i]] = gr_complex(0.0, 0.0);
      	    }
 	}
-#endif
 #endif
      }  
   }

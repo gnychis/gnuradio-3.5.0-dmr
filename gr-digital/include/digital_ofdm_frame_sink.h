@@ -820,7 +820,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 #endif
 
 #ifdef SRC_PILOT
-  void equalizePilot(gr_complex*, gr_complex*);
+  void equalizePilot(gr_complex*, PktInfo*);
   unsigned int demapper_ILP_2_pilot_SRC(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
                                                   FlowInfo *flowInfo, vector<gr_complex> dfe_pilot,
                                                   vector<gr_complex*> interpolated_coeffs);
