@@ -2134,7 +2134,7 @@ digital_ofdm_frame_sink::save_coefficients()
   gr_complex *hestimates = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
   memcpy(hestimates, d_in_estimates, sizeof(gr_complex) * d_occupied_carriers);
 
-#ifndef DEBUG
+#ifdef DEBUG
   //printf("save_coeffs - hestimates::: --------------------------------------- \n"); fflush(stdout);
   float atten = 0.0;
   for(int i = 0; i < d_occupied_carriers; i++) {
@@ -2159,7 +2159,7 @@ digital_ofdm_frame_sink::save_coefficients()
 	    coeffs[index] = ToPhase_c(hdr_coeff);
 	}
      }
-#if 1
+#if 0
   printf("degree: %d\n", d_degree); fflush(stdout);
   for(unsigned i = 0; i < 1; i++) {
      for(unsigned int k = 0; k < d_batch_size; k++) {
@@ -2187,7 +2187,7 @@ digital_ofdm_frame_sink::save_coefficients()
 	     float amp = (float) (d_header.coeffs[index].amplitude)/pow(10.0, i+1);
 	     float ph = (float) (d_header.coeffs[index].phase)/SCALE_FACTOR_PHASE;
 	     lsq_coeffs[index] = amp * gr_expj(ph * M_PI/180); 
-#if 1
+#if 0
 	     printf("batch: %d, i: %d -- [A: %d, P: %d] ---- (%f, %f) \n", k, i, d_header.coeffs[index].amplitude, d_header.coeffs[index].phase, lsq_coeffs[index].real(), lsq_coeffs[index].imag());
 #endif	      
 	 }
@@ -2195,7 +2195,7 @@ digital_ofdm_frame_sink::save_coefficients()
      }
   }
 
-#if 1
+#if 0
   printf("degree: %d\n", d_degree); fflush(stdout);
   for(unsigned i = 0; i < num_carriers; i++) {
      for(unsigned int k = 0; k < d_batch_size; k++) {
@@ -3866,7 +3866,7 @@ digital_ofdm_frame_sink::getAvgAmplificationFactor(vector<gr_complex*> hestimate
 /* just remove the channel effect from pilot and ensure it has a magnitude of 1.0 */
 inline void
 digital_ofdm_frame_sink::equalizePilot(gr_complex *in, gr_complex *estimates) {
-  printf("equalizePilot \n"); fflush(stdout);
+  //printf("equalizePilot \n"); fflush(stdout);
 
   int n_pilots = d_pilot_carriers.size();
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
@@ -3876,7 +3876,7 @@ digital_ofdm_frame_sink::equalizePilot(gr_complex *in, gr_complex *estimates) {
 
      for(unsigned int j = 0; j < n_pilots; j++) {
          unsigned int index = (i*d_occupied_carriers) + d_pilot_carriers[j];
-	 printf("i: %d, j: %d, sym: (%.3f, %.3f)\n", i, j, in[index].real(), in[index].imag()); fflush(stdout);
+	 //printf("i: %d, j: %d, sym: (%.3f, %.3f)\n", i, j, in[index].real(), in[index].imag()); fflush(stdout);
          in[index] *= (estimates[d_pilot_carriers[j]]);			// equalize the pilot
 
 	 float amp = 1.0/abs(in[index]);
@@ -3884,7 +3884,7 @@ digital_ofdm_frame_sink::equalizePilot(gr_complex *in, gr_complex *estimates) {
 	 in[index] *= factor;						// amplify to mangitude of 1.0
 
 	 // debug //
-#if 1
+#if 0
 	 gr_complex pilot_sym(cur_pilot, 0.0);
 	 phase_error += ((in[index]) * conj(pilot_sym));
 
@@ -3899,10 +3899,10 @@ digital_ofdm_frame_sink::equalizePilot(gr_complex *in, gr_complex *estimates) {
 #endif
      }
      float end_angle = arg(phase_error);
-     printf("\nangle: %.3f", end_angle);
-     printf("\n"); fflush(stdout);
+     //printf("\nangle: %.3f", end_angle);
+     //printf("\n"); fflush(stdout);
   }
-  printf(" --------------- equalizePilot ends --------------- \n"); fflush(stdout);
+  //printf(" --------------- equalizePilot ends --------------- \n"); fflush(stdout);
 }
 #endif
 
@@ -6252,7 +6252,7 @@ digital_ofdm_frame_sink::unpackCoefficients_LSQ(gr_complex *in_coeffs, gr_comple
       printf("(%f, %f)\n", out_coeffs[i].real(), out_coeffs[i].imag());
    }
 
-#if 1
+#if 0
    if(!d_coeff_unpacked_open) {
       const char *filename = "unpacked_coeff.dat";
       int fd;
@@ -6291,7 +6291,7 @@ digital_ofdm_frame_sink::packCoefficientsInHeader_LSQ(MULTIHOP_HDR_TYPE& header,
 	 for(int j = 0; j < num_inno_pkts; j++) {
 	    gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[j];  		// reduced coeffs for this inno pkt //
 	    new_coeffs[s] += (coeffs[j] * pkt_coeffs[s + k*num_carriers]);
- 	    printf("(%.3f, %.3f) = (%.3f, %.3f) * (%.3f, %.3f)\n", new_coeffs[s].real(), new_coeffs[s].imag(), coeffs[j].real(), coeffs[j].imag(), pkt_coeffs[s + k*num_carriers].real(), pkt_coeffs[s + k*num_carriers].imag()); fflush(stdout);
+ 	    //printf("(%.3f, %.3f) = (%.3f, %.3f) * (%.3f, %.3f)\n", new_coeffs[s].real(), new_coeffs[s].imag(), coeffs[j].real(), coeffs[j].imag(), pkt_coeffs[s + k*num_carriers].real(), pkt_coeffs[s + k*num_carriers].imag()); fflush(stdout);
 	 }	 
       }
 
@@ -6516,7 +6516,7 @@ void digital_ofdm_frame_sink::track_pilot_dfe_SRC(gr_complex *in, vector<gr_comp
     }
 #endif
     // some debugging //
-#if 1
+#if 0
     float angle = arg(in[di]) * 180/M_PI;                       // rotation after equalization //
     if(angle < 0) angle += 360.0;
     float perfect_angle = arg(pilot_sym) * 180/M_PI;
@@ -6532,7 +6532,7 @@ void digital_ofdm_frame_sink::track_pilot_dfe_SRC(gr_complex *in, vector<gr_comp
   float angle = arg(phase_error);
   carrier = gr_expj(-angle);
 
-#if 1
+#if 0
   // dump the frequency offset value //
   float freq_offset = angle/(2 * M_PI * (o+NULL_OFDM_SYMBOLS));
   printf("(@f: %.5f)  ", freq_offset); fflush(stdout);
@@ -6550,7 +6550,7 @@ void digital_ofdm_frame_sink::track_pilot_dfe_SRC(gr_complex *in, vector<gr_comp
       dfe_pilot[i] += d_eq_gain * (pilot_sym/sigeq - dfe_pilot[i]);
   }
   d_end_angle[sender] = angle;
-  printf("  d_end_angle: %f\n", d_end_angle[sender]); fflush(stdout);
+  //printf("  d_end_angle: %f\n", d_end_angle[sender]); fflush(stdout);
 }
 
 inline void
