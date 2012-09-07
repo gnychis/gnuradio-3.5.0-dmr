@@ -47,7 +47,7 @@ using namespace arma;
 #define SCALE_FACTOR_PHASE 1e2
 #define SCALE_FACTOR_AMP 1e4
 
-//#define ACK_ON_ETHERNET 1
+#define ACK_ON_ETHERNET 1
 //#define TRIGGER_ON_ETHERNET 1
 
 digital_ofdm_mapper_bcv_sptr
@@ -576,8 +576,13 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       d_sock_opened = true;
 
       /* make the socket non-blocking */
-      int flags = fcntl(d_client_fd, F_GETFL, 0);
-      fcntl(d_client_fd, F_SETFL, flags|O_NONBLOCK);
+      //int flags = fcntl(d_client_fd, F_GETFL, 0);
+      //fcntl(d_client_fd, F_SETFL, flags|O_NONBLOCK);
+
+      struct timeval tv;
+      tv.tv_sec = 1;
+      tv.tv_usec = 5e5; 
+      assert(setsockopt(d_client_fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,sizeof(struct timeval))==0);
       break;
     }
   }
@@ -585,15 +590,19 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   /* once a packet has been *completely* modulated, check for ACK on the backend ethernet socket */
   if(d_modulated) {
     memset(d_ack_buf, 0, sizeof(d_ack_buf));
-    int nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), MSG_PEEK);
+    int nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), 0);
+    printf("n_bytes: %d\n", nbytes); fflush(stdout);
+#if 1
     if(nbytes >= 0) {
+#if 0
        if(nbytes == ACK_HEADERBYTELEN) {
-	 nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), 0);
-	 fflush(stdout);
+    	  nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), 0);
+	  fflush(stdout);
        }
        else {
-	  nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), MSG_WAITALL); 
+ 	  nbytes = recv(d_client_fd, d_ack_buf, sizeof(d_ack_buf), MSG_WAITALL); 
        }
+#endif
        printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ received nbytes: %d as ACK @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n", nbytes);
 
        MULTIHOP_ACK_HDR_TYPE ack_header;
@@ -607,6 +616,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	  d_packets_sent_for_batch = 0;
        }
     }
+#endif
   }
 #endif
 
@@ -1548,7 +1558,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   int decimation = 128;
   double rate = 1.0/decimation;
  
-  int num_ofdm_symbols_to_wait = 5500;
+  int num_ofdm_symbols_to_wait = 4000;
 
   int cp_length = d_fft_length/4;
   uint32_t num_samples = num_ofdm_symbols_to_wait * (d_fft_length+cp_length);

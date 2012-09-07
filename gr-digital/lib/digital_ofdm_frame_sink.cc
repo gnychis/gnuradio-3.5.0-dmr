@@ -53,7 +53,7 @@ using namespace std;
 #define UNCORRECTED_REPLAY 0
 #define CORRECTED_REPLAY 1
 
-//#define SEND_ACK_ETHERNET 1
+#define SEND_ACK_ETHERNET 1
 
 #define VERBOSE 0
 //#define SCALE 1e3
@@ -858,6 +858,9 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
 
   d_fp_training = NULL;
   d_training_log_open = false;
+
+  d_num_pkts_correct = 0;
+  d_total_pkts_received = 0;
 }
 
 void
@@ -1148,7 +1151,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		}
 	     } else {
 		if(d_pending_senders <= 1) {
-		   printf("d_pending_senders: %d\n"); fflush(stdout);
+		   printf("d_pending_senders: %d\n", d_pending_senders); fflush(stdout);
 		   assert(false);
 		}
 		assert(d_pending_senders > 1);				// more senders remain - switch to preamble look-up
@@ -1468,6 +1471,7 @@ digital_ofdm_frame_sink::prepareForNewBatch()
   printf("prepareForNewBatch ends, size: %d, %d\n", flow_info->innovative_pkts.size(), d_flowInfoVector.size()); fflush(stdout);
   d_avg_evm_error = 0.0;
   d_total_batches_received++;
+  memset(d_crc, 0, sizeof(int) * MAX_BATCH_SIZE);
 }
 
 
@@ -2109,7 +2113,7 @@ digital_ofdm_frame_sink::save_coefficients()
   gr_complex *hestimates = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
   memcpy(hestimates, d_in_estimates, sizeof(gr_complex) * d_occupied_carriers);
 
-#ifdef DEBUG
+#ifndef DEBUG
   //printf("save_coeffs - hestimates::: --------------------------------------- \n"); fflush(stdout);
   float atten = 0.0;
   for(int i = 0; i < d_occupied_carriers; i++) {
@@ -3550,6 +3554,7 @@ digital_ofdm_frame_sink::do_carrier_correction() {
      return false;
   }
 
+  return false;
 #ifdef SRC_PILOT
   /* if I'm part of synchronized forwarders for this packet, I need to introduce an extra 
      rotation corresponding to (t'-t) in all the symbols for this packet */
@@ -5233,8 +5238,13 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
 		  //set_msg_timestamp(msg);
 
 		  bool crc_valid = crc_check(msg[k]->to_string(), decoded_msg[k]);
-		  printf("crc valid: %d\n", crc_valid); fflush(stdout);
-		  if(crc_valid == 0) {
+		  if(d_crc[k] == 0) {
+		      d_crc[k] = ((crc_valid == true) ? 1:0);
+		      if(crc_valid) d_num_pkts_correct++;
+		  }
+
+		  printf("crc valid: %d, d_crc: %d\n", crc_valid, d_crc[k]); fflush(stdout);
+		  if(d_crc[k] == 0) {
 		     batch_correct = false;						// mark the batch as incorrect! //
 		  }
 #if 0
@@ -5248,13 +5258,22 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
   }
 
   d_avg_evm_error /= ((double) d_num_ofdm_symbols);
+  d_total_pkts_received++;
+
   if(batch_correct) {
      d_last_batch_acked = d_active_batch;
      d_correct_batches++;
   }
 
   int num_inno_pkts = flowInfo->innovative_pkts.size();
-  printf("***** Active Batch: %d Batch OK: %d, Innovative Pkts: %d, evm_error: %f, Total Batches: %d Correct Batches: %d******** \n", d_active_batch, batch_correct, num_inno_pkts, d_avg_evm_error, d_total_batches_received, d_correct_batches); fflush(stdout);
+  printf("***** Active Batch: %d Batch OK: %d, Inno Pkts: %d, evm: %f, #Batches (total: %d right: %d) #Pkts (total: %d, right: %d) ******** \n", d_active_batch, batch_correct, num_inno_pkts, d_avg_evm_error, d_total_batches_received, d_correct_batches, d_total_pkts_received, d_num_pkts_correct); fflush(stdout);
+
+#ifdef SEND_ACK_ETHERNET
+  if(batch_correct || num_inno_pkts == d_batch_size + 1) {
+     d_last_batch_acked = d_active_batch;
+     send_ack(d_flow, d_active_batch);
+  }
+#endif
 
   d_avg_evm_error = 0.0;
 
@@ -6042,7 +6061,7 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
   int decimation = 128;
   double rate = 1.0/decimation;
 
-  int null_ofdm_symbols = 4000;
+  int null_ofdm_symbols = 2000;
 
   int cp_length = d_fft_length/4;
 

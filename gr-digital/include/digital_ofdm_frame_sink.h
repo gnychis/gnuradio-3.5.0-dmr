@@ -798,6 +798,9 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   int d_expected_size, d_fec_n, d_fec_k;
   int d_total_batches_received, d_correct_batches;
   double d_avg_evm_error;			// measure the evm error per batch //   
+  int d_crc[MAX_BATCH_SIZE];			// keeps track of how many pkts decoded correctly in the batch //
+  int d_num_pkts_correct;
+  int d_total_pkts_received;
 
   float getAvgAmplificationFactor(vector<gr_complex*>);
 
