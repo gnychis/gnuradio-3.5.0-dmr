@@ -51,18 +51,22 @@ using namespace arma;
 //#define TRIGGER_ON_ETHERNET 1
 
 digital_ofdm_mapper_bcv_sptr
-digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned int msgq_limit, 
+digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
+			 const std::vector<gr_complex> &data_constellation,
+			 unsigned int msgq_limit, 
                          unsigned int occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source,
 			 unsigned int batch_size,
 			 unsigned int encode_flag,
 			 int fwd_index, unsigned int dst_id, unsigned int degree)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree));
+  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (hdr_constellation, data_constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree));
 }
 
 // Consumes 1 packet and produces as many OFDM symbols of fft_length to hold the full packet
-digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned int msgq_limit, 
+digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
+					const std::vector<gr_complex> &data_constellation,
+					unsigned int msgq_limit, 
 					unsigned int occupied_carriers, unsigned int fft_length, unsigned int id,
 					unsigned int source,
 					unsigned int batch_size,
@@ -71,7 +75,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
 		   gr_make_io_signature2 (1, 2, sizeof(gr_complex)*fft_length, sizeof(char))),
-    d_constellation(constellation),
+    d_hdr_constellation(hdr_constellation),
+    d_data_constellation(data_constellation),
     d_msgq(gr_make_msg_queue(msgq_limit)), d_eof(false),
     d_occupied_carriers(occupied_carriers),
     d_fft_length(fft_length),
@@ -231,7 +236,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   }
   fill_all_carriers_map();  
 
-  d_nbits = (unsigned long)ceil(log10(float(d_constellation.size())) / log10(2.0));
+  d_hdr_nbits = (unsigned long)ceil(log10(float(d_hdr_constellation.size())) / log10(2.0));
+  d_data_nbits = (unsigned long)ceil(log10(float(d_data_constellation.size())) / log10(2.0));
 
   // for offline analysis - apurv++ //
   d_fp_native_symbols = NULL;
@@ -495,10 +501,10 @@ digital_ofdm_mapper_bcv::generateOFDMSymbol(gr_complex* out, int len)
 
     if(d_nresid[0] > 0) {
       // take the residual bits, fill out nbits with info from the new byte, and put them in the symbol
-      d_resid[0] |= (((1 << d_nresid[0])-1) & d_msgbytes[0]) << (d_nbits - d_nresid[0]);
+      d_resid[0] |= (((1 << d_nresid[0])-1) & d_msgbytes[0]) << (d_hdr_nbits - d_nresid[0]);
       bits = d_resid[0];
 
-      out[d_data_carriers[i]] = d_constellation[bits];
+      out[d_data_carriers[i]] = d_hdr_constellation[bits];
       i++;
 
       d_bit_offset[0] += d_nresid[0];
@@ -507,12 +513,12 @@ digital_ofdm_mapper_bcv::generateOFDMSymbol(gr_complex* out, int len)
       //     bits, d_resid[0], d_nresid[0], d_bit_offset[0]);
     }
     else {
-      if((8 - d_bit_offset[0]) >= d_nbits) {  // test to make sure we can fit nbits
+      if((8 - d_bit_offset[0]) >= d_hdr_nbits) {  // test to make sure we can fit nbits
         // take the nbits number of bits at a time from the byte to add to the symbol
-        bits = ((1 << d_nbits)-1) & (d_msgbytes[0] >> d_bit_offset[0]);
-        d_bit_offset[0] += d_nbits;
+        bits = ((1 << d_hdr_nbits)-1) & (d_msgbytes[0] >> d_bit_offset[0]);
+        d_bit_offset[0] += d_hdr_nbits;
 
-        out[d_data_carriers[i]] = d_constellation[bits];
+        out[d_data_carriers[i]] = d_hdr_constellation[bits];
         i++;
       }
       else {  // if we can't fit nbits, store them for the next 
@@ -520,7 +526,7 @@ digital_ofdm_mapper_bcv::generateOFDMSymbol(gr_complex* out, int len)
         unsigned int extra = 8-d_bit_offset[0];
         d_resid[0] = ((1 << extra)-1) & (d_msgbytes[0] >> d_bit_offset[0]);
         d_bit_offset[0] += extra;
-        d_nresid[0] = d_nbits - extra;
+        d_nresid[0] = d_hdr_nbits - extra;
       }
 
     }
@@ -543,7 +549,7 @@ digital_ofdm_mapper_bcv::generateOFDMSymbol(gr_complex* out, int len)
     }
 
     while(i < d_data_carriers.size() && (d_ack || d_default)) {   // finish filling out the symbol
-      out[d_data_carriers[i]] = d_constellation[randsym()];
+      out[d_data_carriers[i]] = d_hdr_constellation[randsym()];
 
       i++;
     }
@@ -556,7 +562,7 @@ digital_ofdm_mapper_bcv::generateOFDMSymbol(gr_complex* out, int len)
 /***************************** integrating SOURCE related functionality to this mapper **************************/
 int digital_ofdm_mapper_bcv::randsym()
 {
-  return (rand() % d_constellation.size());
+  return (rand() % d_hdr_constellation.size());
 }
 
 int
@@ -648,7 +654,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	    d_msg[b] = d_msgq->delete_head();		// dequeue the pkts from the queue //
 	    assert(d_msg[b]->length() > 0);	
 	    d_packetlen = d_msg[b]->length();		// assume: all pkts in batch are of same length //
-	    d_num_ofdm_symbols = ceil(((float) ((d_packetlen) * 8))/(d_data_carriers.size() * d_nbits)); // include 'x55'
+	    d_num_ofdm_symbols = ceil(((float) ((d_packetlen) * 8))/(d_data_carriers.size() * d_data_nbits)); // include 'x55'
 	    printf("d_num_ofdm_symbols: %d\n", d_num_ofdm_symbols); fflush(stdout);
 	}
 
@@ -987,10 +993,10 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolData(gr_complex* out, int k)
 
     if(d_nresid[k] > 0) {
       // take the residual bits, fill out nbits with info from the new byte, and put them in the symbol
-      d_resid[k] |= (((1 << d_nresid[k])-1) & d_msgbytes[k]) << (d_nbits - d_nresid[k]);
+      d_resid[k] |= (((1 << d_nresid[k])-1) & d_msgbytes[k]) << (d_data_nbits - d_nresid[k]);
       bits = d_resid[k];
 
-      out[d_data_carriers[i]] = d_constellation[bits];
+      out[d_data_carriers[i]] = d_data_constellation[bits];
       i++;
 
       d_bit_offset[k] += d_nresid[k];
@@ -998,20 +1004,20 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolData(gr_complex* out, int k)
       d_resid[k] = 0;
     }
     else {
-      if((8 - d_bit_offset[k]) >= d_nbits) {  // test to make sure we can fit nbits
+      if((8 - d_bit_offset[k]) >= d_data_nbits) {  // test to make sure we can fit nbits
         // take the nbits number of bits at a time from the byte to add to the symbol
-        bits = ((1 << d_nbits)-1) & (d_msgbytes[k] >> d_bit_offset[k]);
-        d_bit_offset[k] += d_nbits;
+        bits = ((1 << d_data_nbits)-1) & (d_msgbytes[k] >> d_bit_offset[k]);
+        d_bit_offset[k] += d_data_nbits;
 
-        out[d_data_carriers[i]] = d_constellation[bits];
+        out[d_data_carriers[i]] = d_data_constellation[bits];
         i++;
       }
       else {  // if we can't fit nbits, store them for the next 
-        // saves d_nresid bits of this message where d_nresid < d_nbits
+        // saves d_nresid bits of this message where d_nresid < d_data_nbits
         unsigned int extra = 8-d_bit_offset[k];
         d_resid[k] = ((1 << extra)-1) & (d_msgbytes[k] >> d_bit_offset[k]);
         d_bit_offset[k] += extra;
-        d_nresid[k] = d_nbits - extra;
+        d_nresid[k] = d_data_nbits - extra;
       }
 
     }
@@ -1032,7 +1038,7 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolData(gr_complex* out, int k)
     }
 
     while(i < d_data_carriers.size()) {   // finish filling out the symbol
-      out[d_data_carriers[i]] = d_constellation[randsym()];
+      out[d_data_carriers[i]] = d_data_constellation[randsym()];
       i++;
     }
 
@@ -1073,10 +1079,10 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolHeader(gr_complex* out)
 
     if(d_hdr_nresid > 0) {
       // take the residual bits, fill out nbits with info from the new byte, and put them in the symbol
-      d_hdr_resid |= (((1 << d_hdr_nresid)-1) & d_hdr_byte) << (d_nbits - d_hdr_nresid);
+      d_hdr_resid |= (((1 << d_hdr_nresid)-1) & d_hdr_byte) << (d_hdr_nbits - d_hdr_nresid);
       bits = d_hdr_resid;
 
-      out[d_data_carriers[i]] = d_constellation[bits];
+      out[d_data_carriers[i]] = d_hdr_constellation[bits];
       i++;
 
       d_hdr_bit_offset += d_hdr_nresid;
@@ -1084,12 +1090,12 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolHeader(gr_complex* out)
       d_hdr_resid = 0;
     }
     else {
-      if((8 - d_hdr_bit_offset) >= d_nbits) {  // test to make sure we can fit nbits
+      if((8 - d_hdr_bit_offset) >= d_hdr_nbits) {  // test to make sure we can fit nbits
         // take the nbits number of bits at a time from the byte to add to the symbol
-        bits = ((1 << d_nbits)-1) & (d_hdr_byte >> d_hdr_bit_offset);
-        d_hdr_bit_offset += d_nbits;
+        bits = ((1 << d_hdr_nbits)-1) & (d_hdr_byte >> d_hdr_bit_offset);
+        d_hdr_bit_offset += d_hdr_nbits;
 
-        out[d_data_carriers[i]] = d_constellation[bits];
+        out[d_data_carriers[i]] = d_hdr_constellation[bits];
 	//printf("fill sc: %d\n", d_data_carriers[i]); fflush(stdout);
         i++;
       }
@@ -1098,7 +1104,7 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolHeader(gr_complex* out)
         unsigned int extra = 8-d_hdr_bit_offset;
         d_hdr_resid = ((1 << extra)-1) & (d_hdr_byte >> d_hdr_bit_offset);
         d_hdr_bit_offset += extra;
-        d_hdr_nresid = d_nbits - extra;
+        d_hdr_nresid = d_hdr_nbits - extra;
       }
 
     }
@@ -1120,7 +1126,7 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolHeader(gr_complex* out)
     }
 
     while(i < d_data_carriers.size()) {   // finish filling out the symbol
-      out[d_data_carriers[i]] = d_constellation[randsym()];
+      out[d_data_carriers[i]] = d_hdr_constellation[randsym()];
 
       i++;
     }

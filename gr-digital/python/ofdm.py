@@ -101,6 +101,7 @@ class ofdm_mod(gr.hier_block2):
         symbol_length = options.fft_length + options.cp_length
         
         mods = {"bpsk": 2, "qpsk": 4, "8psk": 8, "qam8": 8, "qam16": 16, "qam64": 64, "qam256": 256}
+	"""
         arity = mods[self._modulation]
         self._bits_per_symbol = int(math.log(mods[self._modulation], 2)) 
         rot = 1
@@ -122,7 +123,32 @@ class ofdm_mod(gr.hier_block2):
 		  			     options.id, options.src,
 					     options.batch_size, options.encode_flag,
 					     options.fwd, options.dst_id, options.degree)
-        
+        """
+
+
+        hdr_rot = 1
+        hdr_arity = mods["bpsk"]
+        hdr_constel = psk.psk_constellation(hdr_arity)
+        hdr_rotated_const = map(lambda pt: pt * hdr_rot, hdr_constel.points())
+
+        data_rot = 1
+        data_arity = mods[self._modulation]
+        if self._modulation == "qpsk":
+            data_rot = (0.707+0.707j)
+        if(self._modulation.find("psk") >= 0):
+            data_constel = psk.psk_constellation(data_arity)
+            data_rotated_const = map(lambda pt: pt * data_rot, data_constel.points())
+        elif(self._modulation.find("qam") >= 0):
+            data_constel = qam.qam_constellation(data_arity)
+            data_rotated_const = map(lambda pt: pt * data_rot, data_constel.points())
+        self._bits_per_symbol = int(math.log(mods[self._modulation], 2))                # just a useless parameter now #
+
+        self._pkt_input = digital_swig.ofdm_mapper_bcv(hdr_rotated_const, data_rotated_const, msgq_limit,
+                                             options.occupied_tones, options.fft_length,
+                                             options.id, options.src,
+                                             options.batch_size, options.encode_flag, 
+					     options.fwd, options.dst_id, options.degree)
+	
 
         self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, options.fwd, padded_preambles)
         self.ifft = gr.fft_vcc(self._fft_length, False, win, True)

@@ -323,7 +323,9 @@ class digital_ofdm_mapper_bcv;
 typedef boost::shared_ptr<digital_ofdm_mapper_bcv> digital_ofdm_mapper_bcv_sptr;
 
 DIGITAL_API digital_ofdm_mapper_bcv_sptr 
-digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
+digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
+			 const std::vector<gr_complex> &data_constellation,
+			 unsigned msgq_limit, 
 			 unsigned occupied_carriers, unsigned int fft_length, unsigned int id=1,
 			 unsigned int source_flag=0,
 			 unsigned int batch_size=1,
@@ -340,12 +342,16 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsi
 class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 {
   friend DIGITAL_API digital_ofdm_mapper_bcv_sptr
-  digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
+  digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
+			   const std::vector<gr_complex> &data_constellation,
+			   unsigned msgq_limit, 
 			   unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			   unsigned int source_flag,
 			   unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree);
  protected:
-  digital_ofdm_mapper_bcv (const std::vector<gr_complex> &constellation, unsigned msgq_limit, 
+  digital_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
+			 const std::vector<gr_complex> &data_constellation,
+			 unsigned msgq_limit, 
 		         unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source_flag,
 			 unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree);
@@ -359,11 +365,15 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   static const int ACK_HEADERBYTELEN = sizeof(MULTIHOP_ACK_HDR_TYPE);
   static const int ACK_HEADERDATALEN = ACK_HEADERBYTELEN - ACK_PADDING_SIZE-4;
 
-  std::vector<gr_complex> d_constellation;
+  std::vector<gr_complex> d_hdr_constellation;
+  unsigned long  d_hdr_nbits;
+
+  std::vector<gr_complex> d_data_constellation;
+  unsigned long  d_data_nbits;
+
   gr_msg_queue_sptr	d_msgq;
   bool			d_eof;
   
-  unsigned long  d_nbits;
   unsigned int 		d_occupied_carriers;
   unsigned int 		d_fft_length;
   int			d_pending_flag;
