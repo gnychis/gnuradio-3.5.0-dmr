@@ -53,7 +53,7 @@ using namespace std;
 #define UNCORRECTED_REPLAY 0
 #define CORRECTED_REPLAY 1
 
-#define SEND_ACK_ETHERNET 1
+//#define SEND_ACK_ETHERNET 1
 
 #define VERBOSE 0
 //#define SCALE 1e3
@@ -183,15 +183,15 @@ digital_ofdm_frame_sink::extract_header()
                     d_header.src_id, d_header.dst_id, d_batch_number, d_nsenders, d_packetlen, d_header.pkt_type);
 }
 
-unsigned char digital_ofdm_frame_sink::slicer(const gr_complex x)
+unsigned char digital_ofdm_frame_sink::slicer_hdr(const gr_complex x)
 {
-  unsigned int table_size = d_sym_value_out.size();
+  unsigned int table_size = d_hdr_sym_value_out.size();
   unsigned int min_index = 0;
-  float min_euclid_dist = norm(x - d_sym_position[0]);
+  float min_euclid_dist = norm(x - d_hdr_sym_position[0]);
   float euclid_dist = 0;
 
   for (unsigned int j = 1; j < table_size; j++){
-    euclid_dist = norm(x - d_sym_position[j]);
+    euclid_dist = norm(x - d_hdr_sym_position[j]);
     if (euclid_dist < min_euclid_dist){
       min_euclid_dist = euclid_dist;
       min_index = j;
@@ -201,7 +201,7 @@ unsigned char digital_ofdm_frame_sink::slicer(const gr_complex x)
   gr_complex closest = d_sym_position[min_index];
   printf("x: (%f, %f), closest: (%f, %f), evm: (%f, %f)\n", x.real(), x.imag(), closest.real(), closest.imag(), min_euclid_dist); fflush(stdout);
 #endif
-  return d_sym_value_out[min_index];
+  return d_hdr_sym_value_out[min_index];
 }
 
 /* experiment to compare the dfe performance for pilot vs no-pilot subcarriers case 
@@ -411,19 +411,19 @@ unsigned int digital_ofdm_frame_sink::demapper_pilot(const gr_complex *in,
 
     while((d_byte_offset < 8) && (i < d_data_carriers.size())) {
 
-      unsigned char bits = slicer(rot_out[i]);
+      unsigned char bits = slicer_hdr(rot_out[i]);
 
       i++;
-      if((8 - d_byte_offset) >= d_nbits) {
+      if((8 - d_byte_offset) >= d_hdr_nbits) {
         d_partial_byte |= bits << (d_byte_offset);
-        d_byte_offset += d_nbits;
+        d_byte_offset += d_hdr_nbits;
       }
       else {
-        d_nresid = d_nbits-(8-d_byte_offset);
+        d_nresid = d_hdr_nbits-(8-d_byte_offset);
         int mask = ((1<<(8-d_byte_offset))-1);
         d_partial_byte |= (bits & mask) << d_byte_offset;
         d_resid = bits >> (8-d_byte_offset);
-        d_byte_offset += (d_nbits - d_nresid);
+        d_byte_offset += (d_hdr_nbits - d_nresid);
       }
       //printf("demod symbol: %.4f + j%.4f   bits: %x   partial_byte: %x   byte_offset: %d   resid: %x   nresid: %d\n", 
       //     in[i-1].real(), in[i-1].imag(), bits, d_partial_byte, d_byte_offset, d_resid, d_nresid);
@@ -468,9 +468,9 @@ unsigned int digital_ofdm_frame_sink::demapper(const gr_complex *in,
         d_derotated_output[i] = sigrot;
       }
 
-      unsigned char bits = slicer(sigrot);
+      unsigned char bits = slicer_hdr(sigrot);
 
-      gr_complex closest_sym = d_sym_position[bits];
+      gr_complex closest_sym = d_hdr_sym_position[bits];
 
       accum_error += sigrot * conj(closest_sym);
       accum_error1 += in[d_data_carriers[i]] * conj(closest_sym);
@@ -481,16 +481,16 @@ unsigned int digital_ofdm_frame_sink::demapper(const gr_complex *in,
       }
 
       i++;
-      if((8 - d_byte_offset) >= d_nbits) {
+      if((8 - d_byte_offset) >= d_hdr_nbits) {
         d_partial_byte |= bits << (d_byte_offset);
-        d_byte_offset += d_nbits;
+        d_byte_offset += d_hdr_nbits;
       }
       else {
-        d_nresid = d_nbits-(8-d_byte_offset);
+        d_nresid = d_hdr_nbits-(8-d_byte_offset);
         int mask = ((1<<(8-d_byte_offset))-1);
         d_partial_byte |= (bits & mask) << d_byte_offset;
         d_resid = bits >> (8-d_byte_offset);
-        d_byte_offset += (d_nbits - d_nresid);
+        d_byte_offset += (d_hdr_nbits - d_nresid);
       }
       //printf("demod symbol: %.4f + j%.4f   bits: %x   partial_byte: %x   byte_offset: %d   resid: %x   nresid: %d\n",
       //     in[i-1].real(), in[i-1].imag(), bits, d_partial_byte, d_byte_offset, d_resid, d_nresid);
@@ -562,8 +562,10 @@ unsigned int digital_ofdm_frame_sink::demapper(const gr_complex *in,
 #endif
 
 digital_ofdm_frame_sink_sptr
-digital_make_ofdm_frame_sink(const std::vector<gr_complex> &sym_position,
-                        const std::vector<unsigned char> &sym_value_out,
+digital_make_ofdm_frame_sink(const std::vector<gr_complex> &hdr_sym_position,
+                        const std::vector<unsigned char> &hdr_sym_value_out,
+			const std::vector<gr_complex> &data_sym_position,
+                        const std::vector<unsigned char> &data_sym_value_out,
                         gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 			unsigned int occupied_carriers, unsigned int fft_length,
                         float phase_gain, float freq_gain, unsigned int id, 
@@ -571,7 +573,8 @@ digital_make_ofdm_frame_sink(const std::vector<gr_complex> &sym_position,
 			int fwd_index, int replay_flag,
 			int exp_size, int fec_n, int fec_k, int degree)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_frame_sink(sym_position, sym_value_out,
+  return gnuradio::get_initial_sptr(new digital_ofdm_frame_sink(hdr_sym_position, hdr_sym_value_out,
+							data_sym_position, data_sym_value_out,
                                                         target_queue, fwd_queue,
 							occupied_carriers, fft_length,
                                                         phase_gain, freq_gain, id,
@@ -580,8 +583,10 @@ digital_make_ofdm_frame_sink(const std::vector<gr_complex> &sym_position,
 }
 
 
-digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &sym_position,
-                                       const std::vector<unsigned char> &sym_value_out,
+digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &hdr_sym_position,
+                                       const std::vector<unsigned char> &hdr_sym_value_out,
+		                       const std::vector<gr_complex> &data_sym_position,
+                		       const std::vector<unsigned char> &data_sym_value_out,
                                        gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 				       unsigned int occupied_carriers, unsigned int fft_length,
                                        float phase_gain, float freq_gain, unsigned int id,
@@ -735,7 +740,8 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   }
 
   d_bytes_out = new unsigned char[d_occupied_carriers];
-  set_sym_value_out(sym_position, sym_value_out);
+  set_hdr_sym_value_out(hdr_sym_position, hdr_sym_value_out);
+  set_data_sym_value_out(data_sym_position, data_sym_value_out);
 
   enter_search();
 
@@ -823,7 +829,7 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
           d_euclid_dist[i][j] = 0.0;
       }
   } */
-  int n_entries = pow(2.0, double(d_batch_size));
+  int n_entries = pow(double (d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
   memset(d_euclid_dist, 0, sizeof(float) * d_data_carriers.size() * n_entries * MAX_OFDM_SYMBOLS);
   /*
   int n_data_carriers = d_data_carriers.size();
@@ -899,7 +905,7 @@ digital_ofdm_frame_sink::~digital_ofdm_frame_sink ()
 }
 
 bool
-digital_ofdm_frame_sink::set_sym_value_out(const std::vector<gr_complex> &sym_position,
+digital_ofdm_frame_sink::set_hdr_sym_value_out(const std::vector<gr_complex> &sym_position,
                                       const std::vector<unsigned char> &sym_value_out)
 {
   if (sym_position.size() != sym_value_out.size())
@@ -908,10 +914,28 @@ digital_ofdm_frame_sink::set_sym_value_out(const std::vector<gr_complex> &sym_po
   if (sym_position.size()<1)
     return false;
 
-  d_sym_position  = sym_position;
-  d_sym_value_out = sym_value_out;
-  d_nbits = (unsigned int)ceil(log10(float(d_sym_value_out.size())) / log10((float)2.0));		// I've got no idea!!!!!
-  printf("size: %d, d_nbits: %d\n", d_sym_value_out.size(), d_nbits); fflush(stdout);
+  d_hdr_sym_position  = sym_position;
+  d_hdr_sym_value_out = sym_value_out;
+  d_hdr_nbits = (unsigned int)ceil(log10(float(d_hdr_sym_value_out.size())) / log10((float)2.0));		// I've got no idea!!!!!
+  printf("size: %d, d_hdr_nbits: %d\n", d_hdr_sym_value_out.size(), d_hdr_nbits); fflush(stdout);
+
+  return true;
+}
+
+bool
+digital_ofdm_frame_sink::set_data_sym_value_out(const std::vector<gr_complex> &sym_position,
+                                      const std::vector<unsigned char> &sym_value_out)
+{
+  if (sym_position.size() != sym_value_out.size())
+    return false;
+
+  if (sym_position.size()<1)
+    return false;
+
+  d_data_sym_position  = sym_position;
+  d_data_sym_value_out = sym_value_out;
+  d_data_nbits = (unsigned int)ceil(log10(float(d_data_sym_value_out.size())) / log10((float)2.0));               // I've got no idea!!!!!
+  printf("size: %d, d_data_nbits: %d\n", d_data_sym_value_out.size(), d_data_nbits); fflush(stdout);
 
   return true;
 }
@@ -1129,9 +1153,9 @@ digital_ofdm_frame_sink::work (int noutput_items,
                      d_state = STATE_HAVE_HEADER;
 		     //d_state = STATE_HAVE_NULL; d_null_symbols = 0;
 		     d_curr_ofdm_symbol_index = 0;
-		     d_num_ofdm_symbols = ceil(((float) (d_packetlen * 8))/(d_data_carriers.size() * d_nbits));
+		     d_num_ofdm_symbols = ceil(((float) (d_packetlen * 8))/(d_data_carriers.size() * d_data_nbits));
 		     assert(d_num_ofdm_symbols < MAX_OFDM_SYMBOLS); 				// FIXME - arbitrary '70'.. 
-		     printf("d_num_ofdm_symbols: %d, actual sc size: %d, d_nbits: %d\n", d_num_ofdm_symbols, d_data_carriers.size(), d_nbits);
+		     printf("d_num_ofdm_symbols: %d, actual sc size: %d, d_data_nbits: %d\n", d_num_ofdm_symbols, d_data_carriers.size(), d_data_nbits);
 		     fflush(stdout);
 
 		     /* rx symbols */
@@ -1465,7 +1489,7 @@ digital_ofdm_frame_sink::prepareForNewBatch()
       }
   } */
  
-  int n_entries = pow(2.0, double(d_batch_size));
+  int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
   memset(d_euclid_dist, 0, sizeof(float) * d_data_carriers.size() * n_entries * MAX_OFDM_SYMBOLS);
 
   printf("prepareForNewBatch ends, size: %d, %d\n", flow_info->innovative_pkts.size(), d_flowInfoVector.size()); fflush(stdout);
@@ -2955,6 +2979,7 @@ digital_ofdm_frame_sink::makePacket(bool sync_send)
    //printf("sink::makePacket - nothing to send\n"); fflush(stdout);
 }
 
+#if 0
 void
 digital_ofdm_frame_sink::printSymbols(gr_complex* symbols, int num) {
   printf("print symbols-- \n");
@@ -3071,6 +3096,7 @@ digital_ofdm_frame_sink::checkPacketError(FlowInfo *flow_info)
 
   return true;
 }
+#endif
 
 #ifdef USE_PILOT
 /* reduce the coefficients using both the hestimates and the coeff used by the node upstream */
@@ -3265,7 +3291,6 @@ digital_ofdm_frame_sink::packCoefficientsInHeader1(MULTIHOP_HDR_TYPE& header,
   memcpy(header.coeffs, new_coeffs, sizeof(COEFF) * count);
   free(new_coeffs);
 }
-#endif
 
 /* used by forwarder: fixes the symbols of each innovative packet to the closest possible locations instead */
 void
@@ -3427,6 +3452,7 @@ digital_ofdm_frame_sink::findClosestSymbol(gr_complex *x, gr_complex **closest_s
       min_index = 0;
   }
 }
+#endif
 
 inline void
 digital_ofdm_frame_sink::calculate_fine_offset() {
@@ -4098,6 +4124,7 @@ digital_ofdm_frame_sink::ToPhase_c(COEFF coeff) {
 }
 
 
+#if 0
 /* ack processing (at the forwarders) */
 void
 digital_ofdm_frame_sink::processACK() {
@@ -4157,6 +4184,7 @@ digital_ofdm_frame_sink::processACK() {
   if(shouldFowardACK(d_flow, d_ack_header.prev_hop_id))
      forwardACK();	
 }
+#endif
 
 inline CreditInfo*
 digital_ofdm_frame_sink::findCreditInfo(unsigned char flowId) {
@@ -4287,6 +4315,7 @@ digital_ofdm_frame_sink::sendACK(unsigned char flow, unsigned char batch) {
 }
 #endif // ACK on ETHERNET
 
+#if 0
 /* just forwards the ACK received ie d_ack_header, updates 
    the prev_hop_id to itself and tail_inserts in the queue 
 */
@@ -4357,11 +4386,7 @@ digital_ofdm_frame_sink::shouldFowardACK(unsigned char flowId, unsigned char pre
 
   return false;
 }
-
-void
-digital_ofdm_frame_sink::fillAckRouteMap() {
-  // TODO! 
-}
+#endif
 
 void
 digital_ofdm_frame_sink::whiten(unsigned char *bytes, const int len)
@@ -4371,10 +4396,10 @@ digital_ofdm_frame_sink::whiten(unsigned char *bytes, const int len)
 }
 
 
+#if 0
 /*
 // Integer Programming //
 */
-
 void
 digital_ofdm_frame_sink::slicer_ILP(gr_complex *x, gr_complex *closest_sym, unsigned char *bits, 
 				    vector<gr_complex*> batched_sym_position, unsigned int ofdm_index, unsigned int subcarrier_index,
@@ -4578,6 +4603,7 @@ digital_ofdm_frame_sink::slicer_ILP_opt(gr_complex *x, gr_complex *closest_sym, 
         closest_sym[k] = batched_sym_position[k][min_index];            // closest_sym: the ideal position where R should hv been at //
 
 }
+#endif
 
 // should only be called from slicer ILP //
 void
@@ -4617,7 +4643,44 @@ digital_ofdm_frame_sink::getSymOutBits_ILP(unsigned char *bits, int index) {
   assert(false);
 }
 
-#ifndef USE_PILOT
+void
+digital_ofdm_frame_sink::getSymOutBits_ILP_QPSK(unsigned char *bits, int index) {
+  if(d_batch_size == 1) {
+     assert(index < 4);
+     switch(index) {
+        case 0: bits[0] = 0; break;
+        case 1: bits[0] = 1; break;
+        case 2: bits[0] = 2; break;
+        case 3: bits[0] = 3; break;
+     }
+     return;
+  } 
+  else if(d_batch_size == 2) { 
+     assert(index < 16);
+     switch(index) {
+        case 0: bits[0] = 0; bits[1] = 0; break;
+        case 1: bits[0] = 0; bits[1] = 1; break;
+        case 2: bits[0] = 0; bits[1] = 2; break;
+        case 3: bits[0] = 0; bits[1] = 3; break;
+        case 4: bits[0] = 1; bits[1] = 0; break;
+        case 5: bits[0] = 1; bits[1] = 1; break;
+        case 6: bits[0] = 1; bits[1] = 2; break;
+        case 7: bits[0] = 1; bits[1] = 3; break;
+        case 8: bits[0] = 2; bits[1] = 0; break;
+        case 9: bits[0] = 2; bits[1] = 1; break;
+        case 10: bits[0] = 2; bits[1] = 2; break;
+        case 11: bits[0] = 2; bits[1] = 3; break;
+        case 12: bits[0] = 3; bits[1] = 0; break;
+        case 13: bits[0] = 3; bits[1] = 1; break;
+        case 14: bits[0] = 3; bits[1] = 2; break;
+        case 15: bits[0] = 3; bits[1] = 3; break;
+     }
+     return;
+  } 
+  assert(false);
+}
+
+#if 0
 void
 digital_ofdm_frame_sink::demodulate_ILP(FlowInfo *flowInfo)
 {
@@ -4809,11 +4872,11 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
          accum_error1[k] += (sigrot1[k] * conj(closest_sym[k]));
 		 if (norm(sigrot1[k])> 0.001) dfe_vec[k][i] +=  d_eq_gain*(closest_sym[k]/sigrot1[k]-dfe_vec[k][i]);
 
-	     assert((8 - byte_offset) >= d_nbits);
+	     assert((8 - byte_offset) >= d_data_nbits);
 	     partial_byte[k] |= bits[k] << (byte_offset);
 	  }
 
-	  byte_offset += d_nbits;
+	  byte_offset += d_data_nbits;
      }
   
      if(byte_offset == 8) {
@@ -4856,13 +4919,12 @@ digital_ofdm_frame_sink::demapper_ILP(unsigned int ofdm_symbol_index, vector<uns
 
   return bytes_produced;
 }
-#endif
 
 // build the combined symbol map. Needs to be called for every new batch. There will 
 // 2^d_batch_size entries in each map 
 void
 digital_ofdm_frame_sink::buildMap_ILP(cx_mat coeffs, vector<gr_complex*> &batched_sym_position) {
-  int n_entries = pow(2.0, double(d_batch_size));
+  int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
 
   if(d_batch_size == 1) {
      for(unsigned int i = 0; i < d_batch_size; i++) {
@@ -4924,7 +4986,7 @@ digital_ofdm_frame_sink::debugMap_ILP(vector<vector<gr_complex*> > batched_sym_p
       assert(batch_position.size() == d_batch_size);
       for(int j = 0; j < pkts; j++) {
 	 gr_complex *positions = batch_position[j];
-	 int n_entries = pow(2.0, double(d_batch_size));
+	 int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
 
 	 
 	 for(int k = 0; k < n_entries; k++) {
@@ -4946,7 +5008,7 @@ digital_ofdm_frame_sink::logCorrectedSymbols(FlowInfo *flowInfo) {
   unsigned int half_occupied_tones = (d_occupied_carriers - dc_tones)/2;
 
   assert(d_batch_size == 2);
-  int n_entries = pow(2.0, double(d_batch_size));
+  int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
 
   cx_mat coeffs = randu<cx_mat>(1, d_batch_size);
 
@@ -5116,6 +5178,7 @@ digital_ofdm_frame_sink::matchSymbol(gr_complex x, gr_complex &closest_sym,
 
   closest_sym = sym_position[min_index];
 }
+#endif
 
 /* alternative decoding strategy, where you try and decode after every packet received. In case we are lucky, we can decode
    after receiving just 1 packet. Else keep trying to decode with every successive packet received. Gradually, the strategy should 
@@ -5179,7 +5242,7 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
         }
 
         // build the map for each subcarrier //
-	int n_entries = pow(2.0, double(d_batch_size));
+	int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
 	gr_complex *sym_position = (gr_complex*) malloc(sizeof(gr_complex) * n_entries);
 
         buildMap_ILP_2(&(pkt_coeffs[i * d_batch_size]), sym_position);
@@ -5343,12 +5406,13 @@ digital_ofdm_frame_sink::set_msg_timestamp(gr_message_sptr msg) {
 
 void
 digital_ofdm_frame_sink::buildMap_ILP_2(gr_complex *coeffs, gr_complex* sym_position) {
-
-   
+  
+  assert(false); 		// disable for now //
+#if 0
   if(d_batch_size == 1) {
          int j = 0;
-         sym_position[j++] = ((coeffs[0] *  d_sym_position[0]));
-         sym_position[j++] = ((coeffs[0] *  d_sym_position[1]));
+         sym_position[j++] = ((coeffs[0] *  d_data_sym_position[0]));
+         sym_position[j++] = ((coeffs[0] *  d_data_sym_position[1]));
   }
   if(d_batch_size == 2) {
          int j = 0;
@@ -5375,6 +5439,7 @@ digital_ofdm_frame_sink::buildMap_ILP_2(gr_complex *coeffs, gr_complex* sym_posi
          sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[0];
          sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[1];
   }
+#endif
   //printf("buildMap_ILP done\n"); fflush(stdout);
 }
 
@@ -5423,26 +5488,26 @@ digital_ofdm_frame_sink::buildMap_pilot(FlowInfo *flowInfo, gr_complex* sym_posi
 
   if(d_batch_size == 1) {
          int j = 0;
-         sym_position[j++] = ((coeffs[0] *  d_sym_position[0]));
-         sym_position[j++] = ((coeffs[0] *  d_sym_position[1]));;
+         sym_position[j++] = ((coeffs[0] *  d_data_sym_position[0]));
+         sym_position[j++] = ((coeffs[0] *  d_data_sym_position[1]));;
   }
   if(d_batch_size == 2) {
          int j = 0;
-         sym_position[j++] = (((coeffs[0] *  d_sym_position[0])) + (coeffs[1] *  d_sym_position[0]));
-         sym_position[j++] = (((coeffs[0] *  d_sym_position[0])) + (coeffs[1] *  d_sym_position[1]));
-         sym_position[j++] = (((coeffs[0] *  d_sym_position[1])) + (coeffs[1] *  d_sym_position[0]));
-         sym_position[j++] = (((coeffs[0] *  d_sym_position[1])) + (coeffs[1] *  d_sym_position[1]));
+         sym_position[j++] = (((coeffs[0] *  d_data_sym_position[0])) + (coeffs[1] *  d_data_sym_position[0]));
+         sym_position[j++] = (((coeffs[0] *  d_data_sym_position[0])) + (coeffs[1] *  d_data_sym_position[1]));
+         sym_position[j++] = (((coeffs[0] *  d_data_sym_position[1])) + (coeffs[1] *  d_data_sym_position[0]));
+         sym_position[j++] = (((coeffs[0] *  d_data_sym_position[1])) + (coeffs[1] *  d_data_sym_position[1]));
   }
   else if (d_batch_size == 3) {
          int j = 0;
-         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[0];
-         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[1];
-         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[0];
-         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[1];
-         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[0];
-         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[1];
-         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[0];
-         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[0] + coeffs[1]* d_data_sym_position[0] + coeffs[2]* d_data_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[0] + coeffs[1]* d_data_sym_position[0] + coeffs[2]* d_data_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[0] + coeffs[1]* d_data_sym_position[1] + coeffs[2]* d_data_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[0] + coeffs[1]* d_data_sym_position[1] + coeffs[2]* d_data_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[1] + coeffs[1]* d_data_sym_position[0] + coeffs[2]* d_data_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[1] + coeffs[1]* d_data_sym_position[0] + coeffs[2]* d_data_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[1] + coeffs[1]* d_data_sym_position[1] + coeffs[2]* d_data_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[1] + coeffs[1]* d_data_sym_position[1] + coeffs[2]* d_data_sym_position[1];
   }
   //printf("buildMap_pilot end\n"); fflush(stdout);
 }
@@ -5605,7 +5670,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
      assert(dfe_data[s].size() == n_data_carriers); 
   }
 
-  int n_entries = pow(2.0, double(d_batch_size));
+  int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
   gr_complex sigrot, closest_sym;
 
   /* for every packet of the batch, 'd_batch_size' # of partial bytes and bits will be decoded */
@@ -5631,12 +5696,12 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
 	 sigrot = sym_vec[d_data_carriers[i]];
 	 slicer_ILP_2(sigrot, closest_sym, bits, sym_position, ofdm_symbol_index, i);
 
-         assert((8 - byte_offset) >= d_nbits);
+         assert((8 - byte_offset) >= d_data_nbits);
 
          for(unsigned int k = 0; k < d_batch_size; k++)
               partial_byte[k] |= bits[k] << (byte_offset);
 
-         byte_offset += d_nbits;
+         byte_offset += d_data_nbits;
      }
 
      if(byte_offset == 8) {
@@ -5718,17 +5783,17 @@ digital_ofdm_frame_sink::demapper_ILP_2(unsigned int ofdm_symbol_index, vector<u
           accum_error += (sigrot * conj(closest_sym));
           if (norm(sigrot)> 0.001) dfe_vec[i] +=  d_eq_gain*(closest_sym/sigrot-dfe_vec[i]);
 
-          assert((8 - byte_offset) >= d_nbits);
+          assert((8 - byte_offset) >= d_data_nbits);
 
 	  for(unsigned int k = 0; k < d_batch_size; k++)
               partial_byte[k] |= bits[k] << (byte_offset);
 
-          byte_offset += d_nbits;
+          byte_offset += d_data_nbits;
      }
 
      if(byte_offset == 8) {
         for(int k = 0; k < d_batch_size; k++) {
-#ifdef DEBUG
+#ifndef DEBUG
             printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
 #endif
             out_vec[k][bytes_produced] = partial_byte[k];
@@ -5760,6 +5825,7 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, gr_complex& closest_sym, uns
                                       gr_complex* batched_sym_position, 
 				      unsigned int ofdm_index, unsigned int subcarrier_index)
 {
+  printf("slicer_ILP_2\n"); fflush(stdout);
   unsigned int min_index = 0;
   assert(d_num_ofdm_symbols < MAX_OFDM_SYMBOLS);						// upper capped for now! 
   d_euclid_dist[ofdm_index][subcarrier_index][0] += norm(x - batched_sym_position[0]);
@@ -5773,12 +5839,12 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, gr_complex& closest_sym, uns
   }
 
   // for each table entry, find the min(total_error, k) //
-  unsigned int table_size = pow(2.0, double(d_batch_size));
+  unsigned int table_size = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
   for(unsigned int j = 1; j < table_size; j++) {
       float euclid_dist = d_euclid_dist[ofdm_index][subcarrier_index][j] + norm(x - batched_sym_position[j]);
 
       //if(d_pkt_num == 1 && subcarrier_index == 0) 
-      if(0)
+      if(1)
       {
 	  printf("euclid_dist: %f, x (%f, %f), sym (%f, %f) j: %d, min_euclid_dist: %f\n", euclid_dist, x.real(), x.imag(), batched_sym_position[j].real(), batched_sym_position[j].imag(), j, min_euclid_dist); fflush(stdout);
       }
@@ -5793,7 +5859,11 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, gr_complex& closest_sym, uns
 
   // assign closest_sym and bits // 
   closest_sym = batched_sym_position[min_index];            // closest_sym: the ideal position where R should hv been at //
-  getSymOutBits_ILP(bits, min_index);
+
+  if(d_data_nbits == 1)
+      getSymOutBits_ILP(bits, min_index);
+  else if(d_data_nbits == 2)
+      getSymOutBits_ILP_QPSK(bits, min_index);
 
   d_avg_evm_error += min_euclid_dist;
 
@@ -6308,7 +6378,7 @@ digital_ofdm_frame_sink::buildMap_pilot_SRC(FlowInfo *flowInfo, gr_complex* sym_
   int subcarrier = d_data_carriers[subcarrier_index];
   int n_data_carriers = d_data_carriers.size();
 
-  //printf("buildMap_pilot start, num_senders: %d\n", num_senders); fflush(stdout);
+  printf("buildMap_pilot start, num_senders: %d\n", num_senders); fflush(stdout);
 
   gr_complex coeffs[5];
   for(unsigned int j = 0; j < d_batch_size; j++)
@@ -6333,26 +6403,42 @@ digital_ofdm_frame_sink::buildMap_pilot_SRC(FlowInfo *flowInfo, gr_complex* sym_
 
   if(d_batch_size == 1) {
          int j = 0;
-         sym_position[j++] = ((coeffs[0] *  d_sym_position[0]));
-         sym_position[j++] = ((coeffs[0] *  d_sym_position[1]));;
+#if 0
+         sym_position[j++] = ((coeffs[0] *  d_data_sym_position[0]));
+         sym_position[j++] = ((coeffs[0] *  d_data_sym_position[1]));
+#endif
+	 printf("d_data_sym_position.size: %d\n", d_data_sym_position.size()); fflush(stdout);
+	 for(unsigned int m1 = 0; m1 < d_data_sym_position.size(); m1++) {
+	     sym_position[j++] = (coeffs[0] * d_data_sym_position[m1]);
+	 }
   }
   if(d_batch_size == 2) {
          int j = 0;
-         sym_position[j++] = (((coeffs[0] *  d_sym_position[0])) + (coeffs[1] *  d_sym_position[0]));
-         sym_position[j++] = (((coeffs[0] *  d_sym_position[0])) + (coeffs[1] *  d_sym_position[1]));
-         sym_position[j++] = (((coeffs[0] *  d_sym_position[1])) + (coeffs[1] *  d_sym_position[0]));
-         sym_position[j++] = (((coeffs[0] *  d_sym_position[1])) + (coeffs[1] *  d_sym_position[1]));
+#if 0
+         sym_position[j++] = (((coeffs[0] *  d_data_sym_position[0])) + (coeffs[1] *  d_data_sym_position[0]));
+         sym_position[j++] = (((coeffs[0] *  d_data_sym_position[0])) + (coeffs[1] *  d_data_sym_position[1]));
+         sym_position[j++] = (((coeffs[0] *  d_data_sym_position[1])) + (coeffs[1] *  d_data_sym_position[0]));
+         sym_position[j++] = (((coeffs[0] *  d_data_sym_position[1])) + (coeffs[1] *  d_data_sym_position[1]));
+#endif
+	 for(unsigned int m1 = 0; m1 < d_data_sym_position.size(); m1++) {
+	     for(unsigned int m2 = 0; m2 < d_data_sym_position.size(); m2++) {
+		gr_complex pos = (coeffs[0] * d_data_sym_position[m1]) + (coeffs[1] * d_data_sym_position[m2]);
+		std::cout<<"sym_pos:: " << pos <<" = " << coeffs[0] << " * " << d_data_sym_position[m1] << " + " << coeffs[1] << " * " << d_data_sym_position[m2] << endl;
+		sym_position[j++] = pos;
+                //printf("sym_position[%d]: (%f, %f)\n", j, pos.real(), pos.imag());
+	     }
+         }
   }
   else if (d_batch_size == 3) {
          int j = 0;
-         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[0];
-         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[1];
-         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[0];
-         sym_position[j++] = coeffs[0]* d_sym_position[0] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[1];
-         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[0];
-         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[0] + coeffs[2]* d_sym_position[1];
-         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[0];
-         sym_position[j++] = coeffs[0]* d_sym_position[1] + coeffs[1]* d_sym_position[1] + coeffs[2]* d_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[0] + coeffs[1]* d_data_sym_position[0] + coeffs[2]* d_data_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[0] + coeffs[1]* d_data_sym_position[0] + coeffs[2]* d_data_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[0] + coeffs[1]* d_data_sym_position[1] + coeffs[2]* d_data_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[0] + coeffs[1]* d_data_sym_position[1] + coeffs[2]* d_data_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[1] + coeffs[1]* d_data_sym_position[0] + coeffs[2]* d_data_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[1] + coeffs[1]* d_data_sym_position[0] + coeffs[2]* d_data_sym_position[1];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[1] + coeffs[1]* d_data_sym_position[1] + coeffs[2]* d_data_sym_position[0];
+         sym_position[j++] = coeffs[0]* d_data_sym_position[1] + coeffs[1]* d_data_sym_position[1] + coeffs[2]* d_data_sym_position[1];
   }
   //printf("buildMap_pilot end\n"); fflush(stdout);
 }
@@ -6382,7 +6468,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot_SRC(unsigned int ofdm_symbol_index
   track_pilot_dfe_SRC(sym_vec, pInfo->hestimates, carrier, dfe_pilot, ofdm_symbol_index);
   interpolate_data_dfe(dfe_pilot, dfe_data, false, NULL, gr_complex(0.0, 0.0));
 
-  int n_entries = pow(2.0, double(d_batch_size));
+  int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
   gr_complex sigrot, closest_sym;
 
   /* for every packet of the batch, 'd_batch_size' # of partial bytes and bits will be decoded */
@@ -6408,17 +6494,17 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot_SRC(unsigned int ofdm_symbol_index
          sigrot = sym_vec[d_data_carriers[i]];
          slicer_ILP_2(sigrot, closest_sym, bits, sym_position, ofdm_symbol_index, i);
 
-         assert((8 - byte_offset) >= d_nbits);
+         assert((8 - byte_offset) >= d_data_nbits);
 
          for(unsigned int k = 0; k < d_batch_size; k++)
               partial_byte[k] |= bits[k] << (byte_offset);
 
-         byte_offset += d_nbits;
+         byte_offset += d_data_nbits;
      }
 
      if(byte_offset == 8) {
         for(int k = 0; k < d_batch_size; k++) {
-            if(d_pkt_num == 2 && 0) printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
+            printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
             //assert(false);
             out_vec[k][bytes_produced] = partial_byte[k];
             partial_byte[k] = 0;

@@ -332,15 +332,32 @@ class ofdm_demod(gr.hier_block2):
 				       self._threshold, options, options.log)
 
         mods = {"bpsk": 2, "qpsk": 4, "8psk": 8, "qam8": 8, "qam16": 16, "qam64": 64, "qam256": 256}
+
+	# apurv: support for other modulations, pass 2 constellation objects #
+	hdr_rot = 1
+ 	hdr_arity = mods["bpsk"]
+	hdr_constel = psk.psk_constellation(hdr_arity)
+	hdr_rotated_const = map(lambda pt: pt * hdr_rot, hdr_constel.points())	
+
+
+	data_rot = 1
+	data_arity = mods[self._modulation]
+	if self._modulation == "qpsk":
+            data_rot = (0.707+0.707j)
+        if(self._modulation.find("psk") >= 0):
+            data_constel = psk.psk_constellation(data_arity)
+            data_rotated_const = map(lambda pt: pt * data_rot, data_constel.points())
+        elif(self._modulation.find("qam") >= 0):
+            data_constel = qam.qam_constellation(data_arity)
+            data_rotated_const = map(lambda pt: pt * data_rot, data_constel.points())
+	self._bits_per_symbol = int(math.log(mods[self._modulation], 2))		# just a useless parameter now #
+
+	"""
         arity = mods[self._modulation]
 	self._bits_per_symbol = int(math.log(mods[self._modulation], 2))
 	#print "arity: ", arity
  	#print "mod: ", self._modulation       
  
-        rot = 1
-        if self._modulation == "qpsk":
-            rot = (0.707+0.707j)
-
         # FIXME: pass the constellation objects instead of just the points
         if(self._modulation.find("psk") >= 0):
             constel = psk.psk_constellation(arity)
@@ -349,9 +366,11 @@ class ofdm_demod(gr.hier_block2):
             constel = qam.qam_constellation(arity)
             rotated_const = map(lambda pt: pt * rot, constel.points())
         #print rotated_const
+	"""
 
         phgain = 0.25
         frgain = phgain*phgain / 4.0
+	"""
         self.ofdm_demod = digital_swig.ofdm_frame_sink(rotated_const, range(arity),
                                              self._rcvd_pktq, self._out_pktq,
                                              self._occupied_tones, self._fft_length,
@@ -360,6 +379,17 @@ class ofdm_demod(gr.hier_block2):
 					     options.fwd, 
 					     options.replay,
 					     self._size, self._fec_n, self._fec_k, options.degree)
+	"""
+
+        self.ofdm_demod = digital_swig.ofdm_frame_sink(hdr_rotated_const, range(hdr_arity),
+					     data_rotated_const, range(data_arity),
+                                             self._rcvd_pktq, self._out_pktq,
+                                             self._occupied_tones, self._fft_length,
+                                             phgain, frgain, self._id,
+                                             self._batch_size, self._decode_flag, 
+                                             options.fwd, 
+                                             options.replay,
+                                             self._size, self._fec_n, self._fec_k, options.degree)
 
         self.connect(self, self.ofdm_recv)
 	

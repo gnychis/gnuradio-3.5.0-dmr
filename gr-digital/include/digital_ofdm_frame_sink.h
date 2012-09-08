@@ -76,8 +76,10 @@ class digital_ofdm_frame_sink;
 typedef boost::shared_ptr<digital_ofdm_frame_sink> digital_ofdm_frame_sink_sptr;
 
 DIGITAL_API digital_ofdm_frame_sink_sptr 
-digital_make_ofdm_frame_sink (const std::vector<gr_complex> &sym_position, 
-			 const std::vector<unsigned char> &sym_value_out,
+digital_make_ofdm_frame_sink (const std::vector<gr_complex> &hdr_sym_position, 
+			 const std::vector<unsigned char> &hdr_sym_value_out,
+                         const std::vector<gr_complex> &data_sym_position,
+                         const std::vector<unsigned char> &data_sym_value_out,
 			 gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 			 unsigned int occupied_tones, unsigned int fft_length,
 			 float phase_gain=0.25, float freq_gain=0.25*0.25/4.0, unsigned int id=1, 
@@ -425,8 +427,10 @@ unsigned char random_mask_tuple[] = {
 class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 {
   friend DIGITAL_API digital_ofdm_frame_sink_sptr 
-  digital_make_ofdm_frame_sink (const std::vector<gr_complex> &sym_position, 
-			   const std::vector<unsigned char> &sym_value_out,
+  digital_make_ofdm_frame_sink (const std::vector<gr_complex> &hdr_sym_position, 
+			   const std::vector<unsigned char> &hdr_sym_value_out,
+                           const std::vector<gr_complex> &data_sym_position,
+                           const std::vector<unsigned char> &data_sym_value_out,
 			   gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 			   unsigned int occupied_tones, unsigned int fft_length,
 			   float phase_gain, float freq_gain, unsigned int id, 
@@ -457,10 +461,17 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   gr_complex * d_derotated_output;  // Pointer to output stream to send deroated symbols out
 
-  std::vector<gr_complex>    d_sym_position;
-  std::vector<unsigned char> d_sym_value_out;
+  // modulation parameters //
+  std::vector<gr_complex>    d_hdr_sym_position;
+  std::vector<unsigned char> d_hdr_sym_value_out;
+  unsigned int d_hdr_nbits;
+
+  std::vector<gr_complex>    d_data_sym_position;
+  std::vector<unsigned char> d_data_sym_value_out;
+  unsigned int d_data_nbits;
+
   std::vector<gr_complex>    d_dfe;
-  unsigned int d_nbits;
+
 
   unsigned char d_resid;
   unsigned int d_nresid;
@@ -484,8 +495,10 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
 
  protected:
-  digital_ofdm_frame_sink(const std::vector<gr_complex> &sym_position, 
-		     const std::vector<unsigned char> &sym_value_out,
+  digital_ofdm_frame_sink(const std::vector<gr_complex> &hdr_sym_position, 
+		     const std::vector<unsigned char> &hdr_sym_value_out,
+                     const std::vector<gr_complex> &data_sym_position,
+                     const std::vector<unsigned char> &data_sym_value_out,
 		     gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 		     unsigned int occupied_tones, unsigned int fft_length,
 		     float phase_gain, float freq_gain, unsigned int id, 
@@ -499,12 +512,14 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   
   bool header_ok();
   
-  unsigned char slicer(const gr_complex x);
+  unsigned char slicer_hdr(const gr_complex x);
   unsigned int demapper(const gr_complex *in,
 			unsigned char *out);
 
-  bool set_sym_value_out(const std::vector<gr_complex> &sym_position, 
+  bool set_hdr_sym_value_out(const std::vector<gr_complex> &sym_position, 
 			 const std::vector<unsigned char> &sym_value_out);
+  bool set_data_sym_value_out(const std::vector<gr_complex> &sym_position,
+                         const std::vector<unsigned char> &sym_value_out);
 
  public:
   ~digital_ofdm_frame_sink();
@@ -674,6 +689,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void slicer_ILP(gr_complex *x, gr_complex *closest_sym, unsigned char *bits, vector<gr_complex*> batched_sym_position,
 		  unsigned int ofdm_symbol_index, unsigned int subcarrier_index, gr_complex** sym_vec);
   void getSymOutBits_ILP(unsigned char *bits, int index);
+  void getSymOutBits_ILP_QPSK(unsigned char *bits, int index);
   void demodulate_ILP(FlowInfo *flowInfo);
   unsigned int demapper_ILP(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec, 
 			    vector<vector<gr_complex*> > batched_sym_position, FlowInfo *flowInfo, vector<gr_complex> *dfe_vec);
@@ -735,7 +751,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   /* alternative way of doing ILP, more incremental in nature */
   //float **d_euclid_dist;						// [subcarrier][2^batch_size]; records the euclid dist seen on each subcarrier, for each possibility in the table! //
-  float d_euclid_dist[MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS][4];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
+  float d_euclid_dist[MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS][16];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
   unsigned int demapper_ILP_2(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
                       vector<gr_complex*> batched_sym_position, FlowInfo *flowInfo,
                       vector<gr_complex> dfe_vec);
