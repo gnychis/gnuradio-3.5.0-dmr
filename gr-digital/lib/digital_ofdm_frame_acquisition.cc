@@ -264,6 +264,8 @@ digital_ofdm_frame_acquisition::general_work(int noutput_items,
     d_phase_count = 1;
   }
 
+  //log_symbols(out);
+
   //test_timestamp(1);				// enable to track tag propagation
   consume_each(1);
   return 1;
@@ -273,6 +275,7 @@ digital_ofdm_frame_acquisition::general_work(int noutput_items,
 bool
 digital_ofdm_frame_acquisition::open_log()
 {
+#if 0
   printf("open_log called\n"); fflush(stdout);
 
   // open the hestimates log file //
@@ -288,7 +291,36 @@ digital_ofdm_frame_acquisition::open_log()
             return false;
       }
   }
+#endif
+
+  // the rx signal log file //
+  char *filename = "acq_out.dat";
+  if ((d_fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
+     perror(filename);
+     return false;
+  }
+  else {
+      if((d_fp = fdopen (d_fd, true ? "wb" : "w")) == NULL) {
+            fprintf(stderr, "h estimates file cannot be opened\n");
+            close(d_fd);
+            return false;
+      }
+  }
+
   return true;
+}
+
+void
+digital_ofdm_frame_acquisition::log_symbols(gr_complex *out)
+{
+  if(!d_file_opened)
+  {
+      d_file_opened = open_log();
+      assert(d_file_opened);
+  }
+  assert(d_fp != NULL);
+  int count = ftell(d_fp);
+  count = fwrite_unlocked(&out[0], sizeof(gr_complex), d_occupied_carriers, d_fp);
 }
 
 void

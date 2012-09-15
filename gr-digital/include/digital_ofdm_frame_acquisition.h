@@ -123,6 +123,7 @@ protected:
   
   
   void test_timestamp(int); 
+  void log_symbols(gr_complex*);
 };
 
 

@@ -253,6 +253,9 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   d_log_open = false;
   d_log_open_native = false;
   printf("NULL_SYMBOL_COUNT: %d\n", NULL_SYMBOL_COUNT); fflush(stdout);
+
+  if(NUM_TRAINING_SYMBOLS > 0)
+     generateKnownSymbols();
 }
 
 digital_ofdm_mapper_bcv::~digital_ofdm_mapper_bcv(void)
@@ -314,6 +317,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 
     d_send_null = false;
     d_null_symbol_cnt = 0;
+    d_training_symbol_cnt = 0;
   }
 
   char *out_flag = 0;
@@ -358,13 +362,19 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 #endif
 	d_hdr_ofdm_index++;
      }
-     else if(d_fwd_index == 1 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT)) {	// lead_fwder: send NULL symbols to accomodate slave fwders
+     else if(d_training_symbol_cnt < NUM_TRAINING_SYMBOLS) {
+        memcpy(out, d_known_symbols, sizeof(gr_complex) * d_fft_length);
+        d_training_symbol_cnt++;
+     }
+     else if(d_fwd_index == 1 && (d_null_symbol_cnt < (NULL_SYMBOL_COUNT+NUM_TRAINING_SYMBOLS))) {	// lead_fwder: send NULL symbols to accomodate slave fwders
 	d_null_symbol_cnt++;
      }
      else if(!d_send_null) {
 
 	/* header has already been modulated, just send the payload *symbols* as it is */
  	copyOFDMSymbol(out, d_msg[0]->length());		
+	//logGeneratedTxSymbols(out);
+
 	//logNativeTxSymbols(out);
 	//printf("data--------- offset: %d\n", d_msg_offset[0]); fflush(stdout);
 	d_data_ofdm_index+=1;
@@ -901,7 +911,7 @@ digital_ofdm_mapper_bcv::fill_all_carriers_map() {
 void 
 digital_ofdm_mapper_bcv::logGeneratedTxSymbols(gr_complex *out) 
 {
-  printf("digital_ofdm_mapper_bcv::logGeneratedTxSymbols\n"); fflush(stdout);  
+  printf("digital_ofdm_mapper_bcv::logGeneratedTxSymbols\n"); fflush(stdout);
   if(!d_log_open) {
       char *filename = "tx_symbols.dat";
       int fd;
@@ -918,20 +928,26 @@ digital_ofdm_mapper_bcv::logGeneratedTxSymbols(gr_complex *out)
       }
       d_log_open = true;
   }
-  unsigned int half_tones = ceil((float) (d_occupied_carriers/2.0));
+
   unsigned int zeros_on_left = ceil((float (d_fft_length - d_occupied_carriers))/2.0);
-  
-  gr_complex *log_symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
-  memset(log_symbols, 0, sizeof(gr_complex) * d_occupied_carriers);
 
-  // copy the 1st half of the fft length except left-guard //
-  memcpy(log_symbols, out + zeros_on_left, sizeof(gr_complex) * half_tones);
+  gr_complex *log_symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_data_carriers.size());
+  memset(log_symbols, 0, sizeof(gr_complex) * d_data_carriers.size());
 
-  // copy the 2nd half of the fft_length except right-guard //
-  memcpy(log_symbols + half_tones, out + zeros_on_left + half_tones, sizeof(gr_complex) * half_tones);
+  int index = 0; int offset = 4;
+  for(int i = 0; i < d_all_carriers.size(); i++) {
+     if(d_all_carriers[i] == 0) {
+        //printf("zeros_on_left: %d, d: %d, offset: %d\n", zeros_on_left, d_data_carriers[index], offset); fflush(stdout);
+        //memcpy(log_symbols+index, out+zeros_on_left+d_data_carriers[index]-offset, sizeof(gr_complex));
+        memcpy(log_symbols+index, out+d_data_carriers[index], sizeof(gr_complex));
+        index++;
+     }
+     printf("\n");
+  }
+  assert(index == d_data_carriers.size());
 
-  int count = fwrite_unlocked(log_symbols, sizeof(gr_complex), d_occupied_carriers, d_fp_log);
-  //printf("count: %d written to tx_symbols.dat \n", count); fflush(stdout);
+  int count = fwrite_unlocked(log_symbols, sizeof(gr_complex), d_data_carriers.size(), d_fp_log);
+  printf("count: %d written to tx_symbols.dat, total: %d \n", count, ftell(d_fp_log)); fflush(stdout);
 
   free(log_symbols);
 }
@@ -1601,3 +1617,16 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   add_item_tag(1/*chan0*/, nitems_written(1), key, value, srcid);
   printf("(MAPPER) make_time_tag, at offset: %llu\n", nitems_written(1)); fflush(stdout);
 } 
+
+/* at BSPK, generate 2 training symbols (helps in deducing snr and noise variance) */
+inline void
+digital_ofdm_mapper_bcv::generateKnownSymbols() {
+   memset(d_known_symbols, 0, sizeof(gr_complex) * d_fft_length);
+   int size = d_hdr_constellation.size();
+
+   int k = 0;
+   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+      d_known_symbols[d_data_carriers[i]] = d_hdr_constellation[k%size];
+      k++;
+   }
+}

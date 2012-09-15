@@ -63,6 +63,7 @@
 #define NULL_OFDM_SYMBOLS (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1
 #define MAX_OFDM_SYMBOLS 170
 #define MAX_OCCUPIED_CARRIERS 88
+#define MAX_PKT_LEN 4096
 
 //#define MAX_OCCUPIED_CARRIERS 64
 //#define MAX_DATA_CARRIERS 48
@@ -439,9 +440,9 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   int exp_size, int fec_n, int fec_k, int degree);
 
  private:
-  enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_NULL, STATE_HAVE_HEADER};
+  enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_NULL, STATE_HAVE_TRAINING, STATE_HAVE_HEADER};
 
-  static const int MAX_PKT_LEN    = 4096;
+  //static const int MAX_PKT_LEN    = 4096;
 
   gr_msg_queue_sptr  d_target_queue;		// where to send the packet when received
   state_t            d_state;
@@ -690,6 +691,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 		  unsigned int ofdm_symbol_index, unsigned int subcarrier_index, gr_complex** sym_vec);
   void getSymOutBits_ILP(unsigned char *bits, int index);
   void getSymOutBits_ILP_QPSK(unsigned char *bits, int index);
+  void getSymOutBits_ILP_QAM16(unsigned char *bits, int index);
+
   void demodulate_ILP(FlowInfo *flowInfo);
   unsigned int demapper_ILP(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec, 
 			    vector<vector<gr_complex*> > batched_sym_position, FlowInfo *flowInfo, vector<gr_complex> *dfe_vec);
@@ -752,10 +755,14 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   /* alternative way of doing ILP, more incremental in nature */
   //float **d_euclid_dist;						// [subcarrier][2^batch_size]; records the euclid dist seen on each subcarrier, for each possibility in the table! //
   float d_euclid_dist[MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS][16];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
+
+  float d_batch_euclid_dist[MAX_BATCH_SIZE][MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS][16];
+  bool d_flag_euclid_dist[MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS];				// if set, then atleast one symbol was confident
+
   unsigned int demapper_ILP_2(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
                       vector<gr_complex*> batched_sym_position, FlowInfo *flowInfo,
                       vector<gr_complex> dfe_vec);
-  void slicer_ILP_2(gr_complex x, gr_complex& closest_sym, unsigned char *bits,
+  void slicer_ILP_2(gr_complex x, FlowInfo *flowInfo, gr_complex& closest_sym, unsigned char *bits,
                     gr_complex* batched_sym_position,
                     unsigned int ofdm_index, unsigned int subcarrier_index);
   void buildMap_ILP_2(gr_complex* coeffs, gr_complex* sym_position);
@@ -856,11 +863,30 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   /* post DFT approach to calculate the freq offset */
   void calculate_fine_offset(); 
-  gr_complex d_training_symbols[8*MAX_OCCUPIED_CARRIERS];
+  gr_complex d_training_symbols[NUM_TRAINING_SYMBOLS*MAX_OCCUPIED_CARRIERS];
   FILE *d_fp_training; 
   bool d_training_log_open;
 
   void adjust_H_estimate(int);
+
+  void logFrequencyDomainRxSymbols();
+  void openRxSymbolLog();
+
+  gr_complex d_known_symbols[NUM_TRAINING_SYMBOLS * MAX_OCCUPIED_CARRIERS];
+  float getAvgAmplificationFactor_NV(vector<gr_complex*> hestimates);
+  void calculateSNR();
+  void generateKnownSymbols();
+  bool d_parse_pkt;
+
+  float getMinDistanceInConstellation(gr_complex *constell);
+
+  void calculateSER(unsigned char msg[][MAX_PKT_LEN], int num_bytes);
+  gr_complex d_true_symbols[MAX_BATCH_SIZE * MAX_OFDM_SYMBOLS * MAX_DATA_CARRIERS];
+  bool d_log_SER_symbols_open; 
+  void modulateMsg(gr_complex* out, unsigned char *msg, int num_bytes);
+
+  long d_agg_total_symbols; 
+  long d_agg_correct_symbols;
 };
 
 

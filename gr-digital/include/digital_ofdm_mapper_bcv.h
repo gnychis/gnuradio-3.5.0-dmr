@@ -57,7 +57,7 @@
 
 //#define TESTING        0
 
-#define NULL_SYMBOL_COUNT (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1 
+#define NULL_SYMBOL_COUNT (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1
 
 // whitening random tuple (from ofdm_packet_utils.py) //
 unsigned char random_mask_tuple1[] = {
@@ -534,6 +534,10 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 #ifdef LSQ_COMPRESSION
   unsigned int d_degree;
 #endif
+
+  gr_complex d_known_symbols[MAX_FFT_LENGTH];
+  int d_training_symbol_cnt;
+  void generateKnownSymbols();
 };
 
 #endif

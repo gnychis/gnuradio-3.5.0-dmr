@@ -171,7 +171,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
     if(trigger[index] && !d_joint_rx_on) {
 
       unsigned int allowed_misalignment = 4;
-      unsigned int gap = (((sizeof(MULTIHOP_HDR_TYPE) * 8)/MAX_DATA_CARRIERS)+1) * (d_symbol_length);
+      unsigned int gap = (((sizeof(MULTIHOP_HDR_TYPE) * 8)/MAX_DATA_CARRIERS)+1+NUM_TRAINING_SYMBOLS) * (d_symbol_length);
       unsigned left_boundary = gap - allowed_misalignment;
       unsigned right_boundary = gap + allowed_misalignment;
 

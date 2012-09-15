@@ -25,8 +25,10 @@
 #include <gr_types.h>
 #include <string>
 
+#define MAX_FFT_LENGTH 96
 #define MAX_DATA_CARRIERS 72
 #define COMPRESSION_FACTOR 8
+#define NUM_TRAINING_SYMBOLS 0
 
 #define LSQ_COMPRESSION 0
 #define MAX_DEGREE 5

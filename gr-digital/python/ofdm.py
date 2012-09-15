@@ -418,7 +418,7 @@ class ofdm_demod(gr.hier_block2):
                                              self._size, self._fec_n, self._fec_k, options.degree)
 
         self.connect(self, self.ofdm_recv)
-	
+
 	manual = options.rx_manual								# apurv++: manual testing flag
 	if manual==0:
            	self.connect((self.ofdm_recv, 0), (self.ofdm_demod, 0))
@@ -444,7 +444,7 @@ class ofdm_demod(gr.hier_block2):
 
         if options.verbose:
             self._print_verbage()
-            
+
         self._watcher = _queue_watcher_thread(self._rcvd_pktq, callback, self._fec_n, self._fec_k, self._bits_per_symbol, self._size)
 	self._watcher_fwd = _queue_watcher_thread(self._out_pktq, fwd_callback)			# apurv++
 

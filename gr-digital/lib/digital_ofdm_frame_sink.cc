@@ -831,14 +831,10 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   } */
   int n_entries = pow(double (d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
   memset(d_euclid_dist, 0, sizeof(float) * d_data_carriers.size() * n_entries * MAX_OFDM_SYMBOLS);
-  /*
-  int n_data_carriers = d_data_carriers.size();
-  int n_entries = pow(2.0, double(d_batch_size));
-  d_euclid_dist = (float**) malloc(sizeof(float*) * n_data_carriers);
-  for(int i = 0; i < n_data_carriers; i++) {
-     d_euclid_dist[i] = (float*) malloc(sizeof(float) * n_entries); 	
-  }
-  */
+
+  memset(d_batch_euclid_dist, 0, sizeof(float) * d_batch_size * d_data_carriers.size() * n_entries * MAX_OFDM_SYMBOLS);
+  memset(d_flag_euclid_dist, 0, sizeof(bool) * d_data_carriers.size() * MAX_OFDM_SYMBOLS);
+
   d_fp_dfe_data = NULL; d_fp_dfe_pilot = NULL;
   d_log_dfe_data_open = false; d_log_dfe_pilot_open = false;
 
@@ -867,6 +863,20 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
 
   d_num_pkts_correct = 0;
   d_total_pkts_received = 0;
+
+  openRxSymbolLog();
+
+  if(NUM_TRAINING_SYMBOLS > 0) {
+     memset(d_training_symbols, 0, NUM_TRAINING_SYMBOLS * MAX_OCCUPIED_CARRIERS * sizeof(gr_complex));
+     generateKnownSymbols();
+     d_parse_pkt = false;
+  }
+ 
+
+  memset(d_true_symbols, 0, sizeof(gr_complex) * d_data_carriers.size() * MAX_OFDM_SYMBOLS);
+  d_log_SER_symbols_open = false;
+
+  d_agg_total_symbols = 0; d_agg_correct_symbols = 0;
 }
 
 void
@@ -1151,6 +1161,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		if(1) {
 #endif
                      d_state = STATE_HAVE_HEADER;
+		     d_parse_pkt = true;
 		     //d_state = STATE_HAVE_NULL; d_null_symbols = 0;
 		     d_curr_ofdm_symbol_index = 0;
 		     d_num_ofdm_symbols = ceil(((float) (d_packetlen * 8))/(d_data_carriers.size() * d_data_nbits));
@@ -1182,6 +1193,12 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		d_pending_senders--;
 		enter_search();
 	     }
+
+             if(NUM_TRAINING_SYMBOLS > 0) {
+                d_state = STATE_HAVE_TRAINING;
+                d_null_symbols = 0;
+             }
+
 	  } else {
 	     enter_search(); 						// don't care
 	     reset_demapper();
@@ -1193,6 +1210,22 @@ digital_ofdm_frame_sink::work (int noutput_items,
           enter_search();           					// bad header
 	  reset_demapper();
         }
+    }
+    break;
+
+  case STATE_HAVE_TRAINING:
+    //equalizeSymbols(&in[0], &in_estimates[0]);
+    memcpy(&d_training_symbols[d_null_symbols*MAX_OCCUPIED_CARRIERS], &in[0], sizeof(gr_complex) * d_occupied_carriers);
+    d_null_symbols++;
+    if(d_null_symbols == NUM_TRAINING_SYMBOLS) {
+        //calculate_fine_offset();
+        calculateSNR();
+	if(d_parse_pkt) {
+            d_state = STATE_HAVE_HEADER;
+	    d_parse_pkt = false;
+	} else {
+	    enter_search();
+	}
     }
     break;
 
@@ -1257,7 +1290,9 @@ digital_ofdm_frame_sink::work (int noutput_items,
 	if(d_dst && 0) {
 	    logCorrectedSymbols(flowInfo);
 	}
-
+	
+        // only logs the symbols //
+        //logFrequencyDomainRxSymbols();
 
 #ifdef USE_PILOT
 	if(d_dst) {
@@ -1354,7 +1389,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 inline void
 digital_ofdm_frame_sink::equalizeSymbols(gr_complex *in, gr_complex *in_estimates)
 {
-   for(unsigned int i = 0; i < d_occupied_carriers; i++)
+   for(unsigned int i = 0; i < d_occupied_carriers; i++) 
         in[i] = in[i] * in_estimates[i];
 }
 
@@ -1481,16 +1516,11 @@ digital_ofdm_frame_sink::prepareForNewBatch()
   }
   flow_info->reduced_coeffs.clear();
 
-  /* re-initialize d_euclid_dist for the this new batch 
-  int n_entries = pow(2.0, double(d_batch_size));
-  for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
-      for(unsigned int j = 0; j < n_entries; j++) {
-          d_euclid_dist[i][j] = 0.0;
-      }
-  } */
- 
   int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
   memset(d_euclid_dist, 0, sizeof(float) * d_data_carriers.size() * n_entries * MAX_OFDM_SYMBOLS);
+
+  memset(d_batch_euclid_dist, 0, sizeof(float) * d_batch_size * d_data_carriers.size() * n_entries * MAX_OFDM_SYMBOLS);
+  memset(d_flag_euclid_dist, 0, sizeof(bool) * d_data_carriers.size() * MAX_OFDM_SYMBOLS);
 
   printf("prepareForNewBatch ends, size: %d, %d\n", flow_info->innovative_pkts.size(), d_flowInfoVector.size()); fflush(stdout);
   d_avg_evm_error = 0.0;
@@ -3457,7 +3487,7 @@ digital_ofdm_frame_sink::findClosestSymbol(gr_complex *x, gr_complex **closest_s
 inline void
 digital_ofdm_frame_sink::calculate_fine_offset() {
   
-  int num = NULL_OFDM_SYMBOLS;		//2;
+  int num = NUM_TRAINING_SYMBOLS;		//2;
   /*
   for(int o = 0; o < num - 1; o++) {  
   gr_complex *rx_symbols1 = &(d_training_symbols[o*MAX_OCCUPIED_CARRIERS]);
@@ -3910,7 +3940,14 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      memcpy(symbols, pInfo->symbols, sizeof(gr_complex) * n_symbols);
 
      phase[i] = rand() % 360 + 1;
-     float amp = getAvgAmplificationFactor(pInfo->hestimates);;
+     float amp = getAvgAmplificationFactor(pInfo->hestimates);
+
+#if 0
+     float LO = 1.0; float HI = 2.5; 
+     float extra_amp = LO + (float)rand()/((float)RAND_MAX/(HI-LO));
+     printf("amp: %.3f, extra_amp: %.3f\n", amp, extra_amp); fflush(stdout);
+     amp += extra_amp;
+#endif
      coeffs[i] = amp * gr_expj(phase[i] * M_PI/180);
 
 #ifndef DEBUG
@@ -4680,6 +4717,37 @@ digital_ofdm_frame_sink::getSymOutBits_ILP_QPSK(unsigned char *bits, int index) 
   assert(false);
 }
 
+/* plain qam-16 demod */
+void
+digital_ofdm_frame_sink::getSymOutBits_ILP_QAM16(unsigned char *bits, int index) {
+  if(d_batch_size == 1) {
+     assert(index < 16);
+     switch(index) {
+        case 0: bits[0] = 0; break;
+        case 1: bits[0] = 1; break;
+        case 2: bits[0] = 2; break;
+        case 3: bits[0] = 3; break;
+        case 4: bits[0] = 4; break;
+        case 5: bits[0] = 5; break;
+        case 6: bits[0] = 6; break;
+        case 7: bits[0] = 7; break;
+        case 8: bits[0] = 8; break;
+        case 9: bits[0] = 9; break;
+        case 10: bits[0] = 10;break;
+        case 11: bits[0] = 11; break;
+        case 12: bits[0] = 12; break;
+        case 13: bits[0] = 13; break;
+        case 14: bits[0] = 14; break;
+        case 15: bits[0] = 15; break;
+     }
+     return;
+  }
+  else if(d_batch_size == 2) {
+     assert(false);
+  }
+  assert(false);
+}
+
 #if 0
 void
 digital_ofdm_frame_sink::demodulate_ILP(FlowInfo *flowInfo)
@@ -5274,7 +5342,7 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
   }
   reset_demapper();
 #endif
-
+ 
   for(unsigned int o = 0; o < d_num_ofdm_symbols; o++) {
 #ifdef USE_PILOT
 
@@ -5319,6 +5387,8 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
          jj++;
       } //while
   }
+
+  calculateSER(packet, d_packetlen);
 
   d_avg_evm_error /= ((double) d_num_ofdm_symbols);
   d_total_pkts_received++;
@@ -5371,6 +5441,7 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
       free(sym_position);
   }
 #endif
+  
   printf("demodulate_ILP_2 end, pkt_no: %d\n\n", d_pkt_num); fflush(stdout);
 }
 
@@ -5663,7 +5734,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
 	carrier[s] = gr_expj(-est_angle);
      }	
 
-     printf("d_end_angle: %.3f\n", d_end_angle[s]); fflush(stdout);
+     //printf("d_end_angle: %.3f\n", d_end_angle[s]); fflush(stdout);
      //printf("sender: %d, d_end_angle: %f, d_phase: %f, d_freq: %f\n", s, d_end_angle[s], d_phase[s], d_freq[s]); fflush(stdout);
 
      interpolate_data_dfe(dfe_pilot[s], dfe_data[s], false, NULL, gr_complex(0.0, 0.0));
@@ -5694,7 +5765,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot(unsigned int ofdm_symbol_index, ve
 
 	 // slice it //
 	 sigrot = sym_vec[d_data_carriers[i]];
-	 slicer_ILP_2(sigrot, closest_sym, bits, sym_position, ofdm_symbol_index, i);
+	 slicer_ILP_2(sigrot, flowInfo, closest_sym, bits, sym_position, ofdm_symbol_index, i);
 
          assert((8 - byte_offset) >= d_data_nbits);
 
@@ -5777,7 +5848,7 @@ digital_ofdm_frame_sink::demapper_ILP_2(unsigned int ofdm_symbol_index, vector<u
                 sigrot = sym_vec[d_data_carriers[i]];
           }
 
-          slicer_ILP_2(sigrot, closest_sym, bits, batched_sym_position[i], ofdm_symbol_index, i);
+          slicer_ILP_2(sigrot, flowInfo, closest_sym, bits, batched_sym_position[i], ofdm_symbol_index, i);
 
           // update accum_error for this packet //
           accum_error += (sigrot * conj(closest_sym));
@@ -5821,13 +5892,65 @@ digital_ofdm_frame_sink::demapper_ILP_2(unsigned int ofdm_symbol_index, vector<u
 
 /* calculate the new euclid_dist after putting this packet's symbols in. Also update the batch history for d_euclid_dist */
 void
-digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, gr_complex& closest_sym, unsigned char *bits,
+digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, FlowInfo *flowInfo, gr_complex& closest_sym, unsigned char *bits,
                                       gr_complex* batched_sym_position, 
 				      unsigned int ofdm_index, unsigned int subcarrier_index)
 {
   printf("slicer_ILP_2\n"); fflush(stdout);
+  int inno_pkts = flowInfo->innovative_pkts.size();
+
   unsigned int min_index = 0;
   assert(d_num_ofdm_symbols < MAX_OFDM_SYMBOLS);						// upper capped for now! 
+
+#if 0
+  /* if first packet: 
+	 	decode it the usual way
+		fill d_euclid_dist
+		record the d_min_euclid_dist for each symbol
+    
+     if subsequent packet:
+	 	first figure out the d_min_euclid_dist
+	        then use only the candidates which pass the confidence test
+		do the joint decoding
+ */
+
+  d_batch_euclid_dist[inno_pkts-1][ofdm_index][subcarrier_index][0] = norm(x - batched_sym_position[0]);
+  float min_euclid_dist = d_batch_euclid_dist[inno_pkts-1][ofdm_index][subcarrier_index][0];
+
+  unsigned int table_size = pow(double(d_data_sym_position.size()), double(d_batch_size));
+  for(unsigned int j = 1; j < table_size; j++) {
+     float euclid_dist = norm(x - batched_sym_position[j]);
+     d_batch_euclid_dist[inno_pkts-1][ofdm_index][subcarrier_index][j] = euclid_dist;
+
+     if(euclid_dist < min_euclid_dist) {
+	min_euclid_dist = euclid_dist;
+	min_index = j;
+     }
+  } 
+  
+  // if enough confidence, then use this symbol in decoding, else use whatever knowledge already // 
+  float confidence_dt = getMinDistanceInConstellation(batched_sym_position);
+  bool confidentSymbol = (min_euclid_dist <= confidence_dt)?true:false;
+  min_euclid_dist = 0.0;
+  int new_min_index = -1;
+  for(unsigned int j = 0; j < table_size; j++) {
+      if(confidentSymbol) {
+     	 d_euclid_dist[ofdm_index][subcarrier_index][j] += d_batch_euclid_dist[inno_pkts-1][ofdm_index][subcarrier_index][j];
+	 d_flag_euclid_dist[ofdm_index][subcarrier_index] = true;
+      }
+
+      float euclid_dist = d_euclid_dist[ofdm_index][subcarrier_index][j];
+      if(euclid_dist < min_euclid_dist) {
+          min_euclid_dist = euclid_dist;
+          new_min_index = j;
+      }
+  } 
+
+  if(d_flag_euclid_dist[ofdm_index][subcarrier_index]) {
+     min_index = new_min_index;
+  }
+ 
+#else
   d_euclid_dist[ofdm_index][subcarrier_index][0] += norm(x - batched_sym_position[0]);
   float min_euclid_dist = d_euclid_dist[ofdm_index][subcarrier_index][0];
 
@@ -5856,6 +5979,7 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, gr_complex& closest_sym, uns
 	
        d_euclid_dist[ofdm_index][subcarrier_index][j] = euclid_dist;			// update d_euclid_dist with this batch's info //
   }
+#endif
 
   // assign closest_sym and bits // 
   closest_sym = batched_sym_position[min_index];            // closest_sym: the ideal position where R should hv been at //
@@ -5864,6 +5988,10 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, gr_complex& closest_sym, uns
       getSymOutBits_ILP(bits, min_index);
   else if(d_data_nbits == 2)
       getSymOutBits_ILP_QPSK(bits, min_index);
+  else if(d_data_nbits == 4) {
+      assert(d_batch_size == 1);
+      getSymOutBits_ILP_QAM16(bits, min_index);
+  }
 
   d_avg_evm_error += min_euclid_dist;
 
@@ -6138,7 +6266,7 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
   /* if lead forwarder, then go after the 'guard' duration, else wait for lead sender's header+preamble */
   uint32_t num_samples = (null_ofdm_symbols * (d_fft_length+cp_length));
   if(d_fwd_index == 2) {
-      num_samples += (d_num_hdr_ofdm_symbols+1) * (d_fft_length+cp_length);
+      num_samples += (d_num_hdr_ofdm_symbols+1+NUM_TRAINING_SYMBOLS) * (d_fft_length+cp_length);
   }
 
   double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
@@ -6420,11 +6548,13 @@ digital_ofdm_frame_sink::buildMap_pilot_SRC(FlowInfo *flowInfo, gr_complex* sym_
          sym_position[j++] = (((coeffs[0] *  d_data_sym_position[1])) + (coeffs[1] *  d_data_sym_position[0]));
          sym_position[j++] = (((coeffs[0] *  d_data_sym_position[1])) + (coeffs[1] *  d_data_sym_position[1]));
 #endif
+	 if(o == 0 && subcarrier_index == 0) 
+	       cout << "delta_coeff: " << (arg(coeffs[0]) - arg(coeffs[1])) * 180/M_PI << endl;
 	 for(unsigned int m1 = 0; m1 < d_data_sym_position.size(); m1++) {
 	     for(unsigned int m2 = 0; m2 < d_data_sym_position.size(); m2++) {
 		gr_complex pos = (coeffs[0] * d_data_sym_position[m1]) + (coeffs[1] * d_data_sym_position[m2]);
-		std::cout<<"sym_pos:: " << pos <<" = " << coeffs[0] << " * " << d_data_sym_position[m1] << " + " << coeffs[1] << " * " << d_data_sym_position[m2] << endl;
-		sym_position[j++] = pos;
+		//std::cout<<"sym_pos:: " << pos <<" = " << coeffs[0] << " * " << d_data_sym_position[m1] << " + " << coeffs[1] << " * " << d_data_sym_position[m2] << endl;
+		sym_position[j++] = pos; 
                 //printf("sym_position[%d]: (%f, %f)\n", j, pos.real(), pos.imag());
 	     }
          }
@@ -6492,8 +6622,8 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot_SRC(unsigned int ofdm_symbol_index
 
          // slice it //
          sigrot = sym_vec[d_data_carriers[i]];
-         slicer_ILP_2(sigrot, closest_sym, bits, sym_position, ofdm_symbol_index, i);
-
+         slicer_ILP_2(sigrot, flowInfo, closest_sym, bits, sym_position, ofdm_symbol_index, i);
+	
          assert((8 - byte_offset) >= d_data_nbits);
 
          for(unsigned int k = 0; k < d_batch_size; k++)
@@ -6504,7 +6634,7 @@ digital_ofdm_frame_sink::demapper_ILP_2_pilot_SRC(unsigned int ofdm_symbol_index
 
      if(byte_offset == 8) {
         for(int k = 0; k < d_batch_size; k++) {
-            printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
+            //printf("k: %d, demod_byte: %x (%d) \n", k, partial_byte[k], partial_byte[k]); fflush(stdout);
             //assert(false);
             out_vec[k][bytes_produced] = partial_byte[k];
             partial_byte[k] = 0;
@@ -6595,10 +6725,274 @@ inline void
 digital_ofdm_frame_sink::adjust_H_estimate(int sender)
 {
   gr_complex *hestimate = d_pktInfo->hestimates[sender];
-  float delta_angle = d_end_angle[sender] - d_start_angle[sender] + d_slope_angle[sender];
+  float delta_angle = d_end_angle[sender] - d_start_angle[sender] + ((NUM_TRAINING_SYMBOLS+1) * d_slope_angle[sender]);
   printf("adjust_H_estimate: %.3f\n", delta_angle); fflush(stdout);
   for(unsigned int i = 0; i < d_occupied_carriers; i++) {
      hestimate[i] *= gr_expj(-delta_angle);
   }
 }
 #endif
+
+inline void
+digital_ofdm_frame_sink::openRxSymbolLog() {
+  const char *filename = "rx_symbols.dat";
+  int fd;
+  if ((fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
+     perror(filename);
+     assert(false);
+  }
+  else {
+      if((d_fp_rx_symbols = fdopen (fd, true ? "wb" : "w")) == NULL) {
+            fprintf(stderr, "rx symbols file cannot be opened\n");
+            close(fd);
+	    assert(false);
+      }
+  }
+}
+
+inline void 
+digital_ofdm_frame_sink::logFrequencyDomainRxSymbols() {
+  // log rx input symbols //
+  int count = ftell(d_fp_rx_symbols);
+
+  for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
+     gr_complex *rx_symbols = &(d_pktInfo->symbols[i*d_occupied_carriers]);
+     for(unsigned int j = 0; j < d_occupied_carriers; j++) {
+        if(d_all_carriers[j] == 0) {
+	   count = fwrite_unlocked(&rx_symbols[j], sizeof(gr_complex), 1, d_fp_rx_symbols);	
+        }
+     }
+  }
+}
+
+inline float
+digital_ofdm_frame_sink::getAvgAmplificationFactor_NV(vector<gr_complex*> hestimates)
+{
+  assert(NUM_TRAINING_SYMBOLS > 0);
+  unsigned int n_data_carriers = d_data_carriers.size();
+  float avg_atten[MAX_SENDERS];
+  memset(avg_atten, 0, sizeof(float) * MAX_SENDERS);
+
+  int n_senders = hestimates.size();
+  for(unsigned int i = 0; i < n_senders; i++) {
+      gr_complex *hest = hestimates[i];
+      for(unsigned int j = 0; j < n_data_carriers; j++) {
+         avg_atten[i] += abs(gr_complex(1.0, 0.0)/hest[d_data_carriers[j]]);
+      }
+      avg_atten[i] /= (float) n_data_carriers;
+  }
+  
+  float noise_var = 0.0;
+  for(unsigned int i = 0; i < d_occupied_carriers; i++) {
+	//std::cout << " amp_NV: training:: " << d_training_symbols[i] << " " << d_training_symbols[i+d_occupied_carriers] << endl;
+        noise_var += abs(pow((d_training_symbols[i] - d_training_symbols[i+d_occupied_carriers]), 2.0)/gr_complex(2.0, 0.0));
+  }
+  noise_var = noise_var/d_occupied_carriers; 
+
+  printf("amp_NV, h: %f, noise_var: %f\n", avg_atten[0], noise_var); fflush(stdout);
+  return sqrt(1.0/(pow(avg_atten[0], 2.0) + pow(noise_var, 2.0)));
+}
+
+#if 0
+/* based on EVM which in turn is calculated from the training symbols sent in the same constellation 
+   as the data is sent
+   ref: http://www.eng.usf.edu/~hmahmoud/pdf/pubs/hmahmoud_WCOMM09.pdf
+   "Error Vector Magnitude to SNR Conversion for Nondata-Aided Receivers"
+*/ 
+inline void
+digital_ofdm_frame_sink::calculateSNR1() {
+   float evm = 0.0; 
+   for(unsigned int i = 0; i < NUM_TRAINING_SYMBOLS; i++) {
+       int ti = i * d_occupied_carriers;
+       for(unsigned int j = 0; j < d_occupied_carriers; j+=2) {
+           std::cout<< "training: " << d_training_symbols[ti+j] << " known: " << d_known_symbols[j] << " diff: " << d_training_symbols[ti+j] - d_known_symbols[j] << endl;
+           evm += pow(abs(d_training_symbols[ti+j] - d_known_symbols[j]), 2.0);
+       }
+   }
+   evm /= (d_occupied_carriers);
+
+   float P_0 = 0.0;
+   int M = d_hdr_sym_position.size();
+   /* calculate p0 */
+   for(unsigned int i = 0; i < M; i++) {
+       P_0 += pow(abs(d_hdr_sym_position[i]), 2.0);
+   }
+   P_0 /= M;
+
+   float evm_rms = sqrt(evm/P_0);
+   float snr = 1/(pow(evm_rms, 2.0));
+   printf("SNR: %f, EVM_RMS: %f, EVM: %f, P: %f\n", snr, evm_rms, evm , P_0); fflush(stdout);
+}
+#endif
+
+inline void
+digital_ofdm_frame_sink::calculateSNR() {
+  assert(NUM_TRAINING_SYMBOLS > 0);
+  float noise_var = 0.0;
+  float signal_power = 0.0;
+
+  int n_data_carriers = d_data_carriers.size();
+  for(unsigned int i = 0; i < n_data_carriers; i++) {
+      int di = d_data_carriers[i];
+      //std::cout << " amp_NV: training:: " << d_training_symbols[i] << " " << d_training_symbols[i+d_occupied_carriers] << endl;
+      noise_var += norm(d_training_symbols[di] - d_training_symbols[di+d_occupied_carriers]);
+      signal_power += norm(d_training_symbols[di]);
+  }
+
+  noise_var = noise_var/(2*n_data_carriers);
+  signal_power /= (n_data_carriers);
+  float snr_ratio = signal_power/noise_var;
+
+  float snr_db = 10*log10(snr_ratio);
+  printf("SNR_DB: %.3f, signal: %.6f, noise_var: %.6f\n", snr_db, signal_power, noise_var); fflush(stdout);
+}
+
+/* generate 2 (base modulation) training symbols (helps in deducing snr and noise variance) */
+inline void
+digital_ofdm_frame_sink::generateKnownSymbols() {
+   assert(NUM_TRAINING_SYMBOLS > 0);
+   memset(d_known_symbols, 0, sizeof(gr_complex) * d_occupied_carriers);
+
+   int M = d_hdr_sym_position.size();
+
+   int k = 0;
+   for(unsigned int i = 0; i < d_occupied_carriers; i++) {
+      d_known_symbols[i] = d_hdr_sym_position[k%M];
+      k++;
+   }
+}
+
+inline float
+digital_ofdm_frame_sink::getMinDistanceInConstellation(gr_complex *constell) {
+   int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size));
+
+   // find the min dist between any 2 points //
+   float min_dt = 0.0;
+   for(int i = 0; i < n_entries; i++) {
+      for(int j = i + 1; j < n_entries; j++) {
+	  float dt = norm(constell[i] - constell[j]);
+	  if(dt < min_dt) {
+	      min_dt = dt;
+	  }
+      }
+   }
+   return min_dt;
+}
+
+/* calculates both BER and SER for each batch from the corresponding demodulated msgs
+   - first modulate the message again (based on the native modulation)
+   - compare against the symbols
+*/
+void
+digital_ofdm_frame_sink::calculateSER(unsigned char msg[][MAX_PKT_LEN], int num_bytes) {
+   int carriers = d_data_carriers.size();
+
+   // read the true native symbols for each batch //
+   if(!d_log_SER_symbols_open) {
+      FILE *fp = NULL;
+      const char *filename = "native_symbols.dat";
+      int fd;
+      if ((fd = open (filename, O_RDONLY|OUR_O_LARGEFILE|OUR_O_BINARY, 0664)) < 0) {
+         perror(filename);
+         assert(false);
+      }
+      else {
+         if((fp = fdopen (fd, true ? "rb" : "r")) == NULL) {
+            close(fd);
+            assert(false);
+         }
+      }
+      d_log_SER_symbols_open = true;
+
+      int count = fread_unlocked(d_true_symbols, sizeof(gr_complex), d_batch_size * d_num_ofdm_symbols * carriers, fp);
+      assert(count == d_batch_size * d_num_ofdm_symbols * carriers);
+   }
+
+   // modulate the symbols //
+   gr_complex *symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_batch_size * d_num_ofdm_symbols * carriers);
+   memset(symbols, 0, sizeof(gr_complex) * d_batch_size * d_num_ofdm_symbols * carriers);
+
+   for(unsigned int k = 0; k < d_batch_size; k++) 
+      modulateMsg(&symbols[k*d_num_ofdm_symbols*carriers], msg[k], num_bytes);
+
+   // compare: but exclude the first and the last symbol, since they aren't same across packets //
+   int correct_symbols = 0;
+   for(unsigned int i = 1; i < d_num_ofdm_symbols-1; i++) {
+       int index = i * carriers;
+       for(unsigned int j = 0; j < carriers; j++) {
+	   //cout<<"true: " << d_true_symbols[index+j]<<" rx: "<<symbols[index+j]<<endl;
+	   if(d_true_symbols[index+j] == symbols[index+j]) 
+	      correct_symbols++;	  
+       }
+   }
+
+   int total_symbols = (d_num_ofdm_symbols-2) * carriers;
+   float SER = ((float)correct_symbols)/(total_symbols);
+
+   d_agg_total_symbols += total_symbols;
+   d_agg_correct_symbols += correct_symbols;
+   float agg_SER = ((float)d_agg_correct_symbols)/(d_agg_total_symbols);
+   printf("SER:: %.3f, correct_symbols: %d, total_symbols: %d -------------- aggSER: %.3f\n", SER, correct_symbols, total_symbols, agg_SER); fflush(stdout);
+
+   free(symbols);
+}
+
+void
+digital_ofdm_frame_sink::modulateMsg(gr_complex* out, unsigned char *msg, int num_bytes)
+{
+  unsigned int msg_offset = 0, bit_offset = 0, resid = 0, nresid = 0;
+  unsigned char msgbytes;
+  unsigned int i = 0;
+  while(1) {
+
+    //unsigned int i = 0;
+    unsigned char bits = 0;
+
+    while((msg_offset < num_bytes)) { //&& (i < d_data_carriers.size())) 
+
+       // need new data to process
+       if(bit_offset == 0) {
+          msgbytes = msg[msg_offset];
+       }
+
+       if(nresid > 0) {
+          // take the residual bits, fill out nbits with info from the new byte, and put them in the symbol
+         resid |= (((1 << nresid)-1) & msgbytes) << (d_data_nbits - nresid);
+         bits = resid;
+
+	 out[i] = d_data_sym_position[bits];
+	 i++;
+
+	 bit_offset += nresid;
+	 nresid = 0;
+	 resid = 0;
+       }
+       else {
+         if((8 - bit_offset) >= d_data_nbits) {  // test to make sure we can fit nbits
+           // take the nbits number of bits at a time from the byte to add to the symbol
+           bits = ((1 << d_data_nbits)-1) & (msgbytes >> bit_offset);
+	   bit_offset += d_data_nbits;
+
+	   out[i] = d_data_sym_position[bits];
+	   i++;
+	 }
+	 else {  // if we can't fit nbits, store them for the next 
+           // saves d_nresid bits of this message where d_nresid < d_data_nbits
+           unsigned int extra = 8-bit_offset;
+	   resid = ((1 << extra)-1) & (msgbytes >> bit_offset);
+	   bit_offset += extra;
+	   nresid = d_data_nbits - extra;
+	 }
+       }
+
+       if(bit_offset == 8) {
+         bit_offset = 0;
+         msg_offset++;
+       }
+    }
+
+    if(msg_offset == num_bytes) {
+	break;
+    }
+  }
+}
