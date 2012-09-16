@@ -53,7 +53,7 @@ using namespace std;
 #define UNCORRECTED_REPLAY 0
 #define CORRECTED_REPLAY 1
 
-#define SEND_ACK_ETHERNET 1
+//#define SEND_ACK_ETHERNET 1
 
 #define VERBOSE 0
 //#define SCALE 1e3
