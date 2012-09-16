@@ -53,7 +53,7 @@ using namespace std;
 #define UNCORRECTED_REPLAY 0
 #define CORRECTED_REPLAY 1
 
-//#define SEND_ACK_ETHERNET 1
+#define SEND_ACK_ETHERNET 1
 
 #define VERBOSE 0
 //#define SCALE 1e3
@@ -5914,14 +5914,17 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, FlowInfo *flowInfo, gr_compl
 		do the joint decoding
  */
 
-  d_batch_euclid_dist[inno_pkts-1][ofdm_index][subcarrier_index][0] = norm(x - batched_sym_position[0]);
+  d_batch_euclid_dist[inno_pkts-1][ofdm_index][subcarrier_index][0] = abs(x - batched_sym_position[0]);
   float min_euclid_dist = d_batch_euclid_dist[inno_pkts-1][ofdm_index][subcarrier_index][0];
 
+  printf("min_euclid_dist:: %.6f\n", min_euclid_dist); fflush(stdout);
   unsigned int table_size = pow(double(d_data_sym_position.size()), double(d_batch_size));
   for(unsigned int j = 1; j < table_size; j++) {
-     float euclid_dist = norm(x - batched_sym_position[j]);
+     float euclid_dist = abs(x - batched_sym_position[j]);
      d_batch_euclid_dist[inno_pkts-1][ofdm_index][subcarrier_index][j] = euclid_dist;
 
+     //cout<<"pt: "<<batched_sym_position[j] << " x: " << x << endl;
+     //printf("index: %d, euclid_dist: %.4f, min: %.4f\n", j, euclid_dist, min_euclid_dist); fflush(stdout);
      if(euclid_dist < min_euclid_dist) {
 	min_euclid_dist = euclid_dist;
 	min_index = j;
@@ -5931,12 +5934,15 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, FlowInfo *flowInfo, gr_compl
   // if enough confidence, then use this symbol in decoding, else use whatever knowledge already // 
   float confidence_dt = getMinDistanceInConstellation(batched_sym_position);
   bool confidentSymbol = (min_euclid_dist <= confidence_dt)?true:false;
-  min_euclid_dist = 0.0;
+  if(confidentSymbol) {
+     d_flag_euclid_dist[ofdm_index][subcarrier_index] = true;
+  }
+  printf("confidence_dt: %.3f, min_euclid_dist: %.5f, min_index: %d\n", confidence_dt, min_euclid_dist, min_index); fflush(stdout);
+  min_euclid_dist = 1000.0;
   int new_min_index = -1;
   for(unsigned int j = 0; j < table_size; j++) {
       if(confidentSymbol) {
      	 d_euclid_dist[ofdm_index][subcarrier_index][j] += d_batch_euclid_dist[inno_pkts-1][ofdm_index][subcarrier_index][j];
-	 d_flag_euclid_dist[ofdm_index][subcarrier_index] = true;
       }
 
       float euclid_dist = d_euclid_dist[ofdm_index][subcarrier_index][j];
@@ -6867,10 +6873,10 @@ digital_ofdm_frame_sink::getMinDistanceInConstellation(gr_complex *constell) {
    int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size));
 
    // find the min dist between any 2 points //
-   float min_dt = 0.0;
+   float min_dt = 1000.0;
    for(int i = 0; i < n_entries; i++) {
       for(int j = i + 1; j < n_entries; j++) {
-	  float dt = norm(constell[i] - constell[j]);
+	  float dt = abs(constell[i] - constell[j]);
 	  if(dt < min_dt) {
 	      min_dt = dt;
 	  }
