@@ -65,6 +65,8 @@
 #define MAX_OCCUPIED_CARRIERS 88
 #define MAX_PKT_LEN 4096
 
+//#define MIMO_RECEIVER 1
+
 //#define MAX_OCCUPIED_CARRIERS 64
 //#define MAX_DATA_CARRIERS 48
 
@@ -887,6 +889,13 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   long d_agg_total_symbols; 
   long d_agg_correct_symbols;
+
+#ifdef MIMO_RECEIVER
+  int d_mimo_sock;
+  void open_mimo_sock();
+  void waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_SIZE][MAX_PKT_LEN]);
+#endif
+
 };
 
 

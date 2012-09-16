@@ -864,6 +864,10 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   d_num_pkts_correct = 0;
   d_total_pkts_received = 0;
 
+#ifdef MIMO_RECEIVER
+  open_mimo_sock();
+#endif
+
   openRxSymbolLog();
 
   if(NUM_TRAINING_SYMBOLS > 0) {
@@ -5343,6 +5347,28 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
   reset_demapper();
 #endif
  
+#ifdef MIMO_RECEIVER
+  // first fill up the d_euclid_dist //
+  for(unsigned int o = 0; o < d_num_ofdm_symbols; o++) {
+      unsigned int bytes_decoded = demapper_ILP_2_pilot_SRC(o, bytes_out_vec, flowInfo, dfe_pilot[0], interpolated_coeffs);   // same # of bytes decoded/batch
+  } 
+  waitForDecisionFromMimo(packet);
+
+  int n_entries = pow(2.0, double(d_batch_size));
+  memset(d_euclid_dist, 0, sizeof(float) * d_data_carriers.size() * n_entries * MAX_OFDM_SYMBOLS);
+#if 0
+  batch_decoded = true;
+  for(unsigned int k = 0; k < d_batch_size; k++) {
+      msg[k] = gr_make_message(0, d_packet_whitener_offset, 0, d_packetlen);
+      memcpy(msg[k]->msg(), packet[k], d_packetlen);
+      bool crc_valid = crc_check(msg[k]->to_string(), decoded_msg[k]);
+      printf("crc valid: %d\n", crc_valid); fflush(stdout);
+      if(crc_valid == 0) {
+	 batch_correct = false;
+      }
+  }
+#endif
+#else // MIMO_RECEIVER
   for(unsigned int o = 0; o < d_num_ofdm_symbols; o++) {
 #ifdef USE_PILOT
 
@@ -5419,6 +5445,7 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
       //if(batch_correct) d_target_queue->insert_tail(msg[k]);
       msg[k].reset();
   } 
+#endif  // MIMO_RECEIVER
 
 #ifdef USE_PILOT
 #ifndef LSQ_COMPRESSION
@@ -6265,7 +6292,7 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
   int decimation = 128;
   double rate = 1.0/decimation;
 
-  int null_ofdm_symbols = 2000;
+  int null_ofdm_symbols = 2500;
 
   int cp_length = d_fft_length/4;
 
@@ -7002,3 +7029,82 @@ digital_ofdm_frame_sink::modulateMsg(gr_complex* out, unsigned char *msg, int nu
     }
   }
 }
+
+#ifdef MIMO_RECEIVER
+inline void
+digital_ofdm_frame_sink::open_mimo_sock() 
+{
+  /* mimo server details */
+  const char *src_ip_addr = "128.83.120.84"; //"128.83.143.15";
+  int port = 9000;
+  struct sockaddr_in dest;
+
+  /* create socket */
+  d_mimo_sock = socket(PF_INET, SOCK_STREAM, 0);
+  if(d_mimo_sock != -1) {
+    printf("@ socket created at the destination SUCCESS\n"); fflush(stdout);
+  }
+
+  /* initialize value in dest */
+  bzero(&dest, sizeof(struct sockaddr_in));
+  dest.sin_family = PF_INET;
+  dest.sin_port = htons(port);
+  dest.sin_addr.s_addr = inet_addr(src_ip_addr);
+
+  /* Connecting to server */
+  int err = connect(d_mimo_sock, (struct sockaddr*)&dest, sizeof(struct sockaddr_in));
+  if(err != 0)  {
+	printf("open_mimo_sock failed with %d\n", errno); fflush(stdout);
+	assert(false);
+  }
+  printf("open_mimo_sock success!\n"); fflush(stdout);
+}
+
+inline void
+digital_ofdm_frame_sink::waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_SIZE][MAX_PKT_LEN])
+{
+  printf("mimo: waitForDecisionFromMimo\n"); fflush(stdout);
+  int out_bytes = (d_num_ofdm_symbols * d_data_carriers.size())/8;
+  assert(out_bytes < MAX_PKT_LEN);
+
+  int n_entries = d_num_ofdm_symbols * d_data_carriers.size() * 4;		// size of d_euclid_dist
+  int buf_size = sizeof(float) * n_entries + 3 * sizeof(unsigned int);	// euclid_dist + batch + num_ofdm_symbols
+  char *eth_buf = (char*) malloc(buf_size);
+  memset(eth_buf, 0, buf_size);
+
+  memcpy(&eth_buf[0], &d_active_batch, sizeof(unsigned int));
+  memcpy(&eth_buf[4], &d_num_ofdm_symbols, sizeof(unsigned int));
+  memcpy(&eth_buf[8], &d_pkt_num, sizeof(unsigned int));
+
+  int offset = 12;
+  int items = d_data_carriers.size() * 4;
+  for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
+      memcpy(&eth_buf[offset], d_euclid_dist[i], sizeof(float) * items);
+      offset += (sizeof(float) * items);
+  }
+  
+  // send on the backend //
+  printf("mimo: size: %d, offset: %d, d_num_ofdm_symbols: %d\n", buf_size, offset, d_num_ofdm_symbols); fflush(stdout);
+  int bytes_sent = send(d_mimo_sock, (char *)&eth_buf[0], buf_size, 0);
+  if (bytes_sent < 0) {
+    printf("mimo: Error: failed to send to MIMO, errno: %d\n", errno);
+    assert(false);
+  } else
+    printf("mimo: @@@@@@@@@@@@@@@@ sent to MIMO (%d bytes) for batch %d, pkt_num: %d @@@@@@@@@@@@@@@@@@@@\n", bytes_sent, d_active_batch, d_pkt_num); fflush(stdout); 
+
+#if 0
+  // now wait for the decoded pkt //
+  for(unsigned int k = 0; k < d_batch_size; k++) {
+      int nbytes = recv(d_mimo_sock, packet[k], out_bytes, MSG_PEEK);
+      if(nbytes == out_bytes) 
+	 nbytes = recv(d_mimo_sock, packet[k], out_bytes, 0);
+      else 
+	 nbytes = recv(d_mimo_sock, packet[k], out_bytes, MSG_WAITALL);
+
+      assert(nbytes == out_bytes);
+  }
+#endif
+}
+#endif
+
+
