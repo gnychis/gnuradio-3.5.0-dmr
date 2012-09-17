@@ -147,7 +147,7 @@ class ofdm_mod(gr.hier_block2):
                                              options.occupied_tones, options.fft_length,
                                              options.id, options.src,
                                              options.batch_size, options.encode_flag, 
-					     options.fwd, options.dst_id, options.degree)
+					     options.fwd, options.dst_id, options.degree, options.mimo)
 	
 
         self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, options.fwd, padded_preambles)
@@ -267,6 +267,8 @@ class ofdm_mod(gr.hier_block2):
                           help="LSQ degree (if applicable) [default=%default]")
 	expert.add_option("", "--hop", type="intx", default=0,
                           help="hop number (for preamble) [default=%default]")
+        expert.add_option("","--mimo", type="intx", default=0,
+                         help="enable MIMO TX [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation

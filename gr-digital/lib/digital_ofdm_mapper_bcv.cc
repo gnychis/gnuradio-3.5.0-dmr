@@ -47,7 +47,7 @@ using namespace arma;
 #define SCALE_FACTOR_PHASE 1e2
 #define SCALE_FACTOR_AMP 1e4
 
-#define ACK_ON_ETHERNET 1
+//#define ACK_ON_ETHERNET 1
 //#define TRIGGER_ON_ETHERNET 1
 
 digital_ofdm_mapper_bcv_sptr
@@ -58,9 +58,10 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation,
 			 unsigned int source,
 			 unsigned int batch_size,
 			 unsigned int encode_flag,
-			 int fwd_index, unsigned int dst_id, unsigned int degree)
+			 int fwd_index, unsigned int dst_id, unsigned int degree,
+			 unsigned int mimo)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (hdr_constellation, data_constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree));
+  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (hdr_constellation, data_constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree, mimo));
 }
 
 // Consumes 1 packet and produces as many OFDM symbols of fft_length to hold the full packet
@@ -71,7 +72,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 					unsigned int source,
 					unsigned int batch_size,
 					unsigned int encode_flag,
-					int fwd_index, unsigned int dst_id, unsigned int degree)
+					int fwd_index, unsigned int dst_id, unsigned int degree, 
+					unsigned int mimo)
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
 		   gr_make_io_signature2 (1, 2, sizeof(gr_complex)*fft_length, sizeof(char))),
@@ -96,10 +98,16 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_trigger_sock_opened(false),
     d_fwd_index(fwd_index),
     d_dst_id(dst_id),
-    d_degree(degree)
+    d_degree(degree),
+    d_mimo(mimo)
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
+
+  // MIMO_TX
+  if(d_mimo != 0) {
+     setup_mimo_tx();
+  }
 
 #ifdef ACK_ON_ETHERNET
   d_sock_fd = openACKSocket();
@@ -1298,7 +1306,7 @@ digital_ofdm_mapper_bcv::makeHeader()
 
    d_header.lead_sender = 1;
    d_header.src_id = d_id;         //TODO: remove the hardcoding
-   d_header.prev_hop_id = 1;
+   d_header.prev_hop_id = d_id;
 
    d_header.packetlen = d_packetlen - 1;		// -1 for '55' appended (ref ofdm_packet_utils)
    d_header.batch_number = d_batch_to_send;
@@ -1580,7 +1588,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   int decimation = 128;
   double rate = 1.0/decimation;
  
-  int num_ofdm_symbols_to_wait = 4000;
+  int num_ofdm_symbols_to_wait = 3000;
 
   int cp_length = d_fft_length/4;
   uint32_t num_samples = num_ofdm_symbols_to_wait * (d_fft_length+cp_length);
@@ -1604,7 +1612,26 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
 
   uint64_t interval_samples = (interval_time.get_frac_secs() * 1e8)/decimation;
 
-  //printf("timestamp: curr (%llu, %f), out (%llu, %f) , last_time (%llu, %f), interval(%lld, %f), interval_samples(%llu), duration(%llu, %f)\n", (uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), (uint64_t) out_time.get_full_secs(), out_time.get_frac_secs(), (uint64_t) d_last_pkt_time.get_full_secs(), d_last_pkt_time.get_frac_secs(), (int64_t) interval_time.get_full_secs(), interval_time.get_frac_secs(), interval_samples, sync_secs, sync_frac_of_secs); fflush(stdout);
+  int hdr_symbols = (HEADERBYTELEN * 8) / d_data_carriers.size();
+  switch(d_mimo) {
+    case 0: break;
+    case 1:
+            send_mimo_trigger(out_time);
+            break;
+    case 2:
+            out_time = rcv_mimo_trigger();
+	    printf("rx again: out_time (%llu, %f)\n", (uint64_t) out_time.get_full_secs(), out_time.get_frac_secs()); fflush(stdout); 
+
+            num_samples = (1+hdr_symbols+NUM_TRAINING_SYMBOLS+d_num_ofdm_symbols+1) * (d_fft_length+cp_length) + 100;
+            duration = num_samples * time_per_sample;
+            sync_secs = (uint64_t) duration;
+            sync_frac_of_secs = duration - (uint64_t) duration;
+            out_time += uhd::time_spec_t(sync_secs, sync_frac_of_secs);
+            break;
+    default: assert(false);
+  }
+
+  printf("timestamp: curr (%llu, %f), out (%llu, %f) , last_time (%llu, %f), interval(%lld, %f), interval_samples(%llu), duration(%llu, %f)\n", (uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), (uint64_t) out_time.get_full_secs(), out_time.get_frac_secs(), (uint64_t) d_last_pkt_time.get_full_secs(), d_last_pkt_time.get_frac_secs(), (int64_t) interval_time.get_full_secs(), interval_time.get_frac_secs(), interval_samples, sync_secs, sync_frac_of_secs); fflush(stdout);
 
   d_last_pkt_time = out_time;
 
@@ -1629,4 +1656,123 @@ digital_ofdm_mapper_bcv::generateKnownSymbols() {
       d_known_symbols[d_data_carriers[i]] = d_hdr_constellation[k%size];
       k++;
    }
+}
+
+void
+digital_ofdm_mapper_bcv::setup_mimo_tx() {
+  if(d_mimo == 1) {
+     open_mimo_master_socket();
+     if(d_mimo_master_sock != -1) {
+        printf("MIMO MASTER connected to SLAVE\n"); fflush(stdout);
+     }
+  } else {
+     d_mimo_slave_sock = open_mimo_slave_socket();
+     if(d_mimo_slave_sock != -1) {
+        printf("MIMO SLAVE connected to MASTER\n"); fflush(stdout);
+     }
+  }
+}
+
+inline void
+digital_ofdm_mapper_bcv::open_mimo_master_socket() {
+  int sock_port = 9001;
+  int sockfd;
+  struct sockaddr_in dest;
+
+  /* create socket */
+  sockfd = socket(PF_INET, SOCK_STREAM, 0);
+  fcntl(sockfd, F_SETFL, O_NONBLOCK);
+
+  /* ensure the socket address can be reused, even after CTRL-C the application */
+  int optval = 1;
+  int ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+  if(ret == -1) {
+        printf("@ digital_ofdm_mapper_bcv::setsockopt ERROR\n"); fflush(stdout);
+  }
+
+  /* initialize structure dest */
+  bzero(&dest, sizeof(dest));
+  dest.sin_family = AF_INET;
+
+  /* assign a port number to socket */
+  dest.sin_port = htons(sock_port);
+  dest.sin_addr.s_addr = INADDR_ANY;
+
+  bind(sockfd, (struct sockaddr*)&dest, sizeof(dest));
+
+  /* make it listen to socket with max 20 connections */
+  listen(sockfd, 1);
+  if(sockfd != -1) {
+    printf("MIMO MASTER Socket OPEN success\n"); fflush(stdout);
+  }
+  else assert(false);
+
+  struct sockaddr_in client_addr;
+  int addrlen = sizeof(client_addr);
+  while(1) {
+    d_mimo_master_sock = accept(sockfd, (struct sockaddr*)&client_addr, (socklen_t*)&addrlen);
+    if(d_mimo_master_sock != -1) {
+      break;
+    }
+  }
+}
+
+inline int
+digital_ofdm_mapper_bcv::open_mimo_slave_socket() {
+  int sockfd;
+  struct sockaddr_in dest;
+
+  /* create socket */
+  sockfd = socket(PF_INET, SOCK_STREAM, 0);
+  if(sockfd != -1) {
+    printf("@ MIMO SLAVE socket OPEN success\n"); fflush(stdout);
+  } else assert(false);
+
+  /* initialize value in dest */
+  bzero(&dest, sizeof(struct sockaddr_in));
+  dest.sin_family = PF_INET;
+  dest.sin_port = htons(9001);
+  dest.sin_addr.s_addr = inet_addr("128.83.141.213");
+  /* Connecting to server */
+  connect(sockfd, (struct sockaddr*)&dest, sizeof(struct sockaddr_in));
+  return sockfd;
+}
+
+inline void
+digital_ofdm_mapper_bcv::send_mimo_trigger(uhd::time_spec_t out_time) {
+   int buf_size = sizeof(uhd::time_spec_t);
+   printf("MIMO: send_mimo_trigger, size: %d\n", buf_size); fflush(stdout);
+   char *eth_buf = (char*) malloc(buf_size);
+   memcpy(eth_buf, &out_time, buf_size);
+
+   int bytes_sent = send(d_mimo_master_sock, (char *)&eth_buf[0], buf_size, 0);
+   printf("MIMO trigger sent, bytes_sent: %d, errno: %d\n", bytes_sent, errno); fflush(stdout);
+   free(eth_buf);
+}
+
+inline uhd::time_spec_t
+digital_ofdm_mapper_bcv::rcv_mimo_trigger() {
+   printf("MIMO: rcv_mimo_trigger\n"); fflush(stdout);
+   uhd::time_spec_t out_time;
+   int buf_size = sizeof(uhd::time_spec_t);
+   char *eth_buf = (char*) malloc(buf_size);
+   int nbytes = recv(d_mimo_slave_sock, eth_buf, buf_size, MSG_PEEK);
+   if(nbytes > 0) {
+      int offset = 0;
+      while(1) {
+         nbytes = recv(d_mimo_slave_sock, eth_buf+offset, buf_size-offset, 0);
+         offset += nbytes;
+         if(offset == buf_size) {
+            break;
+         }
+      }
+      assert(offset == buf_size);
+      memcpy(&out_time, eth_buf, sizeof(uhd::time_spec_t));
+      printf("rx out_time: (%llu, %f)\n", (uint64_t)out_time.get_full_secs(), out_time.get_frac_secs()); fflush(stdout);
+   }
+
+   printf("MIMO slave received trigger, nbytes: %d\n", nbytes); fflush(stdout);
+   free(eth_buf);
+   return out_time;
 }

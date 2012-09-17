@@ -329,7 +329,8 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation,
 			 unsigned occupied_carriers, unsigned int fft_length, unsigned int id=1,
 			 unsigned int source_flag=0,
 			 unsigned int batch_size=1,
-		 	 unsigned int encode_flag=1, int fwd_index=0, unsigned int dst_id=2, unsigned int degree=4);
+		 	 unsigned int encode_flag=1, int fwd_index=0, unsigned int dst_id=2, unsigned int degree=4,
+			 unsigned int mimo=0);
 
 /*!
  * \brief take a stream of bytes in and map to a vector of complex
@@ -347,14 +348,16 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 			   unsigned msgq_limit, 
 			   unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			   unsigned int source_flag,
-			   unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree);
+			   unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree,
+			   unsigned int mimo);
  protected:
   digital_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
 			 const std::vector<gr_complex> &data_constellation,
 			 unsigned msgq_limit, 
 		         unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source_flag,
-			 unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree);
+			 unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree,
+			 unsigned int mimo);
 
  private:
   /* data */
@@ -538,6 +541,15 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   gr_complex d_known_symbols[MAX_FFT_LENGTH];
   int d_training_symbol_cnt;
   void generateKnownSymbols();
+
+  // MIMO TX related stuff //
+  int d_mimo;
+  int d_mimo_master_sock, d_mimo_slave_sock;
+  void setup_mimo_tx();
+  void open_mimo_master_socket();
+  int open_mimo_slave_socket();
+  void send_mimo_trigger(uhd::time_spec_t);
+  uhd::time_spec_t rcv_mimo_trigger();
 };
 
 #endif

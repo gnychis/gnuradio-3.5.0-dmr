@@ -63,9 +63,20 @@ public:
         if (stream_args.cpu_format == "sc16") _type = boost::make_shared<uhd::io_type_t>(uhd::io_type_t::COMPLEX_INT16);
         _dev = uhd::usrp::multi_usrp::make(device_addr);
 
-        printf("Switching to the external clock!\n"); fflush(stdout);
-        this->set_clock_config(uhd::clock_config_t::external(), 0);
-        this->set_time_next_pps(uhd::time_spec_t(0.0));
+	uhd::device_addrs_t dev_addrs_vec = uhd::device::find(device_addr);
+	uhd::device_addr_t dev_addr1 = dev_addrs_vec.at(0);
+        if(dev_addr1.to_string().compare("type=usrp2,addr=192.168.20.2,name=,serial=E0R14VAUN") == 0) {
+           printf("SLAVE CLOCK\n"); fflush(stdout);
+           uhd::clock_config_t clock_config1;
+           clock_config1.ref_source = uhd::clock_config_t::REF_MIMO;
+           clock_config1.pps_source = uhd::clock_config_t::PPS_MIMO;
+           this->set_clock_config(clock_config1, 0);
+        }
+        else {
+           printf("Switching to the external clock!\n"); fflush(stdout);
+           this->set_clock_config(uhd::clock_config_t::external(), 0);
+           this->set_time_next_pps(uhd::time_spec_t(0.0));
+	}
     }
 
     void set_subdev_spec(const std::string &spec, size_t mboard){

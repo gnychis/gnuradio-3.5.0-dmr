@@ -5354,7 +5354,7 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
   } 
   waitForDecisionFromMimo(packet);
 
-  int n_entries = pow(2.0, double(d_batch_size));
+  int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size));
   memset(d_euclid_dist, 0, sizeof(float) * d_data_carriers.size() * n_entries * MAX_OFDM_SYMBOLS);
 #if 0
   batch_decoded = true;
@@ -6948,9 +6948,8 @@ digital_ofdm_frame_sink::calculateSER(unsigned char msg[][MAX_PKT_LEN], int num_
    for(unsigned int k = 0; k < d_batch_size; k++) 
       modulateMsg(&symbols[k*d_num_ofdm_symbols*carriers], msg[k], num_bytes);
 
-   // compare: but exclude the first and the last symbol, since they aren't same across packets //
    int correct_symbols = 0;
-   for(unsigned int i = 1; i < d_num_ofdm_symbols-1; i++) {
+   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
        int index = i * carriers;
        for(unsigned int j = 0; j < carriers; j++) {
 	   //cout<<"true: " << d_true_symbols[index+j]<<" rx: "<<symbols[index+j]<<endl;
@@ -6959,7 +6958,7 @@ digital_ofdm_frame_sink::calculateSER(unsigned char msg[][MAX_PKT_LEN], int num_
        }
    }
 
-   int total_symbols = (d_num_ofdm_symbols-2) * carriers;
+   int total_symbols = (d_num_ofdm_symbols) * carriers;
    float SER = ((float)correct_symbols)/(total_symbols);
 
    d_agg_total_symbols += total_symbols;
@@ -7064,10 +7063,8 @@ inline void
 digital_ofdm_frame_sink::waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_SIZE][MAX_PKT_LEN])
 {
   printf("mimo: waitForDecisionFromMimo\n"); fflush(stdout);
-  int out_bytes = (d_num_ofdm_symbols * d_data_carriers.size())/8;
-  assert(out_bytes < MAX_PKT_LEN);
 
-  int n_entries = d_num_ofdm_symbols * d_data_carriers.size() * 4;		// size of d_euclid_dist
+  int n_entries = d_num_ofdm_symbols * d_data_carriers.size() * pow(double(d_data_sym_position.size()), double(d_batch_size));
   int buf_size = sizeof(float) * n_entries + 3 * sizeof(unsigned int);	// euclid_dist + batch + num_ofdm_symbols
   char *eth_buf = (char*) malloc(buf_size);
   memset(eth_buf, 0, buf_size);
@@ -7077,7 +7074,7 @@ digital_ofdm_frame_sink::waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_
   memcpy(&eth_buf[8], &d_pkt_num, sizeof(unsigned int));
 
   int offset = 12;
-  int items = d_data_carriers.size() * 4;
+  int items = d_data_carriers.size() * pow(double(d_data_sym_position.size()), double(d_batch_size));
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
       memcpy(&eth_buf[offset], d_euclid_dist[i], sizeof(float) * items);
       offset += (sizeof(float) * items);
