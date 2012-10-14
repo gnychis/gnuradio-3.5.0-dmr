@@ -896,6 +896,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_SIZE][MAX_PKT_LEN]);
 #endif
 
+ void chooseCV(FlowInfo *flowInfo, gr_complex *coeffs);
+ bool is_CV_good(gr_complex cv1, gr_complex cv2);
 };
 
 

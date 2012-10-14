@@ -381,7 +381,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 
 	/* header has already been modulated, just send the payload *symbols* as it is */
  	copyOFDMSymbol(out, d_msg[0]->length());		
-	//logGeneratedTxSymbols(out);
+	logGeneratedTxSymbols(out);
 
 	//logNativeTxSymbols(out);
 	//printf("data--------- offset: %d\n", d_msg_offset[0]); fflush(stdout);
@@ -937,16 +937,12 @@ digital_ofdm_mapper_bcv::logGeneratedTxSymbols(gr_complex *out)
       d_log_open = true;
   }
 
-  unsigned int zeros_on_left = ceil((float (d_fft_length - d_occupied_carriers))/2.0);
-
   gr_complex *log_symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_data_carriers.size());
   memset(log_symbols, 0, sizeof(gr_complex) * d_data_carriers.size());
 
   int index = 0; int offset = 4;
   for(int i = 0; i < d_all_carriers.size(); i++) {
      if(d_all_carriers[i] == 0) {
-        //printf("zeros_on_left: %d, d: %d, offset: %d\n", zeros_on_left, d_data_carriers[index], offset); fflush(stdout);
-        //memcpy(log_symbols+index, out+zeros_on_left+d_data_carriers[index]-offset, sizeof(gr_complex));
         memcpy(log_symbols+index, out+d_data_carriers[index], sizeof(gr_complex));
         index++;
      }
@@ -1200,7 +1196,7 @@ digital_ofdm_mapper_bcv::generateCodeVector()
 
   float cv = 0.0;
   for(unsigned int k = 0; k < d_batch_size; k++) {
-#if 1
+#if 0
       if(k > 0)
         cv += 90;
       else
@@ -1743,11 +1739,21 @@ inline void
 digital_ofdm_mapper_bcv::send_mimo_trigger(uhd::time_spec_t out_time) {
    int buf_size = sizeof(uhd::time_spec_t);
    printf("MIMO: send_mimo_trigger, size: %d\n", buf_size); fflush(stdout);
-   char *eth_buf = (char*) malloc(buf_size);
-   memcpy(eth_buf, &out_time, buf_size);
+   char *eth_buf = (char*) malloc(buf_size); 
+
+   time_t secs = out_time.get_full_secs();
+   double frac = out_time.get_frac_secs();
+
+   memcpy(eth_buf, &secs, sizeof(time_t));
+   memcpy(eth_buf+sizeof(time_t), &frac, sizeof(double));
 
    int bytes_sent = send(d_mimo_master_sock, (char *)&eth_buf[0], buf_size, 0);
-   printf("MIMO trigger sent, bytes_sent: %d, errno: %d\n", bytes_sent, errno); fflush(stdout);
+   memcpy(&secs, eth_buf, sizeof(time_t));
+   memcpy(&frac, eth_buf+sizeof(time_t), sizeof(double));
+
+   uhd::time_spec_t _out_time(secs, frac);
+   //memcpy(&_out_time, eth_buf, buf_size);
+   printf("MIMO trigger sent, bytes_sent: %d, errno: %d, out_time: (%llu, %f)\n", bytes_sent, errno, (uint64_t) _out_time.get_full_secs(), _out_time.get_frac_secs()); fflush(stdout);
    free(eth_buf);
 }
 

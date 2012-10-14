@@ -142,7 +142,7 @@ class ofdm_receiver(gr.hier_block2):
 		self.connect(self.chan_filt, (self.sampler, 0))
 		##self.connect(self.chan_filt, gr.delay(gr.sizeof_gr_complex, (fft_length+cp_length)), (self.sampler, 0))		## extra delay
 
-	    #self.connect(self.chan_filt, gr.file_sink(gr.sizeof_gr_complex, "ofdm_receiver-chan_filt_c.dat"))
+	    self.connect(self.chan_filt, gr.file_sink(gr.sizeof_gr_complex, "ofdm_receiver-chan_filt_c.dat"))
 	elif use_chan_filt == 2: 
 	    #### alternative: chan_filt-> NULL, file_source -> SYNC, file_source -> SIGMIX ####
 	    self.connect(self.chan_filt, gr.null_sink(gr.sizeof_gr_complex))

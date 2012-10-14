@@ -987,6 +987,8 @@ digital_ofdm_frame_sink::work (int noutput_items,
   if (VERBOSE)
     fprintf(stderr,">>> Entering state machine, d_state: %d\n", d_state);
 
+  unsigned ii = 0;
+
   unsigned int bytes=0;
   unsigned int n_data_carriers = d_data_carriers.size();
   switch(d_state) {
@@ -1253,6 +1255,16 @@ digital_ofdm_frame_sink::work (int noutput_items,
        equalizeSymbols(&in[0], &d_in_estimates[0]);
     } */
 
+    //equalizeSymbols(&in[0], &d_in_estimates[0]);
+
+#if 0
+   for(ii= 0; ii < d_occupied_carriers; ii++) {
+	gr_complex new_est(1.0, 0.0);
+        in[ii] = in[ii] * ((d_pktInfo->hestimates[0])[ii] * (d_pktInfo->hestimates[1])[ii])/((d_pktInfo->hestimates[0])[ii] + (d_pktInfo->hestimates[1])[ii]);
+   }
+#endif      
+
+	
     if(d_curr_ofdm_symbol_index >= d_num_ofdm_symbols) {
 	assert(false);
         enter_search();         					// something went crazy
@@ -3897,7 +3909,7 @@ digital_ofdm_frame_sink::equalizePilot(gr_complex *in, PktInfo *pInfo) {
 #endif
      }
      float end_angle = arg(phase_error);
-     //printf("\nangle: %.3f", end_angle);
+     printf("\npilot_angle: %.3f", end_angle);
      //printf("\n"); fflush(stdout);
   }
   //printf(" --------------- equalizePilot ends --------------- \n"); fflush(stdout);
@@ -3934,6 +3946,9 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   gr_complex *out_symbols = (gr_complex*) malloc(sizeof(gr_complex) * n_symbols);
   memset(out_symbols, 0, sizeof(gr_complex) * n_symbols);
 
+  //reduceCoefficients_LSQ(flow_info);
+  //chooseCV(flow_info, coeffs);
+
   /* pick new random <coeffs> for each innovative pkt to == new coded pkt */
   printf("selecting random coeffs::: --- \n"); fflush(stdout);
   float phase[MAX_BATCH_SIZE];
@@ -3947,7 +3962,8 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      float amp = getAvgAmplificationFactor(pInfo->hestimates);
 
 #if 0
-     float LO = 1.0; float HI = 2.5; 
+     phase[i] = 0.0;
+     float LO = 0.5; float HI = 1.5; 
      float extra_amp = LO + (float)rand()/((float)RAND_MAX/(HI-LO));
      printf("amp: %.3f, extra_amp: %.3f\n", amp, extra_amp); fflush(stdout);
      amp += extra_amp;
@@ -5414,7 +5430,7 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
       } //while
   }
 
-  calculateSER(packet, d_packetlen);
+  //calculateSER(packet, d_packetlen);
 
   d_avg_evm_error /= ((double) d_num_ofdm_symbols);
   d_total_pkts_received++;
@@ -5984,7 +6000,7 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, FlowInfo *flowInfo, gr_compl
   }
  
 #else
-  d_euclid_dist[ofdm_index][subcarrier_index][0] += norm(x - batched_sym_position[0]);
+  d_euclid_dist[ofdm_index][subcarrier_index][0] += abs(x - batched_sym_position[0]);
   float min_euclid_dist = d_euclid_dist[ofdm_index][subcarrier_index][0];
 
   //if(subcarrier_index == 0 && d_pkt_num == 1) 
@@ -5997,7 +6013,7 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, FlowInfo *flowInfo, gr_compl
   // for each table entry, find the min(total_error, k) //
   unsigned int table_size = pow(double(d_data_sym_position.size()), double(d_batch_size)); //pow(2.0, double(d_batch_size));
   for(unsigned int j = 1; j < table_size; j++) {
-      float euclid_dist = d_euclid_dist[ofdm_index][subcarrier_index][j] + norm(x - batched_sym_position[j]);
+      float euclid_dist = d_euclid_dist[ofdm_index][subcarrier_index][j] + abs(x - batched_sym_position[j]);
 
       //if(d_pkt_num == 1 && subcarrier_index == 0) 
       if(1)
@@ -6027,7 +6043,7 @@ digital_ofdm_frame_sink::slicer_ILP_2(gr_complex x, FlowInfo *flowInfo, gr_compl
   }
 
   d_avg_evm_error += min_euclid_dist;
-
+  printf("xxx %f %f %f %f\n", x.real(), x.imag(), closest_sym.real(), closest_sym.imag()); fflush(stdout);
   //if(d_pkt_num == 1 && subcarrier_index == 0) 
   if(0) 
   {
@@ -6558,6 +6574,7 @@ digital_ofdm_frame_sink::buildMap_pilot_SRC(FlowInfo *flowInfo, gr_complex* sym_
           if(k == 0) coeffs[j] = coeff;
           else coeffs[j] += coeff;
       }
+      cout << "batch : " << j << " coeffs: " << coeffs[j] << " amp: " << abs(coeffs[j]) << " degrees: " << arg(coeffs[j]) * 180/M_PI << endl;
       coeffs[j] *= (gr_complex(1.0, 0.0)/(carrier * dfe[subcarrier_index]));
   }
   //if(o == 0) printf("\n"); fflush(stdout);
@@ -6582,11 +6599,11 @@ digital_ofdm_frame_sink::buildMap_pilot_SRC(FlowInfo *flowInfo, gr_complex* sym_
          sym_position[j++] = (((coeffs[0] *  d_data_sym_position[1])) + (coeffs[1] *  d_data_sym_position[1]));
 #endif
 	 if(o == 0 && subcarrier_index == 0) 
-	       cout << "delta_coeff: " << (arg(coeffs[0]) - arg(coeffs[1])) * 180/M_PI << endl;
+	       cout << "delta_coeff: " << (arg(coeffs[0]) - arg(coeffs[1])) * 180/M_PI << " -- " << arg(coeffs[0]) * 180/M_PI << " --- " << arg(coeffs[1]) * 180/M_PI<< endl;
 	 for(unsigned int m1 = 0; m1 < d_data_sym_position.size(); m1++) {
 	     for(unsigned int m2 = 0; m2 < d_data_sym_position.size(); m2++) {
 		gr_complex pos = (coeffs[0] * d_data_sym_position[m1]) + (coeffs[1] * d_data_sym_position[m2]);
-		//std::cout<<"sym_pos:: " << pos <<" = " << coeffs[0] << " * " << d_data_sym_position[m1] << " + " << coeffs[1] << " * " << d_data_sym_position[m2] << endl;
+		std::cout<<"sym_pos:: " << pos <<" = " << coeffs[0] << " * " << d_data_sym_position[m1] << " + " << coeffs[1] << " * " << d_data_sym_position[m2] << endl;
 		sym_position[j++] = pos; 
                 //printf("sym_position[%d]: (%f, %f)\n", j, pos.real(), pos.imag());
 	     }
@@ -6751,7 +6768,7 @@ void digital_ofdm_frame_sink::track_pilot_dfe_SRC(gr_complex *in, vector<gr_comp
       dfe_pilot[i] += d_eq_gain * (pilot_sym/sigeq - dfe_pilot[i]);
   }
   d_end_angle[sender] = angle;
-  //printf("  d_end_angle: %f\n", d_end_angle[sender]); fflush(stdout);
+  printf("  d_end_angle: %f\n", d_end_angle[sender]); fflush(stdout);
 }
 
 inline void
@@ -7104,4 +7121,203 @@ digital_ofdm_frame_sink::waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_
 }
 #endif
 
+inline void
+digital_ofdm_frame_sink::chooseCV(FlowInfo *flowInfo, gr_complex *coeffs)
+{
+  assert(d_batch_size == 2);
+  InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
+  unsigned int n_inno_pkts = inno_pkts.size();
 
+  gr_complex new_coeffs[MAX_BATCH_SIZE];
+  int num_carriers = d_data_carriers.size();
+
+  /* randomly choose every coefficient except for the last one and keep reducing to latest value */
+  for(unsigned int i = 0; i < n_inno_pkts-1; i++) {
+     PktInfo *pInfo = inno_pkts[i];
+     float amp = getAvgAmplificationFactor(pInfo->hestimates);
+     float phase = (rand() % 360 + 1) * M_PI/180;
+
+     coeffs[i] = (amp * ToPhase_c(phase));
+     gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[i];               // reduced coeffs for this inno pkt //
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+	new_coeffs[k] += (coeffs[i] * pkt_coeffs[k*num_carriers]);
+     }
+  }
+
+  int last = n_inno_pkts-1;
+  gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[last];
+  PktInfo *pInfo = inno_pkts[last];
+  float amp = getAvgAmplificationFactor(pInfo->hestimates);
+
+  while(1) {
+     float phase = (rand() % 360 + 1) * M_PI/180;
+     coeffs[last] = (amp * ToPhase_c(phase));
+
+     for(unsigned int k = 0; k < d_batch_size; k++) 
+         new_coeffs[k] += (coeffs[last] * pkt_coeffs[k*num_carriers]);
+
+     if(is_CV_good(new_coeffs[0], new_coeffs[1])) {
+	  break; 	
+     }
+  }
+}
+
+bool
+digital_ofdm_frame_sink::is_CV_good(gr_complex cv1, gr_complex cv2) {
+   int M = d_data_sym_position.size();
+   float threshold = 0.7;
+   float min_dt = 1000.0;
+
+   int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size));
+   int index = 0;
+   gr_complex *comb_mod = (gr_complex*) malloc(sizeof(gr_complex) * n_entries);
+   for(int m1 = 0; m1 < M; m1++) {
+      gr_complex p1 = cv1 * d_data_sym_position[m1];
+      for(int m2 = 0; m2 < M; m2++) {
+         gr_complex p2 = cv2 * d_data_sym_position[m2];
+         comb_mod[index++] = p1 + p2;
+      }
+   }
+   assert(index == n_entries);
+
+   for(int i = 0; i < n_entries; i++) {
+      for(int j = i+1; j < n_entries; j++) {
+         float dt = abs(comb_mod[i] - comb_mod[j]);
+         if(dt < min_dt) {
+            min_dt = dt;
+         }
+         if(min_dt < threshold)
+            return false;
+      }
+   }
+
+   free(comb_mod);
+   printf("min_dt: %.3f\n", min_dt);
+   return true;
+}
+
+#if 0
+void
+digital_ofdm_frame_sink::correctStoredSignal(FlowInfo *flowInfo) 
+{
+  printf("correctOutgoingSignal start\n"); fflush(stdout);
+  // prep for building the map //
+  vector<vector<gr_complex*> > batched_sym_position;
+
+  int dc_tones = d_occupied_carriers - d_data_carriers.size();
+  unsigned int half_occupied_tones = (d_occupied_carriers - dc_tones)/2;
+
+  for(unsigned int i = 0; i < d_occupied_carriers; i++) {
+
+        if(i >= half_occupied_tones && i < half_occupied_tones + dc_tones) {
+            continue;                                                                                   // bypass the DC tones //
+        }
+	
+	cx_mat coeff_mat = flowInfo->coeff_mat;
+        updateCoeffMatrix(flowInfo, i, coeff_mat);
+
+        // build the map for each batch on each subcarrier //
+        vector<gr_complex*> sym_position;
+        buildMap_ILP(coeff_mat, sym_position);
+        batched_sym_position.push_back(sym_position);
+  }
+
+  InnovativePktInfoVector innovativePkts = flowInfo->innovative_pkts;
+  //debugMap_ILP(batched_sym_position, innovativePkts.size()); 
+ 
+  assert(batched_sym_position.size() == d_data_carriers.size());
+  vector<gr_complex> dfe_vec[MAX_BATCH_SIZE];
+  gr_complex* sym_vec[MAX_BATCH_SIZE];
+  gr_complex* closest_sym_vec[MAX_BATCH_SIZE];
+
+  // initialization //
+  for(unsigned int k = 0; k < innovativePkts.size(); k++) {
+     dfe_vec[k].resize(d_occupied_carriers);
+     fill(dfe_vec[k].begin(), dfe_vec[k].end(), gr_complex(1.0,0.0));
+
+     sym_vec[k] = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
+     closest_sym_vec[k] = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
+  }
+  
+  // signal correction //
+  for(unsigned int o = 0; o < d_num_ofdm_symbols; o++) {
+      gr_complex carrier[MAX_BATCH_SIZE], accum_error[MAX_BATCH_SIZE];
+      for(unsigned int i = 0; i < innovativePkts.size(); i++) {	
+          PktInfo *pInfo = innovativePkts[i];
+	  gr_complex *rx_symbols_this_batch = pInfo->symbols;
+
+	  carrier[i] = gr_expj(d_phase[i]);
+	  accum_error[i] = 0.0;
+
+	  memset(closest_sym_vec[i], 0, sizeof(gr_complex) * d_occupied_carriers);
+	  memcpy(sym_vec[i], &rx_symbols_this_batch[o * d_occupied_carriers], sizeof(gr_complex) * d_occupied_carriers);	
+      }
+
+      gr_complex sigrot[MAX_BATCH_SIZE]; 
+      for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+	  // find sigrot for each batch //
+          for(unsigned int k = 0; k < innovativePkts.size(); k++) {
+              sigrot[k] = sym_vec[k][d_data_carriers[i]] * carrier[k] * dfe_vec[k][i];
+          }
+
+          findClosestSymbol(sigrot, closest_sym_vec, innovativePkts.size(), batched_sym_position[i], i, o);
+
+	  // update accum_error, dfe_vec //
+	  for(unsigned int k = 0; k < innovativePkts.size(); k++) {
+             accum_error[k] += (sigrot[k] * conj(closest_sym_vec[k][d_data_carriers[i]]));
+             if (norm(sigrot[k])> 0.001) dfe_vec[k][i] +=  d_eq_gain*(closest_sym_vec[k][d_data_carriers[i]]/sigrot[k]-dfe_vec[k][i]);
+          }
+      } 
+
+      // update the PLL settings //
+      for(unsigned int k = 0; k < innovativePkts.size(); k++) {
+
+	 // update outgoing with closest symbol //
+	 PktInfo *pInfo = innovativePkts[k];
+	 gr_complex *rx_symbols_this_batch = pInfo->symbols;
+	 memcpy(&rx_symbols_this_batch[o * d_occupied_carriers], closest_sym_vec[k], sizeof(gr_complex) * d_occupied_carriers);
+
+         float angle = arg(accum_error[k]);
+      }
+  }
+  
+  // cleanup //
+  for(unsigned int k = 0; k < innovativePkts.size(); k++) {
+        free(sym_vec[k]);
+        free(closest_sym_vec[k]);
+  }
+}
+
+void
+digital_ofdm_frame_sink::findClosestSymbol(gr_complex *x, gr_complex **closest_sym_vec, int num_pkts,
+                                    vector<gr_complex*> batched_sym_position, unsigned int subcarrier_index, unsigned int o_index) {
+  unsigned int min_index = 0;
+  float min_euclid_dist = 0.0;
+
+  // for each table entry, find the min(error, k) //
+  unsigned int table_size = pow(2.0, double(d_batch_size));
+  for(unsigned int k = 0; k < num_pkts; k++) {
+
+      // initialize //
+      min_euclid_dist = norm(x[k] - batched_sym_position[k][0]);
+
+      float euclid_dist = 0.0;
+      for(unsigned int j = 1; j < table_size; j++) {
+	 euclid_dist = norm(x[k] - batched_sym_position[k][j]);
+	 if (euclid_dist < min_euclid_dist) {
+	     min_euclid_dist = euclid_dist;
+	     min_index = j;
+	 }
+      }
+
+      closest_sym_vec[k][d_data_carriers[subcarrier_index]] = batched_sym_position[k][min_index];
+      if(o_index == 0 && subcarrier_index == 0) {
+	 printf("closest match for (%f, %f) ----> (%f, %f) \n", x[k].real(), x[k].imag(), batched_sym_position[k][min_index].real(), batched_sym_position[k][min_index].imag());
+	 fflush(stdout);
+      }
+
+      // reinit min_index for next batch //
+      min_index = 0;
+  }
+}
+#endif
