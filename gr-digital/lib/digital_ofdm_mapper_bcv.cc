@@ -254,10 +254,14 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   d_num_ofdm_symbols = 0;
   d_ofdm_symbol_index = 0;
   // apurv++ end //
-  srand(time(NULL));
+
+  /* for mimo_tx, rand_seed = 1, else rand_seed = d_id */
+  if(d_mimo != 0) 
+     srand(1);
+  else
+     srand(d_id);
+
   d_time_pkt_sent = 0;
-
-
   d_log_open = false;
   d_log_open_native = false;
   printf("NULL_SYMBOL_COUNT: %d\n", NULL_SYMBOL_COUNT); fflush(stdout);
@@ -647,7 +651,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   //int packetlen = 0;		//only used for make_header//
 
 #ifndef ACK_ON_ETHERNET
-  if(d_packets_sent_for_batch == d_batch_size)
+  if(d_packets_sent_for_batch == (d_batch_size+1))
   {
 	d_packets_sent_for_batch = 0;
 	d_batch_to_send += 1;
@@ -706,6 +710,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 
      d_time_tag = false;
      d_null_symbol_cnt = 0;
+     d_hdr_ofdm_index = 0;
   }
 
   bool tx_pilot = false;
@@ -714,6 +719,18 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   gr_complex *out = (gr_complex *)output_items[0];
   memset(out, 0, sizeof(gr_complex) * d_fft_length);
 
+#ifdef PRE_NULL_SYMBOLS
+  if(d_null_symbol_cnt < NULL_SYMBOL_COUNT) {
+     printf("(mapper): send NULL\n"); fflush(stdout);
+     d_null_symbol_cnt++;
+     d_pending_flag = 3;
+     if(!d_time_tag) {
+          make_time_tag1();
+          d_time_tag = true;
+     }
+  }
+  else
+#endif
   if(d_hdr_byte_offset < HEADERBYTELEN) {
       if(!d_time_tag) {
            make_time_tag1();
@@ -721,6 +738,12 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
         }
 
       generateOFDMSymbolHeader(out); 					// send the header symbols out first //
+#ifdef PRE_NULL_SYMBOLS
+     if(d_hdr_ofdm_index == 0) {
+        d_pending_flag = 1;
+     }
+     d_hdr_ofdm_index++;
+#endif
       tx_pilot = true;
   }
   else if(!d_send_null) {
@@ -739,9 +762,10 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	   memset(t_out, 0, sizeof(gr_complex) * d_fft_length);
 
 	   generateOFDMSymbolData(t_out, k);
-
 	   symbols_vec.push_back(t_out);
-	   //logNativeTxSymbols(t_out);
+
+           int in = (k*d_num_ofdm_symbols + d_ofdm_symbol_index) * d_fft_length;
+           memcpy(&d_native_symbols[in], t_out, sizeof(gr_complex) * d_fft_length);
       }
 
       assert(symbols_vec.size() == d_batch_size);
@@ -762,7 +786,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       /* encoding process ends */
 
       normalizeSignal(out, d_batch_size);						// normalize the outgoing signal //
-      //logGeneratedTxSymbols(out); 
+      logGeneratedTxSymbols(out); 
 
  	// offline, timekeeping, etc //
       assert(d_ofdm_symbol_index < d_num_ofdm_symbols);
@@ -785,7 +809,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       }
 #endif
 	// etc end //
-      tx_pilot = true;
+	tx_pilot = (d_mimo == 1)?false:true;
   }
 
 #if 1
@@ -797,6 +821,10 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       d_ofdm_symbol_index = 0;
       d_send_null = false;
       d_modulated = true;
+      if(!d_log_open_native) {
+         logNativeTxSymbols();
+         d_log_open_native = true;
+      }
   }
 #endif
 
@@ -807,6 +835,11 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       for(int i = 0; i < d_pilot_carriers.size(); i++) {
          out[d_pilot_carriers[i]] = gr_complex(cur_pilot, 0.0);
          cur_pilot = -cur_pilot;
+      }
+  }
+  else {
+      for(int i = 0; i < d_pilot_carriers.size(); i++) {
+	out[d_pilot_carriers[i]] = gr_complex(0.0, 0.0);
       }
   }
 #endif
@@ -823,59 +856,49 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   return 1;  // produced symbol
 }
 
-/* only log the symbols belonging to the 'data carriers'. Ignore the left and right guards, dc tones and pilot tones */
 void
-digital_ofdm_mapper_bcv::logNativeTxSymbols(gr_complex *out)
+digital_ofdm_mapper_bcv::logNativeTxSymbols()
 {
-  printf("digital_ofdm_mapper_bcv::logNativeTxSymbols\n"); fflush(stdout);
-  if(!d_log_open_native) {
-      char *filename = "native_tx_symbols.dat";
-      int fd;
-      if ((fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
-         perror(filename);
-            assert(false);
+   /* one time logging */
+   FILE *fp = NULL;
+   char *filename = "native_symbols.dat";
+   int fd;
+   if ((fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
+       perror(filename);
+       assert(false);
+   }
+   else {
+       if((fp = fdopen (fd, true ? "wb" : "w")) == NULL) {
+           close(fd);
+           assert(false);
+       }
+   }
+
+#if 0
+  int count = ftell(fp);
+  count = fwrite_unlocked(d_native_symbols, sizeof(gr_complex), d_batch_size * d_num_ofdm_symbols * d_fft_length, fp);
+  count = ftell(fp);
+#else
+  int carriers = d_data_carriers.size();
+
+  gr_complex *log_symbols = (gr_complex*) malloc(sizeof(gr_complex) * carriers);
+  memset(log_symbols, 0, sizeof(gr_complex) * carriers);
+
+  for(unsigned int k = 0; k < d_batch_size; k++) {
+      for(unsigned int o = 0; o < d_num_ofdm_symbols; o++) {
+          gr_complex *out = &d_native_symbols[(k*d_num_ofdm_symbols+o)*d_fft_length];
+          for(int i = 0; i < carriers; i++)
+                memcpy(log_symbols+i, out+d_data_carriers[i], sizeof(gr_complex));
+
+          int count = fwrite_unlocked(log_symbols, sizeof(gr_complex), carriers, fp);
+          count = ftell(fp);
       }
-      else {
-         if((d_fp_native = fdopen (fd, true ? "wb" : "w")) == NULL) {
-              fprintf(stderr, "log file cannot be opened\n");
-              close(fd);
-              assert(false);
-         }
-      }
-      d_log_open_native = true;
   }
-  unsigned int half_tones = ceil((float) (d_occupied_carriers/2.0));
-  unsigned int zeros_on_left = ceil((float (d_fft_length - d_occupied_carriers))/2.0);
-  unsigned int dc_tones = d_occupied_carriers - (d_data_carriers.size() + d_pilot_carriers.size());
-
-  gr_complex *log_symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_data_carriers.size());
-  memset(log_symbols, 0, sizeof(gr_complex) * d_data_carriers.size());
-
-  // copy the 1st half of the fft length except left-guard //
-  int index = 0; int offset = 4;
-  for(int i = 0; i < d_all_carriers.size(); i++) {
-     printf("d_all_carriers: %d ", d_all_carriers[i]); fflush(stdout);
-     if(d_all_carriers[i] == 0) {
-	printf("index: %d, zeros_on_left: %d, data_carrier: %d, i: %d", index, zeros_on_left, d_data_carriers[index], i); fflush(stdout);
-	memcpy(log_symbols+index, out+zeros_on_left+d_data_carriers[index]-offset, sizeof(gr_complex));
-	index++;
-     }	
-     printf("\n");
-  }
-  assert(index == d_data_carriers.size());
-
-  /*
-  memcpy(log_symbols, out + zeros_on_left, sizeof(gr_complex) * half_tones);
-
-  // copy the 2nd half of the fft_length except right-guard //
-  memcpy(log_symbols + half_tones, out + zeros_on_left + half_tones, sizeof(gr_complex) * half_tones);
-  */
-
-  int count = fwrite_unlocked(log_symbols, sizeof(gr_complex), d_data_carriers.size(), d_fp_native);
-  printf("count: %d written to native tx_symbols.dat, total: %d \n", count, ftell(d_fp_native)); fflush(stdout);
-
-
   free(log_symbols);
+#endif
+
+  close(fd);
+  fp = NULL;
 }
 
 void
@@ -940,19 +963,18 @@ digital_ofdm_mapper_bcv::logGeneratedTxSymbols(gr_complex *out)
   gr_complex *log_symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_data_carriers.size());
   memset(log_symbols, 0, sizeof(gr_complex) * d_data_carriers.size());
 
-  int index = 0; int offset = 4;
+  int index = 0;
   for(int i = 0; i < d_all_carriers.size(); i++) {
      if(d_all_carriers[i] == 0) {
-        memcpy(log_symbols+index, out+d_data_carriers[index], sizeof(gr_complex));
+	memcpy(log_symbols+index, out+d_data_carriers[index], sizeof(gr_complex));
         index++;
      }
-     printf("\n");
   }
   assert(index == d_data_carriers.size());
 
   int count = fwrite_unlocked(log_symbols, sizeof(gr_complex), d_data_carriers.size(), d_fp_log);
   printf("count: %d written to tx_symbols.dat, total: %d \n", count, ftell(d_fp_log)); fflush(stdout);
-
+  
   free(log_symbols);
 }
 
@@ -1057,10 +1079,12 @@ digital_ofdm_mapper_bcv::generateOFDMSymbolData(gr_complex* out, int k)
       d_resid[k] = 0;
     }
 
+#if 0
     while(i < d_data_carriers.size()) {   // finish filling out the symbol
-      out[d_data_carriers[i]] = d_data_constellation[randsym()];
+      out[d_data_carriers[i]] = d_constellation[randsym()];
       i++;
     }
+#endif
 
     //printf("complete pkt modulated\n"); fflush(stdout);
     //d_modulated = true;		// complete msg has been demodulated //
@@ -1188,6 +1212,7 @@ digital_ofdm_mapper_bcv::ToPhase_c(COEFF coeff) {
   return amp * gr_expj(angle_rad);
 }
 
+#if 0
 void 
 digital_ofdm_mapper_bcv::generateCodeVector()
 {
@@ -1201,13 +1226,16 @@ digital_ofdm_mapper_bcv::generateCodeVector()
         cv += 90;
       else
         cv = rand() % 360 + 1;
+      float amp = 1.0;
 #else
       float cv = rand() % 360 + 1;                              // degree
+      float LO = 0.5; float HI = 1.5;
+      float amp = 1.0; //LO + (float)rand()/((float)RAND_MAX/(HI-LO));
 #endif
 
       // store the scaled versions in header (space constraints) //
       d_header.coeffs[k].phase = cv * SCALE_FACTOR_PHASE;
-      d_header.coeffs[k].amplitude = SCALE_FACTOR_AMP;
+      d_header.coeffs[k].amplitude = amp * SCALE_FACTOR_AMP;
 
 #ifndef DEBUG
           float rad = cv * M_PI/180;
@@ -1237,6 +1265,7 @@ digital_ofdm_mapper_bcv::generateCodeVector()
 #endif
   printf("\n");
 }
+#endif
 
 void
 digital_ofdm_mapper_bcv::encodeSignal(gr_complex *symbols, unsigned int batch_num)
@@ -1256,14 +1285,9 @@ digital_ofdm_mapper_bcv::encodeSignal(gr_complex *symbols, unsigned int batch_nu
 inline void
 digital_ofdm_mapper_bcv::normalizeSignal(gr_complex* out, int k)
 {
-
+  float factor = sqrt(k) * sqrt(d_header.nsenders);
   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
-#ifdef SCALE
-     out[d_data_carriers[i]] /= (gr_complex(k)*gr_complex(SCALE));
-#else
-     out[d_data_carriers[i]] /= gr_complex(sqrt(k));
-#endif
-     //printf("(%f, %f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
+     out[d_data_carriers[i]] /= gr_complex(factor);
   }
 }
 
@@ -1293,21 +1317,22 @@ digital_ofdm_mapper_bcv::combineSignal(gr_complex *out, gr_complex* symbols)
 void
 digital_ofdm_mapper_bcv::makeHeader()
 {
-   printf("makeHeader for pkt: %d\n", d_pkt_num); fflush(stdout);
+   printf("makeHeader for batch: %d, pkt: %d, len: %d\n", d_batch_to_send, d_pkt_num, d_packetlen); fflush(stdout);
    memset(&d_header, 0, sizeof(d_header));
    d_header.dst_id = d_dst_id;
    d_header.flow_id = 0;
    d_header.inno_pkts = d_batch_size;
-   d_header.factor = 1.0;
 
-   d_header.lead_sender = 1;
-   d_header.src_id = d_id;         //TODO: remove the hardcoding
+   d_header.lead_sender = (d_mimo == 2)?0:1;
+   d_header.src_id = d_id;
    d_header.prev_hop_id = d_id;
 
    d_header.packetlen = d_packetlen - 1;		// -1 for '55' appended (ref ofdm_packet_utils)
    d_header.batch_number = d_batch_to_send;
-   d_header.nsenders = 1;				//TODO: remove hardcoding
+   d_header.nsenders = (d_mimo == 0)?1:2;
    d_header.pkt_type = DATA_TYPE;
+
+   d_header.factor = sqrt(d_header.nsenders);
   
    d_header.pkt_num = d_pkt_num++;
    d_header.link_id = 0;
@@ -1617,12 +1642,13 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
     case 2:
             out_time = rcv_mimo_trigger();
 	    printf("rx again: out_time (%llu, %f)\n", (uint64_t) out_time.get_full_secs(), out_time.get_frac_secs()); fflush(stdout); 
-
-            num_samples = (1+hdr_symbols+NUM_TRAINING_SYMBOLS+d_num_ofdm_symbols+1) * (d_fft_length+cp_length) + 100;
+#ifndef PRE_NULL_SYMBOLS
+            num_samples = (1+hdr_symbols+NUM_TRAINING_SYMBOLS) * (d_fft_length+cp_length);
             duration = num_samples * time_per_sample;
             sync_secs = (uint64_t) duration;
             sync_frac_of_secs = duration - (uint64_t) duration;
             out_time += uhd::time_spec_t(sync_secs, sync_frac_of_secs);
+#endif
             break;
     default: assert(false);
   }
@@ -1781,4 +1807,100 @@ digital_ofdm_mapper_bcv::rcv_mimo_trigger() {
    printf("MIMO slave received trigger, nbytes: %d\n", nbytes); fflush(stdout);
    free(eth_buf);
    return out_time;
+}
+
+#if 1 
+void
+digital_ofdm_mapper_bcv::generateCodeVector()
+{
+  // for each subcarrier, record 'd_batch_size' coeffs //
+  int num_carriers = d_data_carriers.size()/COMPRESSION_FACTOR;
+
+  assert(d_batch_size == 2);
+
+  float cv1 = rand() % 360 + 1;
+  d_header.coeffs[0].phase = cv1 * SCALE_FACTOR_PHASE;
+  d_header.coeffs[0].amplitude = SCALE_FACTOR_AMP;
+
+  float cv2 = 0.0;
+  while(1) {
+     cv2 = rand() % 360 + 1;
+     if(is_CV_good(ToPhase_c(cv1*M_PI/180), ToPhase_c(cv2*M_PI/180)))
+        break;
+  }
+
+  // store the scaled versions in header (space constraints) //
+  d_header.coeffs[1].phase = cv2 * SCALE_FACTOR_PHASE;
+  d_header.coeffs[1].amplitude = SCALE_FACTOR_AMP;
+  printf("generateCodeVector:: cv1: %.3f , cv2: %.3f\n", cv1, cv2); fflush(stdout);
+
+#ifdef LSQ_COMPRESSION
+  // source just blindly copies the coefficients, no point doing LSQ at the source //
+  for(unsigned int s = 1; s < d_degree; s++) {
+      for(unsigned int k = 0; k < d_batch_size; k++) {
+          int index = s * d_batch_size + k;
+          d_header.coeffs[index].phase = d_header.coeffs[k].phase;
+          d_header.coeffs[index].amplitude = d_header.coeffs[k].amplitude;
+      }
+  }
+#else
+  // for now copy the <d_batch_size> coeffs for all the coeff entries for the header //
+  for(unsigned int s = 1; s < num_carriers; s++) {
+      for(unsigned int k = 0; k < d_batch_size; k++) {
+          int index = s * d_batch_size + k;
+          d_header.coeffs[index].phase = d_header.coeffs[k].phase;
+          d_header.coeffs[index].amplitude = d_header.coeffs[k].amplitude;
+      }
+  }
+#endif
+  printf("\n");
+}
+#endif
+
+bool
+digital_ofdm_mapper_bcv::is_CV_good(gr_complex cv1, gr_complex cv2) {
+   int M = d_data_constellation.size();
+   float threshold = 0.7;
+
+   float min_dt = 1000.0;
+#if 0
+   for(int m1 = 0; m1 < M; m1++) {
+      gr_complex p1 = cv1 * d_data_constellation[m1];
+      for(int m2 = 0; m2 < M; m2++) {
+         gr_complex p2 = cv2 * d_data_constellation[m2];
+         float dt = abs(p1 - p2);
+         if(min_dt < dt) {
+            min_dt = dt;
+         }
+         if(dt < threshold)
+             return false;
+      }
+   }
+#endif
+
+   int n_entries = pow(double(d_data_constellation.size()), double(d_batch_size));
+   int index = 0;
+   gr_complex *comb_mod = (gr_complex*) malloc(sizeof(gr_complex) * n_entries);
+   for(int m1 = 0; m1 < M; m1++) {
+      gr_complex p1 = cv1 * d_data_constellation[m1];
+      for(int m2 = 0; m2 < M; m2++) {
+         gr_complex p2 = cv2 * d_data_constellation[m2];
+         comb_mod[index++] = p1 + p2;
+      }
+   }
+   assert(index == n_entries);
+
+   for(int i = 0; i < n_entries; i++) {
+      for(int j = i+1; j < n_entries; j++) {
+         float dt = abs(comb_mod[i] - comb_mod[j]);
+         if(dt < min_dt) {
+            min_dt = dt;
+         }
+         if(min_dt < threshold)
+            return false;
+      }
+   }
+
+   printf("min_dt: %.3f\n", min_dt);
+   return true;
 }

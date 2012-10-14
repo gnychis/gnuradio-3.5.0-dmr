@@ -125,7 +125,8 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
       if ((in_flag[ni] == 1))	// this is first symbol of new payload
 	enter_preamble();
 #ifdef SEND_NULL_SYMBOLS
-      else if(d_fwd_index == 2 && in_flag[ni] == 3) {
+      //else if(d_fwd_index == 2 && in_flag[ni] == 3) {
+      else if(in_flag[ni] == 3) {
 	d_timestamp = true;
 	d_state = ST_NULL_SYMBOLS;
       }
@@ -228,7 +229,8 @@ digital_ofdm_insert_preamble::general_work (int noutput_items,
 	break;
       }
 #ifdef SEND_NULL_SYMBOLS
-      else if(d_fwd_index == 2 && in_flag[ni] == 3){
+      //else if(d_fwd_index == 2 && in_flag[ni] == 3){
+      else if(in_flag[ni] == 3) {
         d_state = ST_NULL_SYMBOLS;
 	d_timestamp = true;
         break;

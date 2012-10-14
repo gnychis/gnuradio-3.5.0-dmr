@@ -48,6 +48,8 @@
 #define OUR_O_BINARY 0
 #endif
 
+//#define PRE_NULL_SYMBOLS 1
+
 #ifdef O_LARGEFILE
 #define OUR_O_LARGEFILE O_LARGEFILE
 #else
@@ -494,7 +496,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void logGeneratedTxSymbols(gr_complex *out);
   FILE *d_fp_log; bool d_log_open;
 
-  void logNativeTxSymbols(gr_complex *out);
+  void logNativeTxSymbols();
   void fill_all_carriers_map();
   FILE *d_fp_native; bool d_log_open_native;
 
@@ -542,6 +544,8 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   int d_training_symbol_cnt;
   void generateKnownSymbols();
 
+  gr_complex d_native_symbols[MAX_BATCH_SIZE*170*MAX_FFT_LENGTH];
+
   // MIMO TX related stuff //
   int d_mimo;
   int d_mimo_master_sock, d_mimo_slave_sock;
@@ -550,6 +554,8 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   int open_mimo_slave_socket();
   void send_mimo_trigger(uhd::time_spec_t);
   uhd::time_spec_t rcv_mimo_trigger();
+
+  bool is_CV_good(gr_complex cv1, gr_complex cv2);
 };
 
 #endif
