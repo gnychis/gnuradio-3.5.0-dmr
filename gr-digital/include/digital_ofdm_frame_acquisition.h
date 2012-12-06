@@ -90,7 +90,8 @@ protected:
   std::vector<gr_complex> d_known_symbol; // !< \brief known symbols at start of frame
   std::vector<float> d_known_phase_diff; // !< \brief factor used in correlation from known symbol
   std::vector<float> d_symbol_phase_diff; // !< \brief factor used in correlation from received symbol
-  std::vector<gr_complex> d_hestimate;  // !< channel estimate
+  //std::vector<gr_complex> d_hestimate;  // !< channel estimate
+  gr_complex *d_hestimate;
   int d_coarse_freq;             // !< \brief search distance in number of bins
   unsigned int d_phase_count;           // !< \brief accumulator for coarse freq correction
   float d_snr_est;                      // !< an estimation of the signal to noise ratio

@@ -56,6 +56,8 @@ using namespace std;
 //#define SEND_ACK_ETHERNET 1
 
 #define VERBOSE 0
+#define LOG_H 1
+
 //#define SCALE 1e3
 
 static const pmt::pmt_t SYNC_TIME = pmt::pmt_string_to_symbol("sync_time");
@@ -157,7 +159,7 @@ digital_ofdm_frame_sink::reset_demapper() {
 ---------------------------------------------------------------
 */
 inline void
-digital_ofdm_frame_sink::extract_header()
+digital_ofdm_frame_sink::extract_header(gr_complex h)
 {
   d_packet_whitener_offset = 0;                 // apurv++: hardcoded!
 
@@ -181,6 +183,15 @@ digital_ofdm_frame_sink::extract_header()
   if (VERBOSE)
     fprintf(stderr, " hdr details: (src: %d), (rx: %d), (batch_num: %d), (d_nsenders: %d), (d_packetlen: %d), (d_pkt_type: %d)\n",
                     d_header.src_id, d_header.dst_id, d_batch_number, d_nsenders, d_packetlen, d_header.pkt_type);
+
+#ifdef H_PRECODING
+  HInfo hInfo;
+  hInfo.batch_num = d_batch_number;
+  hInfo.h_value = h;
+  HKey hkey(d_header.prev_hop_id, d_id);
+  updateHInfo(hkey, hInfo);
+  txHInfo();
+#endif
 }
 
 unsigned char digital_ofdm_frame_sink::slicer_hdr(const gr_complex x)
@@ -766,7 +777,9 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   d_in_estimates = (gr_complex*) malloc(sizeof(gr_complex) * occupied_carriers);
   memset(d_in_estimates, 0, sizeof(gr_complex) * occupied_carriers);  
 
-  //assert(open_hestimates_log());
+#ifdef LOG_H
+  assert(open_hestimates_log());
+#endif
 
   d_log_pkt = false;
   d_log_ofdm_index = 0;
@@ -813,9 +826,7 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   memset(d_freq1, 0, sizeof(float) * MAX_BATCH_SIZE); 
 
 #ifdef SEND_ACK_ETHERNET
-  d_src_ip_addr = "128.83.141.213";
-  d_src_sock_port = 9000;
-  d_ack_sock = create_ack_sock();
+  d_ack_sock = open_client_sock(9000, "128.83.141.213");
   if(d_ack_sock != -1) {
      printf("@ backend ethernet connected for ACK!\n"); fflush(stdout);
   }
@@ -881,6 +892,11 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   d_log_SER_symbols_open = false;
 
   d_agg_total_symbols = 0; d_agg_correct_symbols = 0;
+
+#ifdef H_PRECODING
+  prepare_H_coding();
+#endif
+
 }
 
 void
@@ -1063,14 +1079,16 @@ digital_ofdm_frame_sink::work (int noutput_items,
     if (d_hdr_byte_offset == HEADERBYTELEN) {
         if (header_ok()) {						 // full header received
 
+#ifdef LOG_H
 	  /* log hestimates */
-	  if(use_estimates && 0) {
+	  if(use_estimates) {
 	      int count = ftell(d_fp_hestimates);
 	      count = fwrite_unlocked(&in_estimates[0], sizeof(gr_complex), d_occupied_carriers, d_fp_hestimates);
    	  }
+#endif
 
-          printf("HEADER OK prev_hop: %d pkt_num: %d dst_id: %d\n", d_header.prev_hop_id, d_header.pkt_num, d_header.dst_id); fflush(stdout);
-          extract_header();						// fills local fields with header info
+          printf("HEADER OK prev_hop: %d pkt_num: %d batch_num: %d dst_id: %d\n", d_header.prev_hop_id, d_header.pkt_num, d_header.batch_number, d_header.dst_id); fflush(stdout);
+          extract_header(in_estimates[0]);						// fills local fields with header info
 
           assert(d_nsenders > 0);
 
@@ -2916,6 +2934,8 @@ digital_ofdm_frame_sink::populateCompositeLinkInfo()
            unsigned int srcId = atoi(token_vec[i+2]);
            printf("srcId: %d, size: %d\n", srcId, cLink->srcIds.size()); fflush(stdout);
            cLink->srcIds.push_back(srcId);
+	   if(srcId == d_id)
+	     d_outCLinks.push_back(cLink->linkId);
         }
 
         int num_dst = atoi(token_vec[num_src+2]);
@@ -2924,6 +2944,8 @@ digital_ofdm_frame_sink::populateCompositeLinkInfo()
            unsigned int dstId = atoi(token_vec[num_src+3+i]);
            printf("dstId: %d\n", dstId); fflush(stdout);
            cLink->dstIds.push_back(dstId);
+	   if(dstId == d_id)
+	     d_inCLinks.push_back(cLink->linkId);
         }
         
         d_compositeLinkVector.push_back(cLink);
@@ -3949,6 +3971,11 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   //reduceCoefficients_LSQ(flow_info);
   //chooseCV(flow_info, coeffs);
 
+#ifdef H_PRECODING
+  reduceCoefficients_LSQ(flow_info);
+  chooseCV_H(flow_info, coeffs);
+  
+#else
   /* pick new random <coeffs> for each innovative pkt to == new coded pkt */
   printf("selecting random coeffs::: --- \n"); fflush(stdout);
   float phase[MAX_BATCH_SIZE];
@@ -3983,6 +4010,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      free(symbols);
   }
   printf("--------------------------------------------------------------------- \n"); fflush(stdout);
+#endif	// H_PRECODING
 
   float factor = normalizeSignal(out_symbols, n_innovative_pkts, ((d_fwd_index==0)?1:2));
 
@@ -4293,30 +4321,7 @@ digital_ofdm_frame_sink::send_ack(unsigned char flow, unsigned char batch) {
     printf("@@@@@@@@@@@@@@@@ sent ACK (%d bytes) for batch %d @@@@@@@@@@@@@@@@@@@@\n", ACK_HEADERDATALEN, flowInfo->active_batch); fflush(stdout);
 }
 
-#ifdef SEND_ACK_ETHERNET
-int
-digital_ofdm_frame_sink::create_ack_sock() {
-  int sockfd;
-  struct sockaddr_in dest;
-
-  /* create socket */
-  sockfd = socket(PF_INET, SOCK_STREAM, 0);
-  if(sockfd != -1) {
-    printf("@ socket created at the destination SUCCESS\n"); fflush(stdout);
-  }
-
-  /* initialize value in dest */
-  bzero(&dest, sizeof(struct sockaddr_in));
-  dest.sin_family = PF_INET;
-  dest.sin_port = htons(d_src_sock_port);
-  dest.sin_addr.s_addr = inet_addr(d_src_ip_addr);
-  /* Connecting to server */
-  connect(sockfd, (struct sockaddr*)&dest, sizeof(struct sockaddr_in));
-  return sockfd;
-}
-
-#else
-
+#ifndef SEND_ACK_ETHERNET
 /* receiver does this - creates an ACK which contains: 
    flowId, batch_to_be_ACKed, flow_src_id, flow_dst_id (my_id). 
    Insert the ACK in the out_queue, which would trigger the callback
@@ -6501,6 +6506,9 @@ digital_ofdm_frame_sink::packCoefficientsInHeader_LSQ(MULTIHOP_HDR_TYPE& header,
   printf("packCoefficientsInHeader end\n"); fflush(stdout);
 }
 
+/* reduction means to combine the 'h' and 'coeff' of different senders. Eg with 2 senders
+   (c1.h11+c2.h21)P1 + (d1.h11+d2.h21)P2, where the (..) are the reduced coeffs and 
+   (c1, d1) and (c2, d2) are the coefficients of S1 and S2 respectively */
 inline void
 digital_ofdm_frame_sink::reduceCoefficients_LSQ(FlowInfo *flowInfo) {
 
@@ -6800,9 +6808,9 @@ digital_ofdm_frame_sink::openRxSymbolLog() {
   }
 }
 
+/* logs only the /data/ symbols (data subcarriers) for offline analysis */
 inline void 
 digital_ofdm_frame_sink::logFrequencyDomainRxSymbols() {
-  // log rx input symbols //
   int count = ftell(d_fp_rx_symbols);
 
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
@@ -6813,6 +6821,7 @@ digital_ofdm_frame_sink::logFrequencyDomainRxSymbols() {
         }
      }
   }
+  printf("logFreq, count: %d\n", ftell(d_fp_rx_symbols)); fflush(stdout);
 }
 
 inline float
@@ -7050,29 +7059,11 @@ digital_ofdm_frame_sink::modulateMsg(gr_complex* out, unsigned char *msg, int nu
 inline void
 digital_ofdm_frame_sink::open_mimo_sock() 
 {
+
   /* mimo server details */
   const char *src_ip_addr = "128.83.120.84"; //"128.83.143.15";
   int port = 9000;
-  struct sockaddr_in dest;
-
-  /* create socket */
-  d_mimo_sock = socket(PF_INET, SOCK_STREAM, 0);
-  if(d_mimo_sock != -1) {
-    printf("@ socket created at the destination SUCCESS\n"); fflush(stdout);
-  }
-
-  /* initialize value in dest */
-  bzero(&dest, sizeof(struct sockaddr_in));
-  dest.sin_family = PF_INET;
-  dest.sin_port = htons(port);
-  dest.sin_addr.s_addr = inet_addr(src_ip_addr);
-
-  /* Connecting to server */
-  int err = connect(d_mimo_sock, (struct sockaddr*)&dest, sizeof(struct sockaddr_in));
-  if(err != 0)  {
-	printf("open_mimo_sock failed with %d\n", errno); fflush(stdout);
-	assert(false);
-  }
+  d_mimo_sock = open_client_sock(port, src_ip_addr);
   printf("open_mimo_sock success!\n"); fflush(stdout);
 }
 
@@ -7196,128 +7187,557 @@ digital_ofdm_frame_sink::is_CV_good(gr_complex cv1, gr_complex cv2) {
    return true;
 }
 
-#if 0
-void
-digital_ofdm_frame_sink::correctStoredSignal(FlowInfo *flowInfo) 
+#ifdef H_PRECODING
+/* the lead sender selects the coeffs and sends them over the socket to the 
+   slave sender. The slave then uses that knowledge to figure out its own 
+   coefficients */
+inline int
+digital_ofdm_frame_sink::get_coFwd()
 {
-  printf("correctOutgoingSignal start\n"); fflush(stdout);
-  // prep for building the map //
-  vector<vector<gr_complex*> > batched_sym_position;
+   assert(d_fwd_index == 1);
+   assert(d_outCLinks.size() == 1);                     // assume only 1 cofwd for now //
 
-  int dc_tones = d_occupied_carriers - d_data_carriers.size();
-  unsigned int half_occupied_tones = (d_occupied_carriers - dc_tones)/2;
+   int coLinkId = d_outCLinks[0];
+   CompositeLink *cLink = getCompositeLink(coLinkId);
+   int n_coFwds = cLink->srcIds.size();
+   assert(n_coFwds == 2);
 
-  for(unsigned int i = 0; i < d_occupied_carriers; i++) {
+   for(int i = 0; i < n_coFwds; i++) {
+      if(cLink->srcIds[i] != d_id)
+	 return cLink->srcIds[i];
+   } 
+   assert(false);
+}
 
-        if(i >= half_occupied_tones && i < half_occupied_tones + dc_tones) {
-            continue;                                                                                   // bypass the DC tones //
+/* spits all the next-hop rx-ids */
+inline void
+digital_ofdm_frame_sink::get_nextHop_rx(vector<int> &rx_ids) {
+   vector<int>::iterator it = d_outCLinks.begin();
+   assert(d_outCLinks.size() > 0);
+   while(it != d_outCLinks.end()) {
+      rx_ids.push_back(*it);	
+      it++;
+   }
+}
+
+inline void
+digital_ofdm_frame_sink::send_coeff_info_eth(gr_complex *coeffs)
+{
+   int coFwdId = get_coFwd();
+   
+   int buf_size = sizeof(gr_complex) * d_batch_size;			
+   printf("send_coeff_info_eth to node%d\n", coFwdId); fflush(stdout);
+   char *_buf = (char*) malloc(buf_size);
+   memcpy(_buf, coeffs, buf_size);
+
+   int bytes_sent = send(d_coeff_tx_sock, (char *)&_buf[0], buf_size, 0);
+   printf("Coeffs sent, bytes_sent: %d, errno: %d\n", bytes_sent, errno); fflush(stdout);
+   free(_buf);
+}
+
+/* the lead sender sends out 'batch_size' # of coeffs for each rx they will encounter.  */
+inline void
+digital_ofdm_frame_sink::get_coeffs_from_lead(CoeffInfo *coeffs)
+{
+   vector<int> rx_ids;
+   get_nextHop_rx(rx_ids); 
+   int num_rx = rx_ids.size(); assert(num_rx > 0);
+
+   int buf_size = sizeof(CoeffInfo) * num_rx;
+   char *_buf = (char*) malloc(sizeof(buf_size));
+   memset(_buf, 0, sizeof(buf_size));
+
+   int nbytes = recv(d_coeff_rx_sock, _buf, buf_size, 0);
+   if(nbytes > 0) {
+      int offset = 0;
+      while(1) {
+         nbytes = recv(d_coeff_rx_sock, _buf+offset, buf_size-offset, 0);
+         offset += nbytes;
+         if(offset == buf_size) {
+	    memcpy(coeffs, _buf, buf_size); 
+	    break;
+         }
+      }
+      assert(offset == buf_size);
+   }
+   free(_buf);
+}
+
+inline void
+digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, gr_complex *reduced_coeffs, FlowInfo *flowInfo) {
+  InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
+  unsigned int n_inno_pkts = inno_pkts.size();
+
+  int num_carriers = d_data_carriers.size();
+
+  /* randomly choose every coefficient except for the last one and keep reducing to latest value */
+  for(unsigned int i = 0; i < n_inno_pkts-1; i++) {
+     PktInfo *pInfo = inno_pkts[i];
+     float amp = getAvgAmplificationFactor(pInfo->hestimates);
+     float phase = (rand() % 360 + 1) * M_PI/180;
+
+     coeffs[i] = (amp * ToPhase_c(phase));
+     gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[i];               // reduced coeffs for this inno pkt //
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+        reduced_coeffs[k] += (coeffs[i] * pkt_coeffs[k*num_carriers]);
+     }
+  }
+
+  int last = n_inno_pkts-1;
+  gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[last];
+  PktInfo *pInfo = inno_pkts[last];
+  float amp = getAvgAmplificationFactor(pInfo->hestimates);
+
+  vector<int> rx_ids;
+  get_nextHop_rx(rx_ids);
+
+  while(1) {
+     float phase = (rand() % 360 + 1) * M_PI/180;
+     coeffs[last] = (amp * ToPhase_c(phase));
+
+     for(unsigned int k = 0; k < d_batch_size; k++)
+         reduced_coeffs[k] += (coeffs[last] * pkt_coeffs[k*num_carriers]);
+
+     // ensure its a good selection over all the next-hop rx //
+     bool good = 1;
+     for(int i = 0; i < rx_ids.size(); i++) {
+	int rx_id = rx_ids[i];
+ 	gr_complex h = predictH(d_id, rx_id);         //h-val from me to this rx
+
+	// include the channel effect //
+	for(int k = 0; k < d_batch_size; k++) {
+	   reduced_coeffs[k] *= h;
+	}	
+
+        if(!is_CV_good(reduced_coeffs[0], reduced_coeffs[1])) {
+	    good = 0;
+            break;
         }
-	
-	cx_mat coeff_mat = flowInfo->coeff_mat;
-        updateCoeffMatrix(flowInfo, i, coeff_mat);
+     }
 
-        // build the map for each batch on each subcarrier //
-        vector<gr_complex*> sym_position;
-        buildMap_ILP(coeff_mat, sym_position);
-        batched_sym_position.push_back(sym_position);
-  }
-
-  InnovativePktInfoVector innovativePkts = flowInfo->innovative_pkts;
-  //debugMap_ILP(batched_sym_position, innovativePkts.size()); 
- 
-  assert(batched_sym_position.size() == d_data_carriers.size());
-  vector<gr_complex> dfe_vec[MAX_BATCH_SIZE];
-  gr_complex* sym_vec[MAX_BATCH_SIZE];
-  gr_complex* closest_sym_vec[MAX_BATCH_SIZE];
-
-  // initialization //
-  for(unsigned int k = 0; k < innovativePkts.size(); k++) {
-     dfe_vec[k].resize(d_occupied_carriers);
-     fill(dfe_vec[k].begin(), dfe_vec[k].end(), gr_complex(1.0,0.0));
-
-     sym_vec[k] = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
-     closest_sym_vec[k] = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
-  }
-  
-  // signal correction //
-  for(unsigned int o = 0; o < d_num_ofdm_symbols; o++) {
-      gr_complex carrier[MAX_BATCH_SIZE], accum_error[MAX_BATCH_SIZE];
-      for(unsigned int i = 0; i < innovativePkts.size(); i++) {	
-          PktInfo *pInfo = innovativePkts[i];
-	  gr_complex *rx_symbols_this_batch = pInfo->symbols;
-
-	  carrier[i] = gr_expj(d_phase[i]);
-	  accum_error[i] = 0.0;
-
-	  memset(closest_sym_vec[i], 0, sizeof(gr_complex) * d_occupied_carriers);
-	  memcpy(sym_vec[i], &rx_symbols_this_batch[o * d_occupied_carriers], sizeof(gr_complex) * d_occupied_carriers);	
-      }
-
-      gr_complex sigrot[MAX_BATCH_SIZE]; 
-      for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
-	  // find sigrot for each batch //
-          for(unsigned int k = 0; k < innovativePkts.size(); k++) {
-              sigrot[k] = sym_vec[k][d_data_carriers[i]] * carrier[k] * dfe_vec[k][i];
-          }
-
-          findClosestSymbol(sigrot, closest_sym_vec, innovativePkts.size(), batched_sym_position[i], i, o);
-
-	  // update accum_error, dfe_vec //
-	  for(unsigned int k = 0; k < innovativePkts.size(); k++) {
-             accum_error[k] += (sigrot[k] * conj(closest_sym_vec[k][d_data_carriers[i]]));
-             if (norm(sigrot[k])> 0.001) dfe_vec[k][i] +=  d_eq_gain*(closest_sym_vec[k][d_data_carriers[i]]/sigrot[k]-dfe_vec[k][i]);
-          }
-      } 
-
-      // update the PLL settings //
-      for(unsigned int k = 0; k < innovativePkts.size(); k++) {
-
-	 // update outgoing with closest symbol //
-	 PktInfo *pInfo = innovativePkts[k];
-	 gr_complex *rx_symbols_this_batch = pInfo->symbols;
-	 memcpy(&rx_symbols_this_batch[o * d_occupied_carriers], closest_sym_vec[k], sizeof(gr_complex) * d_occupied_carriers);
-
-         float angle = arg(accum_error[k]);
-      }
-  }
-  
-  // cleanup //
-  for(unsigned int k = 0; k < innovativePkts.size(); k++) {
-        free(sym_vec[k]);
-        free(closest_sym_vec[k]);
+     if(good) break;
   }
 }
 
-void
-digital_ofdm_frame_sink::findClosestSymbol(gr_complex *x, gr_complex **closest_sym_vec, int num_pkts,
-                                    vector<gr_complex*> batched_sym_position, unsigned int subcarrier_index, unsigned int o_index) {
-  unsigned int min_index = 0;
-  float min_euclid_dist = 0.0;
+/* more exhaustive now, since it accounts for co-ordinating transmitters, multiple rx (if any) */
+inline void
+digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo *others_coeffs, FlowInfo *flowInfo) {
+  InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
+  unsigned int n_inno_pkts = inno_pkts.size();
 
-  // for each table entry, find the min(error, k) //
-  unsigned int table_size = pow(2.0, double(d_batch_size));
-  for(unsigned int k = 0; k < num_pkts; k++) {
+  vector<int> rx_ids;
+  get_nextHop_rx(rx_ids); 
 
-      // initialize //
-      min_euclid_dist = norm(x[k] - batched_sym_position[k][0]);
+  /* first, formulate the constant part, which does not change with different receivers */
+  gr_complex new_coeffs[MAX_BATCH_SIZE];
+  int num_carriers = d_data_carriers.size();
 
-      float euclid_dist = 0.0;
-      for(unsigned int j = 1; j < table_size; j++) {
-	 euclid_dist = norm(x[k] - batched_sym_position[k][j]);
-	 if (euclid_dist < min_euclid_dist) {
-	     min_euclid_dist = euclid_dist;
-	     min_index = j;
-	 }
-      }
+  /* randomly choose every coefficient except for the last one and keep reducing to latest value */
+  for(unsigned int i = 0; i < n_inno_pkts-1; i++) {
+     PktInfo *pInfo = inno_pkts[i];
+     float amp = getAvgAmplificationFactor(pInfo->hestimates);
+     float phase = (rand() % 360 + 1) * M_PI/180;
 
-      closest_sym_vec[k][d_data_carriers[subcarrier_index]] = batched_sym_position[k][min_index];
-      if(o_index == 0 && subcarrier_index == 0) {
-	 printf("closest match for (%f, %f) ----> (%f, %f) \n", x[k].real(), x[k].imag(), batched_sym_position[k][min_index].real(), batched_sym_position[k][min_index].imag());
-	 fflush(stdout);
-      }
+     my_coeffs[i] = (amp * ToPhase_c(phase));
+     gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[i];               // reduced coeffs for this inno pkt //
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+        new_coeffs[k] += (my_coeffs[i] * pkt_coeffs[k*num_carriers]);
+     }
+  } /* step 1 done */
+   
+  /* as for the last one, take the global knowledge into account */
+  int last = n_inno_pkts-1;
+  gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[last];
+  PktInfo *pInfo = inno_pkts[last];
+  float amp = getAvgAmplificationFactor(pInfo->hestimates);
 
-      // reinit min_index for next batch //
-      min_index = 0;
+  while(1) {
+     float phase = (rand() % 360 + 1) * M_PI/180;
+     my_coeffs[last] = (amp * ToPhase_c(phase));
+
+     for(unsigned int k = 0; k < d_batch_size; k++)
+         new_coeffs[k] += (my_coeffs[last] * pkt_coeffs[k*num_carriers]);
+
+     // now the receiver based stuff //
+     bool good = 1;
+     for(int i = 0; i < rx_ids.size(); i++) {
+	int rx_id = rx_ids[i];
+        gr_complex h = predictH(d_id, rx_id);         //h-val from me to this rx
+	gr_complex *o_coeffs = others_coeffs[i].coeffs;     // other senders coeffs for this rx
+
+	assert(others_coeffs[i].rx_id == rx_id);           // ensure right value
+
+	// combine with the other sender //    
+        for(unsigned int k = 0; k < d_batch_size; k++) {
+           new_coeffs[k] = (new_coeffs[k] * h) + o_coeffs[k];
+        }
+
+        if(!is_CV_good(new_coeffs[0], new_coeffs[1])) {
+	    good = 0;
+            break;
+	}
+     }
+
+     if(good == 1)
+	break;
+  } //end while
+}
+
+inline void
+digital_ofdm_frame_sink::chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs) {
+
+  assert(d_batch_size == 2);
+  InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
+  assert(inno_pkts.size() == d_batch_size);
+
+  // first check if any outstanding HInfo available //
+  vector<unsigned int>:: iterator it = d_h_rx_socks.begin();
+  while(it != d_h_rx_socks.end()) {
+     check_HInfo_rx_sock(*it);
+     it++;
   }
+
+  if(d_fwd_index <=1) {
+     gr_complex reduced_coeffs[MAX_BATCH_SIZE];
+     smart_selection_local(coeffs, reduced_coeffs, flowInfo);
+     if(d_fwd_index == 1) 
+        send_coeff_info_eth(reduced_coeffs);
+  } else {
+     assert(d_fwd_index == 2);
+     CoeffInfo lead_coeffs[MAX_RX];
+     get_coeffs_from_lead(lead_coeffs);
+     smart_selection_global(coeffs, lead_coeffs, flowInfo);
+  }
+}
+
+inline HInfo*
+digital_ofdm_frame_sink::getHInfo(unsigned int tx_id, unsigned int rx_id) {
+  HKey hkey(tx_id, rx_id);
+  HInfoMap::iterator it = d_HInfoMap.find(hkey);
+  assert(it != d_HInfoMap.end());
+  return (HInfo*) it->second;
+}
+
+/* predict the value of H as a fn(slope, samples since last tx) */
+inline gr_complex 
+digital_ofdm_frame_sink::predictH(unsigned int tx_id, unsigned int rx_id) {
+  HInfo *hInfo = getHInfo(tx_id, rx_id);
+
+  float slope  = hInfo->slope;
+  gr_complex h_value = hInfo->h_value;
+
+  // TODO:  
+
+  return h_value;
+}
+
+/* opens the h_tx and h_rx sockets 
+   figure out the upstream and downstream nodes and open sockets accordingly
+*/
+inline void
+digital_ofdm_frame_sink::prepare_H_coding() {
+   populateEthernetAddress();   
+   EthInfoMap::iterator it;
+
+   /* create 1 rx client socket per downstream nodes to receive from */
+   for(int i = 0; i < d_outCLinks.size(); i++) {
+      CompositeLink *link = getCompositeLink(d_outCLinks[i]);
+   
+      vector<unsigned int> dst_ids = link->dstIds;
+      for(int j = 0; j < dst_ids.size(); j++) {
+	 it = d_ethInfoMap.find(dst_ids[j]);
+	 assert(it != d_ethInfoMap.end());
+	 EthInfo *ethInfo = (EthInfo*) it->second;
+	 int rx_sock = open_client_sock(ethInfo->port, ethInfo->addr);
+
+	 //d_h_rx_socks.insert(pair<int, int>(dst_ids[j], rx_sock));		// dstId will send HInfo
+	 d_h_rx_socks.push_back(rx_sock);
+      }
+   }
+
+   // open a server socket (since I'll be transmitting to upstream nodes). 
+   // upstream nodes are the clients that'll transmit to me
+   assert(d_outCLinks.size() == 1);
+   CompositeLink *link = getCompositeLink(d_outCLinks[0]);
+   int num_clients = link->srcIds.size();
+   it = d_ethInfoMap.find(d_id);
+   assert(it != d_ethInfoMap.end());
+   EthInfo *ethInfo = (EthInfo*) it->second;
+   open_server_sock(ethInfo->port, d_h_tx_socks, num_clients);		// fill up d_h_tx_socks
+
+#if 0
+   // opens 1 tx port to transmit to 1 upstream node //
+   for(int i = 0; i < d_inCLinks.size(); i++) {
+      CompositeLink *link = getCompositeLink(d_outCLinks[i]);
+
+      vector<unsigned int> src_ids = link->srcIds;
+      for(int j = 0; j < src_ids.size(); j++) {
+         it = d_ethInfoMap.find(src_ids[j]);
+         assert(it != d_ethInfoMap.end());
+	 EthInfo *ethInfo = (EthInfo*) it->second;
+         int tx_sock = open_server_sock(ethInfo->port);
+         d_h_tx_socks.push_back(tx_sock);
+      }
+   }
+#endif
+
+   printf("opened H sockets for exchanging H information!\n"); fflush(stdout);
+
+   /* create 1 tx socket to send the coeffs over, if lead sender */
+   if(d_fwd_index == 1) {
+      unsigned int co_id = get_coFwd();
+      it = d_ethInfoMap.find(d_id);
+      assert(it != d_ethInfoMap.end());
+      EthInfo *ethInfo = (EthInfo*) it->second;
+      vector<unsigned int> conn_socks;
+      open_server_sock(ethInfo->port + 50, conn_socks, 1);		// only 1 client needs to be connected
+      d_coeff_tx_sock = conn_socks[0];
+   }
+   /* else open 1 rx socket to receive from the lead sender */
+   else if (d_fwd_index == 2) {
+      unsigned int co_id = get_coFwd();
+      it = d_ethInfoMap.find(co_id);
+      assert(it != d_ethInfoMap.end());
+      EthInfo *ethInfo = (EthInfo*) it->second;
+      d_coeff_rx_sock = open_client_sock(ethInfo->port+50, ethInfo->addr);
+   }
+
+   initHInfoMap();
+}
+
+// called when (1) receive a packet on the air, and (2) receive HInfo packet over ethernet //
+inline void
+digital_ofdm_frame_sink::updateHInfo(HKey hkey, HInfo _hInfo) {
+   HInfoMap::iterator it = d_HInfoMap.find(hkey);
+   assert(it != d_HInfoMap.end());
+   HInfo *hInfo = (HInfo*) it->second;  
+ 
+   hInfo->batch_num = _hInfo.batch_num;
+   if(hInfo->slope > 0.0) {
+      float diff = arg(_hInfo.h_value - hInfo->h_value);
+      hInfo->slope = (hInfo->slope + diff)/2.0;
+   }
+   hInfo->h_value = _hInfo.h_value;
+}
+
+// initializes the HInfoMap to have keys for all the relevant entries //
+inline void
+digital_ofdm_frame_sink::initHInfoMap() {
+  
+   vector<int>::iterator it = d_outCLinks.begin();
+   while(it != d_outCLinks.end()) {
+	unsigned int rx_id = *it;
+	HKey hkey(d_id, rx_id);
+	HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
+	memset(hInfo, 0, sizeof(HInfo));
+	d_HInfoMap.insert(pair<HKey, HInfo*>(hkey, hInfo));
+        it++;
+   }
+
+   it = d_inCLinks.begin();
+   while(it != d_inCLinks.end()) {
+        unsigned int tx_id = *it;
+        HKey hkey(tx_id, d_id);
+        HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
+        memset(hInfo, 0, sizeof(HInfo));
+        d_HInfoMap.insert(pair<HKey, HInfo*> (hkey, hInfo));
+        it++;
+   }
+}
+
+/* check if any outstanding msgs on HInfo rx sock, if yes, then extract those HInfo 
+   structures and insert them into HInfoMap. Upto 2 HInfo can be extracted every time 
+*/
+inline void
+digital_ofdm_frame_sink::check_HInfo_rx_sock(int rx_sock) {
+
+   int buf_size = sizeof(HInfo) + sizeof(unsigned char);		// extra byte for the sender's id
+   char *_buf = (char*) malloc(sizeof(buf_size));
+   memset(_buf, 0, sizeof(buf_size));
+
+   int n_extracted = 0; 
+   int nbytes = recv(rx_sock, _buf, buf_size, 0);
+   if(nbytes > 0) {
+      int offset = 0;
+      while(1) {
+         nbytes = recv(rx_sock, _buf+offset, buf_size-offset, 0);
+         offset += nbytes;
+         if(offset == buf_size) {
+
+	    unsigned char rxId = _buf[0];				// copy the sender's id
+	    HKey hkey(d_id, rxId);
+	
+	    HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
+	    memcpy(hInfo, &_buf[1], sizeof(HInfo));			// copy HInfo
+
+	    updateHInfo(hkey, *hInfo);
+	    free(hInfo);
+
+	    n_extracted++;
+	    
+	    if(n_extracted == 1) {
+       	      // see if there's another packet - I'll try and get only one more, rest later //
+	      memset(_buf, 0, sizeof(buf_size));
+              nbytes = recv(rx_sock, _buf, buf_size, 0);
+	      if(nbytes > 0) {
+		 offset = 0;
+	         continue;
+	      }
+	    }
+	    break;
+      	 }
+      }
+      assert(offset == buf_size);
+   }
+
+   printf("check_HInfo_rx, nextracted: %d\n", n_extracted); fflush(stdout);
+   free(_buf);
+} 
+
+// broadcast the HInfo to all the upstream clients, d_h_tx_socks are the clients to be transmitted to //
+inline void
+digital_ofdm_frame_sink::txHInfo() {
+   int num_clients = d_h_tx_socks.size();
+   assert(num_clients >= 1);
+
+   int buf_size = sizeof(HInfo)*num_clients + sizeof(unsigned char);            // extra byte for my-id
+   char *_buf = (char*) malloc(buf_size);
+   memcpy(_buf, &d_id, 1); 
+
+   // ids of clients 
+   assert(d_inCLinks.size() == 1);                                              // can't envision more than 1 link that i'm part of
+   CompositeLink *clink = getCompositeLink(d_inCLinks[0]);
+   assert(clink);
+   vector<unsigned int> tx_ids = clink->srcIds;
+   assert(tx_ids.size() == num_clients);
+
+
+   // build the payload
+   vector<unsigned int>::iterator it = tx_ids.begin();
+   int offset = 1;
+   while(it != tx_ids.end()) {
+       int tx_id = *it;
+       HInfo *hInfo = getHInfo(tx_id, d_id);
+       memcpy(_buf+offset, hInfo, sizeof(HInfo));
+       offset += sizeof(HInfo);
+       it++;
+   }
+
+   // send msgs
+   it = d_h_tx_socks.begin();
+   while(it != d_h_tx_socks.end()) {
+   	int bytes_sent = send(*it, (char *)&_buf[0], buf_size, 0);
+        printf("HInfo sent, bytes_sent: %d, errno: %d\n", bytes_sent, errno); fflush(stdout);
+	it++;
+   }
+   free(_buf);
+}
+
+inline void
+digital_ofdm_frame_sink::populateEthernetAddress()
+{
+   // node-id ethernet-addrees port-on-which-it-is-listening //
+   printf("populateEthernetAddress\n"); fflush(stdout);
+   FILE *fl = fopen ( "eth_add.txt" , "r+" );
+   if (fl==NULL) {
+        fprintf (stderr, "File error\n");
+        exit (1);
+   }
+
+   char line[128];
+   const char *delim = " ";
+   while ( fgets ( line, sizeof(line), fl ) != NULL ) {
+        char *strtok_res = strtok(line, delim);
+        vector<char*> token_vec;
+        while (strtok_res != NULL) {
+           token_vec.push_back(strtok_res);
+           //printf ("%s\n", strtok_res);
+           strtok_res = strtok (NULL, delim);
+        }
+
+        printf("size: %d\n", token_vec.size()); fflush(stdout);
+       
+	EthInfo *ethInfo = (EthInfo*) malloc(sizeof(EthInfo));
+	memset(ethInfo, 0, sizeof(EthInfo));
+        unsigned char node_id = (unsigned char) atoi(token_vec[0]);
+        memcpy(ethInfo->addr, &token_vec[1], sizeof(token_vec[1]));
+	unsigned int port = atoi(token_vec[2]);
+	ethInfo->port = port;
+
+        d_ethInfoMap.insert(pair<unsigned char, EthInfo*> (node_id, ethInfo));
+
+        std::cout<<"Inserting in the map: node " << node_id << " addr: " << ethInfo->addr << endl;
+        printf("\n");
+   }
+
+    fclose (fl);
 }
 #endif
+
+
+/* util function */
+inline void
+digital_ofdm_frame_sink::open_server_sock(int sock_port, vector<unsigned int>& connected_clients, int num_clients) {
+  int sockfd, _sock;
+  struct sockaddr_in dest;
+
+  /* create socket */
+  sockfd = socket(PF_INET, SOCK_STREAM, 0);
+  fcntl(sockfd, F_SETFL, O_NONBLOCK);
+
+  /* ensure the socket address can be reused, even after CTRL-C the application */
+  int optval = 1;
+  int ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+  if(ret == -1) {
+        printf("@ digital_ofdm_mapper_bcv::setsockopt ERROR\n"); fflush(stdout);
+  }
+
+  /* initialize structure dest */
+  bzero(&dest, sizeof(dest));
+  dest.sin_family = AF_INET;
+
+  /* assign a port number to socket */
+  dest.sin_port = htons(sock_port);
+  dest.sin_addr.s_addr = INADDR_ANY;
+
+  bind(sockfd, (struct sockaddr*)&dest, sizeof(dest));
+
+  /* make it listen to socket with max 20 connections */
+  listen(sockfd, 1);
+  assert(sockfd != -1);
+
+  struct sockaddr_in client_addr;
+  int addrlen = sizeof(client_addr);
+
+  int conn = 0;
+  while(conn != num_clients) {
+    _sock = accept(sockfd, (struct sockaddr*)&client_addr, (socklen_t*)&addrlen);
+    if(_sock != -1) {
+      connected_clients.push_back(_sock);
+      conn++;
+    }
+  }
+
+  assert(connected_clients.size() == num_clients);
+}
+
+/* util function */
+inline int
+digital_ofdm_frame_sink::open_client_sock(int port, const char *addr) {
+  int sockfd;
+  struct sockaddr_in dest;
+
+  /* create socket */
+  sockfd = socket(PF_INET, SOCK_STREAM, 0);
+  assert(sockfd != -1);
+
+  /* initialize value in dest */
+  bzero(&dest, sizeof(struct sockaddr_in));
+  dest.sin_family = PF_INET;
+  dest.sin_port = htons(port);
+  dest.sin_addr.s_addr = inet_addr(addr);
+  /* Connecting to server */
+  connect(sockfd, (struct sockaddr*)&dest, sizeof(struct sockaddr_in));
+  return sockfd;
+}

@@ -58,6 +58,7 @@
 
 #define USE_ILP 0
 #define MAX_SENDERS 4
+#define MAX_RX 3
 //#define USE_HEADER_PLL 0
 
 #define NULL_OFDM_SYMBOLS (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1
@@ -69,6 +70,10 @@
 
 //#define MAX_OCCUPIED_CARRIERS 64
 //#define MAX_DATA_CARRIERS 48
+
+#define H_PRECODING 1
+
+
 
 // apurv for logging ends //
 
@@ -157,6 +162,33 @@ typedef struct credit_str {
 } CreditInfo;
 typedef vector<CreditInfo*> CreditInfoVector;
 
+#ifdef H_PRECODING
+/* for exchanging h-values over the ethernet */
+// for recording the h-values between each pair of nodes. Every node maintains this info from 
+// itself->upstream node, and sends this to all upstream nodes (only single hop upstream)
+typedef struct h_info {
+  unsigned int batch_num;
+  float slope;
+  gr_complex h_value;
+} HInfo;
+
+typedef pair<unsigned int, unsigned int> HKey;		// <from, to>
+typedef map<HKey, HInfo*> HInfoMap;			// records between every pair of nodes
+
+typedef struct eth_info {
+  char addr[15];
+  int port;
+} EthInfo;
+
+typedef map<unsigned char, EthInfo*> EthInfoMap;		// to store ethernet add
+
+/* used by the co-ordinating transmitters to exchange coeff information */
+typedef struct coeff_info {
+  gr_complex coeffs[MAX_BATCH_SIZE];	// max batch size - these coeffs are reduced coeffs (2 for each rx) 
+  unsigned int rx_id;
+} CoeffInfo;
+
+#endif
 
 unsigned char random_mask_tuple[] = {
   255,  63,   0,  16,   0,  12,   0,   5, 192,   3,  16,   1, 204,   0,  85, 192,
@@ -612,7 +644,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  
   /* etc */
   void equalizeSymbols(gr_complex *in, gr_complex *in_estimates);
-  void extract_header();
+  void extract_header(gr_complex);
   void prepareForNewBatch();
   void debugPktInfo(PktInfo *pktInfo, unsigned char senderId);
   bool isSameNodeList(vector<unsigned char> ids1, vector<unsigned char> ids2);
@@ -659,6 +691,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void populateCompositeLinkInfo();
   void populateCreditInfo();
   void updateCredit();
+  vector<int> d_outCLinks, d_inCLinks;
 
   /* ACKs */
   unsigned int num_acks_sent;
@@ -748,11 +781,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   vector<float*> d_error_vec;						// on each subcarrier, hold error rotations for each OFDM symbol //
 
   /* to send the ACK on the backend ethernet */
-  int create_ack_sock();
   void send_ack(unsigned char flow_id, unsigned char batch_id);
   int d_ack_sock;
-  char * d_src_ip_addr;
-  unsigned int d_src_sock_port;
 
   /* alternative way of doing ILP, more incremental in nature */
   //float **d_euclid_dist;						// [subcarrier][2^batch_size]; records the euclid dist seen on each subcarrier, for each possibility in the table! //
@@ -898,6 +928,43 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
  void chooseCV(FlowInfo *flowInfo, gr_complex *coeffs);
  bool is_CV_good(gr_complex cv1, gr_complex cv2);
+
+ /* util functions */
+ void open_server_sock(int sock_port, vector<unsigned int>& connected_clients, int num_clients);
+ int open_client_sock(int port, const char *addr);
+
+#ifdef H_PRECODING
+ void get_nextHop_rx(vector<int> &rx_ids);
+ void updateHInfo(HKey, HInfo);
+ void initHInfoMap();
+ void prepare_H_coding();
+ gr_complex predictH(unsigned int tx_id, unsigned int rx_id);
+ void populateEthernetAddress();
+ void txHInfo();
+ void check_HInfo_rx_sock(int);
+ void send_coeff_info_eth(gr_complex *coeffs);
+ int get_coFwd();
+ void get_coeffs_from_lead(CoeffInfo *coeffs);
+ void smart_selection_local(gr_complex*, gr_complex*, FlowInfo*); 
+ void smart_selection_global(gr_complex*, CoeffInfo*, FlowInfo*);
+ HInfo* getHInfo(unsigned int tx_id, unsigned int rx_id);
+
+ void chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs);
+ bool is_CV_good_H(gr_complex cv1, gr_complex cv2);
+
+ HInfoMap d_HInfoMap;
+ EthInfoMap d_ethInfoMap;
+
+ // sockets used //
+ int d_coeff_tx_sock, d_coeff_rx_sock;				// for tx coefficients between the co-ordinating transmitters //
+ vector<unsigned int> d_h_tx_socks, d_h_rx_socks; 		// for tx HInfo between upstream/dowstream nodes //
+
+ //map<int, int> d_h_tx_socks;					// (toId, sock)	- used to send HInfo -> toId
+ //vector<int> d_h_tx_socks;					// all the toIds, to whom I'd send the HInfo
+ //map<int, int> d_h_rx_socks;					// (fromId, sock) - used to rcv HInfo <- fromId
+
+#endif
+
 };
 
 

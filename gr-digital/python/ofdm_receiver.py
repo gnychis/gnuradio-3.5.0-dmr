@@ -112,7 +112,7 @@ class ofdm_receiver(gr.hier_block2):
 
         self.nco = gr.frequency_modulator_fc(nco_sensitivity)         # generate a signal proportional to frequency error of sync block
         self.sigmix = gr.multiply_cc()				     
-        self.sampler = digital_swig.ofdm_sampler(fft_length, fft_length+cp_length)
+        self.sampler = digital_swig.ofdm_sampler(fft_length, fft_length+cp_length, 100)
         self.fft_demod = gr.fft_vcc(fft_length, True, win, True)
         self.ofdm_frame_acq = digital_swig.ofdm_frame_acquisition(occupied_tones, fft_length,
                                                         cp_length, ks[0])
@@ -140,7 +140,7 @@ class ofdm_receiver(gr.hier_block2):
        	    	self.connect(self.chan_filt, gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sigmix, 0))        # apurv++ follow freq offset
 	    else:
 		self.connect(self.chan_filt, (self.sampler, 0))
-		##self.connect(self.chan_filt, gr.delay(gr.sizeof_gr_complex, (fft_length+cp_length)), (self.sampler, 0))		## extra delay
+		###self.connect(self.chan_filt, gr.delay(gr.sizeof_gr_complex, (fft_length)), (self.sampler, 0))		## extra delay
 
 	    self.connect(self.chan_filt, gr.file_sink(gr.sizeof_gr_complex, "ofdm_receiver-chan_filt_c.dat"))
 	elif use_chan_filt == 2: 
@@ -222,6 +222,9 @@ class ofdm_receiver(gr.hier_block2):
 	#self.connect((self.ofdm_frame_acq,3), (self,3))           # ref sampler above
 
 	# apurv++ ends #
+
+	self.connect(self.ofdm_frame_acq, gr.file_sink(gr.sizeof_gr_complex*occupied_tones, "ofdm_receiver-frame_acq_c.dat"))
+	self.connect((self.ofdm_frame_acq,1), gr.file_sink(1, "ofdm_receiver-found_corr_b.dat"))
 
 
 	# apurv++ log the fine frequency offset corrected symbols #

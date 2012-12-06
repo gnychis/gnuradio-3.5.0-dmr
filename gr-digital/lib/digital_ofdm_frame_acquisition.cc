@@ -99,7 +99,7 @@ digital_ofdm_frame_acquisition::digital_ofdm_frame_acquisition (unsigned occupie
 {
   d_symbol_phase_diff.resize(d_fft_length);
   d_known_phase_diff.resize(d_occupied_carriers);
-  d_hestimate.resize(d_occupied_carriers);
+  //d_hestimate.resize(d_occupied_carriers);
   d_hest_freq_prod.resize(d_occupied_carriers); //apurv++
 
   unsigned int i = 0, j = 0;
@@ -115,11 +115,15 @@ digital_ofdm_frame_acquisition::digital_ofdm_frame_acquisition (unsigned occupie
       d_phase_lut[j + i*MAX_NUM_SYMBOLS] =  gr_expj(-M_TWOPI*d_cplen/d_fft_length*(i-d_freq_shift_len)*j);
     }
   }
+
+  d_hestimate = (gr_complex*) malloc(sizeof(gr_complex) * d_occupied_carriers);
+  memset(d_hestimate, 0, sizeof(gr_complex) * d_occupied_carriers);
 }
 
 digital_ofdm_frame_acquisition::~digital_ofdm_frame_acquisition(void)
 {
   delete [] d_phase_lut;
+  free(d_hestimate);
 }
 
 void
@@ -250,12 +254,18 @@ digital_ofdm_frame_acquisition::general_work(int noutput_items,
     signal_out[0] = 0;
   } 
 
-  for(unsigned int i = 0; i < d_occupied_carriers; i++) {
-    if(output_items.size() >= 3)
-        hout[i] = d_hestimate[i];								//apurv++
-    out[i] = //d_hestimate[i]*
-       coarse_freq_comp(d_coarse_freq, d_phase_count)*symbol[i+zeros_on_left+d_coarse_freq];
+#if 1
+  if(output_items.size() >= 3) {
+     memcpy(hout, d_hestimate, sizeof(gr_complex) * d_occupied_carriers);
+     memcpy(out, &symbol[zeros_on_left], sizeof(gr_complex) * d_occupied_carriers);
+     assert(d_coarse_freq == 0);
   }
+#else  
+  for(unsigned int i = 0; i < d_occupied_carriers; i++) {
+    if(output_items.size() >= 3) hout[i] = d_hestimate[i];								//apurv++
+    out[i] = d_hestimate[i]*coarse_freq_comp(d_coarse_freq, d_phase_count)*symbol[i+zeros_on_left+d_coarse_freq];
+  }
+#endif
 
   //log_hestimate();  	// apurv++: will now log the d_hestimate * coarse_freq_comp(a,b)
 
