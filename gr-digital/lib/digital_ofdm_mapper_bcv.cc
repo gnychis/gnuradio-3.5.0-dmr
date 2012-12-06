@@ -268,6 +268,10 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 
   if(NUM_TRAINING_SYMBOLS > 0)
      generateKnownSymbols();
+
+#ifdef H_PRECODING
+  prepare_H_coding();
+#endif
 }
 
 digital_ofdm_mapper_bcv::~digital_ofdm_mapper_bcv(void)
@@ -1818,6 +1822,15 @@ digital_ofdm_mapper_bcv::generateCodeVector()
 
   assert(d_batch_size == 2);
 
+#ifdef H_PRECODING
+  gr_complex coeffs[2];
+  chooseCV_H(coeffs);
+  for(unsigned int k = 0; k < d_batch_size; k++) {
+     float cv = arg(coeffs[k]) * 180/M_PI;
+     d_header.coeffs[k].phase = cv * SCALE_FACTOR_PHASE;
+     d_header.coeffs[k].amplitude = 1.0 * SCALE_FACTOR_AMP;
+  }
+#else
   float cv1 = rand() % 360 + 1;
   d_header.coeffs[0].phase = cv1 * SCALE_FACTOR_PHASE;
   d_header.coeffs[0].amplitude = SCALE_FACTOR_AMP;
@@ -1833,6 +1846,7 @@ digital_ofdm_mapper_bcv::generateCodeVector()
   d_header.coeffs[1].phase = cv2 * SCALE_FACTOR_PHASE;
   d_header.coeffs[1].amplitude = SCALE_FACTOR_AMP;
   printf("generateCodeVector:: cv1: %.3f , cv2: %.3f\n", cv1, cv2); fflush(stdout);
+#endif	// H_PRECODING
 
 #ifdef LSQ_COMPRESSION
   // source just blindly copies the coefficients, no point doing LSQ at the source //
@@ -1903,4 +1917,540 @@ digital_ofdm_mapper_bcv::is_CV_good(gr_complex cv1, gr_complex cv2) {
 
    printf("min_dt: %.3f\n", min_dt);
    return true;
+}
+
+/* util function */
+inline void
+digital_ofdm_mapper_bcv::open_server_sock(int sock_port, vector<unsigned int>& connected_clients, int num_clients) {
+  int sockfd, _sock;
+  struct sockaddr_in dest;
+
+  /* create socket */
+  sockfd = socket(PF_INET, SOCK_STREAM, 0);
+  fcntl(sockfd, F_SETFL, O_NONBLOCK);
+
+  /* ensure the socket address can be reused, even after CTRL-C the application */
+  int optval = 1;
+  int ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+  if(ret == -1) {
+        printf("@ digital_ofdm_mapper_bcv::setsockopt ERROR\n"); fflush(stdout);
+  }
+
+  /* initialize structure dest */
+  bzero(&dest, sizeof(dest));
+  dest.sin_family = AF_INET;
+
+  /* assign a port number to socket */
+  dest.sin_port = htons(sock_port);
+  dest.sin_addr.s_addr = INADDR_ANY;
+
+  bind(sockfd, (struct sockaddr*)&dest, sizeof(dest));
+
+  /* make it listen to socket with max 20 connections */
+  listen(sockfd, 1);
+  assert(sockfd != -1);
+
+  struct sockaddr_in client_addr;
+  int addrlen = sizeof(client_addr);
+
+  int conn = 0;
+  while(conn != num_clients) {
+    _sock = accept(sockfd, (struct sockaddr*)&client_addr, (socklen_t*)&addrlen);
+    if(_sock != -1) {
+      connected_clients.push_back(_sock);
+      conn++;
+    }
+  }
+
+  assert(connected_clients.size() == num_clients);
+}
+
+inline int
+digital_ofdm_mapper_bcv::open_client_sock(int port, const char *addr) {
+  int sockfd;
+  struct sockaddr_in dest;
+
+  /* create socket */
+  sockfd = socket(PF_INET, SOCK_STREAM, 0);
+  assert(sockfd != -1);
+
+  /* initialize value in dest */
+  bzero(&dest, sizeof(struct sockaddr_in));
+  dest.sin_family = PF_INET;
+  dest.sin_port = htons(port);
+  dest.sin_addr.s_addr = inet_addr(addr);
+  /* Connecting to server */
+  connect(sockfd, (struct sockaddr*)&dest, sizeof(struct sockaddr_in));
+  return sockfd;
+}
+
+#ifdef H_PRECODING
+inline int
+digital_ofdm_mapper_bcv::get_coFwd()
+{
+   assert(d_mimo == 1);
+   assert(d_outCLinks.size() == 1);                     // assume only 1 cofwd for now //
+
+   int coLinkId = d_outCLinks[0];
+   CompositeLink *cLink = getCompositeLink(coLinkId);
+   int n_coFwds = cLink->srcIds.size();
+   assert(n_coFwds == 2);
+
+   for(int i = 0; i < n_coFwds; i++) {
+      if(cLink->srcIds[i] != d_id)
+         return cLink->srcIds[i];
+   }
+   assert(false);
+}
+
+/* spits all the next-hop rx-ids */
+inline void
+digital_ofdm_mapper_bcv::get_nextHop_rx(vector<int> &rx_ids) {
+   vector<int>::iterator it = d_outCLinks.begin();
+   assert(d_outCLinks.size() > 0);
+   while(it != d_outCLinks.end()) {
+      rx_ids.push_back(*it);
+      it++;
+   }
+}
+
+inline void
+digital_ofdm_mapper_bcv::send_coeff_info_eth(gr_complex *coeffs)
+{
+   int coFwdId = get_coFwd();
+
+   int buf_size = sizeof(gr_complex) * d_batch_size;
+   printf("send_coeff_info_eth to node%d\n", coFwdId); fflush(stdout);
+   char *_buf = (char*) malloc(buf_size);
+   memcpy(_buf, coeffs, buf_size);
+
+   int bytes_sent = send(d_coeff_tx_sock, (char *)&_buf[0], buf_size, 0);
+   printf("Coeffs sent, bytes_sent: %d, errno: %d\n", bytes_sent, errno); fflush(stdout);
+   free(_buf);
+}
+
+/* the lead sender sends out 'batch_size' # of coeffs for each rx they will encounter.  */
+inline void
+digital_ofdm_mapper_bcv::get_coeffs_from_lead(CoeffInfo *coeffs)
+{
+   vector<int> rx_ids;
+   get_nextHop_rx(rx_ids);
+   int num_rx = rx_ids.size(); assert(num_rx > 0);
+
+   int buf_size = sizeof(CoeffInfo) * num_rx;
+   char *_buf = (char*) malloc(sizeof(buf_size));
+   memset(_buf, 0, sizeof(buf_size));
+
+   int nbytes = recv(d_coeff_rx_sock, _buf, buf_size, 0);
+   if(nbytes > 0) {
+      int offset = 0;
+      while(1) {
+         nbytes = recv(d_coeff_rx_sock, _buf+offset, buf_size-offset, 0);
+         offset += nbytes;
+         if(offset == buf_size) {
+            memcpy(coeffs, _buf, buf_size);
+            break;
+         }
+      }
+      assert(offset == buf_size);
+   }
+   free(_buf);
+}
+
+inline void
+digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, gr_complex *reduced_coeffs) {
+
+  int num_carriers = d_data_carriers.size();
+
+  /* randomly choose every coefficient except for the last one and keep reducing to latest value */
+  for(unsigned int i = 0; i < d_batch_size-1; i++) {
+     float amp = 1.0;
+     float phase = (rand() % 360 + 1) * M_PI/180;
+
+     coeffs[i] = (amp * ToPhase_c(phase));
+     reduced_coeffs[i] = coeffs[i];
+  }
+
+  int last = d_batch_size-1;
+  float amp = 1.0;
+
+  vector<int> rx_ids;
+  get_nextHop_rx(rx_ids);
+
+  while(1) {
+     float phase = (rand() % 360 + 1) * M_PI/180;
+     coeffs[last] = (amp * ToPhase_c(phase));
+     reduced_coeffs[last] = coeffs[last];
+
+     // ensure its a good selection over all the next-hop rx //
+     bool good = 1;
+     for(int i = 0; i < rx_ids.size(); i++) {
+        int rx_id = rx_ids[i];
+        gr_complex h = predictH(d_id, rx_id);         //h-val from me to this rx
+
+        // include the channel effect //
+        for(int k = 0; k < d_batch_size; k++) {
+           reduced_coeffs[k] *= h;
+        }
+
+        if(!is_CV_good(reduced_coeffs[0], reduced_coeffs[1])) {
+            good = 0;
+            break;
+        }
+     }
+
+     if(good) break;
+  }
+}
+
+/* more exhaustive now, since it accounts for co-ordinating transmitters, multiple rx (if any) */
+inline void
+digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo *others_coeffs) {
+  unsigned int n_inno_pkts = d_batch_size;
+
+  vector<int> rx_ids;
+  get_nextHop_rx(rx_ids);
+
+  /* first, formulate the constant part, which does not change with different receivers */
+  gr_complex new_coeffs[MAX_BATCH_SIZE];
+  int num_carriers = d_data_carriers.size();
+
+  /* randomly choose every coefficient except for the last one and keep reducing to latest value */
+  for(unsigned int i = 0; i < n_inno_pkts-1; i++) {
+     float amp = 1.0;
+     float phase = (rand() % 360 + 1) * M_PI/180;
+
+     my_coeffs[i] = (amp * ToPhase_c(phase));
+     new_coeffs[i] = my_coeffs[i];
+  } /* step 1 done */
+
+  /* as for the last one, take the global knowledge into account */
+  int last = n_inno_pkts-1;
+  float amp = 1.0;
+
+  while(1) {
+     float phase = (rand() % 360 + 1) * M_PI/180;
+     my_coeffs[last] = (amp * ToPhase_c(phase));
+     new_coeffs[last] = my_coeffs[last];
+
+     // now the receiver based stuff //
+     bool good = 1;
+     for(int i = 0; i < rx_ids.size(); i++) {
+        int rx_id = rx_ids[i];
+        gr_complex h = predictH(d_id, rx_id);         //h-val from me to this rx
+        gr_complex *o_coeffs = others_coeffs[i].coeffs;     // other senders coeffs for this rx
+
+        assert(others_coeffs[i].rx_id == rx_id);           // ensure right value
+
+        // combine with the other sender //    
+        for(unsigned int k = 0; k < d_batch_size; k++) {
+           new_coeffs[k] = (new_coeffs[k] * h) + o_coeffs[k];
+        }
+
+        if(!is_CV_good(new_coeffs[0], new_coeffs[1])) {
+            good = 0;
+            break;
+        }
+     }
+
+     if(good == 1)
+        break;
+  } //end while
+}
+
+inline void
+digital_ofdm_mapper_bcv::chooseCV_H(gr_complex *coeffs) {
+
+  assert(d_batch_size == 2);
+
+  // first check if any outstanding HInfo available //
+  vector<unsigned int>:: iterator it = d_h_rx_socks.begin();
+  while(it != d_h_rx_socks.end()) {
+     check_HInfo_rx_sock(*it);
+     it++;
+  }
+
+  if(d_mimo <=1) {
+     gr_complex reduced_coeffs[MAX_BATCH_SIZE];
+     smart_selection_local(coeffs, reduced_coeffs);
+     if(d_mimo == 1)
+        send_coeff_info_eth(reduced_coeffs);
+  } else {
+     assert(d_mimo == 2);
+     CoeffInfo lead_coeffs[MAX_RX];
+     get_coeffs_from_lead(lead_coeffs);
+     smart_selection_global(coeffs, lead_coeffs);
+  }
+}
+
+inline HInfo*
+digital_ofdm_mapper_bcv::getHInfo(unsigned int tx_id, unsigned int rx_id) {
+  HKey hkey(tx_id, rx_id);
+  HInfoMap::iterator it = d_HInfoMap.find(hkey);
+  assert(it != d_HInfoMap.end());
+  return (HInfo*) it->second;
+}
+
+/* predict the value of H as a fn(slope, samples since last tx) */
+inline gr_complex
+digital_ofdm_mapper_bcv::predictH(unsigned int tx_id, unsigned int rx_id) {
+  HInfo *hInfo = getHInfo(tx_id, rx_id);
+
+  float slope  = hInfo->slope;
+  gr_complex h_value = hInfo->h_value;
+
+  // TODO:  
+
+  return h_value;
+}
+
+/* opens the h_tx and h_rx sockets 
+   figure out the upstream and downstream nodes and open sockets accordingly
+*/
+inline void
+digital_ofdm_mapper_bcv::prepare_H_coding() {
+   populateEthernetAddress();
+   EthInfoMap::iterator it;
+
+   /* create 1 rx client socket per downstream nodes to receive from */
+   for(int i = 0; i < d_outCLinks.size(); i++) {
+      CompositeLink *link = getCompositeLink(d_outCLinks[i]);
+
+      vector<unsigned int> dst_ids = link->dstIds;
+      for(int j = 0; j < dst_ids.size(); j++) {
+         it = d_ethInfoMap.find(dst_ids[j]);
+         assert(it != d_ethInfoMap.end());
+         EthInfo *ethInfo = (EthInfo*) it->second;
+         int rx_sock = open_client_sock(ethInfo->port, ethInfo->addr);
+
+         //d_h_rx_socks.insert(pair<int, int>(dst_ids[j], rx_sock));            // dstId will send HInfo
+         d_h_rx_socks.push_back(rx_sock);
+      }
+   }
+
+   printf("opened H sockets for exchanging H information!\n"); fflush(stdout);
+
+   /* create 1 tx socket to send the coeffs over, if lead sender */
+   if(d_mimo == 1) {
+      unsigned int co_id = get_coFwd();
+      it = d_ethInfoMap.find(d_id);
+      assert(it != d_ethInfoMap.end());
+      EthInfo *ethInfo = (EthInfo*) it->second;
+      vector<unsigned int> conn_socks;
+      open_server_sock(ethInfo->port + 50, conn_socks, 1);              // only 1 client needs to be connected
+      d_coeff_tx_sock = conn_socks[0];
+   }
+   /* else open 1 rx socket to receive from the lead sender */
+   else if (d_mimo == 2) {
+      unsigned int co_id = get_coFwd();
+      it = d_ethInfoMap.find(co_id);
+      assert(it != d_ethInfoMap.end());
+      EthInfo *ethInfo = (EthInfo*) it->second;
+      d_coeff_rx_sock = open_client_sock(ethInfo->port+50, ethInfo->addr);
+   }
+
+   initHInfoMap();
+}
+
+// called when (1) receive a packet on the air, and (2) receive HInfo packet over ethernet //
+inline void
+digital_ofdm_mapper_bcv::updateHInfo(HKey hkey, HInfo _hInfo) {
+   HInfoMap::iterator it = d_HInfoMap.find(hkey);
+   assert(it != d_HInfoMap.end());
+   HInfo *hInfo = (HInfo*) it->second;
+
+   hInfo->batch_num = _hInfo.batch_num;
+   if(hInfo->slope > 0.0) {
+      float diff = arg(_hInfo.h_value - hInfo->h_value);
+      hInfo->slope = (hInfo->slope + diff)/2.0;
+   }
+   hInfo->h_value = _hInfo.h_value;
+}
+
+// initializes the HInfoMap to have keys for all the relevant entries //
+inline void
+digital_ofdm_mapper_bcv::initHInfoMap() {
+
+   vector<int>::iterator it = d_outCLinks.begin();
+   while(it != d_outCLinks.end()) {
+        unsigned int rx_id = *it;
+        HKey hkey(d_id, rx_id);
+        HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
+        memset(hInfo, 0, sizeof(HInfo));
+        d_HInfoMap.insert(pair<HKey, HInfo*>(hkey, hInfo));
+        it++;
+   }
+
+   it = d_inCLinks.begin();
+   while(it != d_inCLinks.end()) {
+        unsigned int tx_id = *it;
+        HKey hkey(tx_id, d_id);
+        HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
+        memset(hInfo, 0, sizeof(HInfo));
+        d_HInfoMap.insert(pair<HKey, HInfo*> (hkey, hInfo));
+        it++;
+   }
+}
+
+/* check if any outstanding msgs on HInfo rx sock, if yes, then extract those HInfo 
+   structures and insert them into HInfoMap. Upto 2 HInfo can be extracted every time 
+*/
+inline void
+digital_ofdm_mapper_bcv::check_HInfo_rx_sock(int rx_sock) {
+
+   int buf_size = sizeof(HInfo) + sizeof(unsigned char);                // extra byte for the sender's id
+   char *_buf = (char*) malloc(sizeof(buf_size));
+   memset(_buf, 0, sizeof(buf_size));
+
+   int n_extracted = 0;
+   int nbytes = recv(rx_sock, _buf, buf_size, 0);
+   if(nbytes > 0) {
+      int offset = 0;
+      while(1) {
+         nbytes = recv(rx_sock, _buf+offset, buf_size-offset, 0);
+         offset += nbytes;
+         if(offset == buf_size) {
+
+            unsigned char rxId = _buf[0];                               // copy the sender's id
+            HKey hkey(d_id, rxId);
+
+            HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
+            memcpy(hInfo, &_buf[1], sizeof(HInfo));                     // copy HInfo
+
+            updateHInfo(hkey, *hInfo);
+            free(hInfo);
+
+            n_extracted++;
+
+            if(n_extracted == 1) {
+              // see if there's another packet - I'll try and get only one more, rest later //
+              memset(_buf, 0, sizeof(buf_size));
+              nbytes = recv(rx_sock, _buf, buf_size, 0);
+              if(nbytes > 0) {
+                 offset = 0;
+                 continue;
+              }
+            }
+            break;
+         }
+      }
+      assert(offset == buf_size);
+   }
+
+   printf("check_HInfo_rx, nextracted: %d\n", n_extracted); fflush(stdout);
+   free(_buf);
+}
+
+inline void
+digital_ofdm_mapper_bcv::populateEthernetAddress()
+{
+   // node-id ethernet-addrees port-on-which-it-is-listening //
+   printf("populateEthernetAddress\n"); fflush(stdout);
+   FILE *fl = fopen ( "eth_add.txt" , "r+" );
+   if (fl==NULL) {
+        fprintf (stderr, "File error\n");
+        exit (1);
+   }
+
+   char line[128];
+   const char *delim = " ";
+   while ( fgets ( line, sizeof(line), fl ) != NULL ) {
+        char *strtok_res = strtok(line, delim);
+        vector<char*> token_vec;
+        while (strtok_res != NULL) {
+           token_vec.push_back(strtok_res);
+           //printf ("%s\n", strtok_res);
+           strtok_res = strtok (NULL, delim);
+        }
+
+        printf("size: %d\n", token_vec.size()); fflush(stdout);
+
+        EthInfo *ethInfo = (EthInfo*) malloc(sizeof(EthInfo));
+        memset(ethInfo, 0, sizeof(EthInfo));
+        unsigned char node_id = (unsigned char) atoi(token_vec[0]);
+        memcpy(ethInfo->addr, &token_vec[1], sizeof(token_vec[1]));
+        unsigned int port = atoi(token_vec[2]);
+        ethInfo->port = port;
+
+        d_ethInfoMap.insert(pair<unsigned char, EthInfo*> (node_id, ethInfo));
+
+        std::cout<<"Inserting in the map: node " << node_id << " addr: " << ethInfo->addr << endl;
+        printf("\n");
+   }
+
+    fclose (fl);
+}
+#endif
+
+CompositeLink*
+digital_ofdm_mapper_bcv::getCompositeLink(int id)
+{
+   CompositeLinkVector::iterator it = d_compositeLinkVector.begin();
+   while(it != d_compositeLinkVector.end()) {
+        CompositeLink *cLink = *it;
+        if(cLink->linkId == id)
+            return cLink;
+        it++;
+   }
+   return NULL;
+}
+
+inline void
+digital_ofdm_mapper_bcv::populateCompositeLinkInfo()
+{
+   // link-id   #of-src     src1   src2   src3    #of-dst   dst1   dst2    dst3    //
+   printf("populateCompositeLinkInfo\n"); fflush(stdout);
+
+   FILE *fl = fopen ( "compositeLink_info.txt" , "r+" );
+   if (fl==NULL) {
+        fprintf (stderr, "File error\n");
+        exit (1);
+   }
+
+   char line[128];
+   const char *delim = " ";
+   while ( fgets ( line, sizeof(line), fl ) != NULL ) {
+        char *strtok_res = strtok(line, delim);
+        vector<char*> token_vec;
+        while (strtok_res != NULL) {
+           token_vec.push_back(strtok_res);
+           //printf ("%s\n", strtok_res);
+           strtok_res = strtok (NULL, delim);
+        }
+
+        printf("size: %d\n", token_vec.size()); fflush(stdout);
+
+        CompositeLink *cLink = (CompositeLink*) malloc(sizeof(CompositeLink));
+        memset(cLink, 0, sizeof(CompositeLink));
+        cLink->linkId = atoi(token_vec[0]);
+        printf("linkId: %d\n", cLink->linkId); fflush(stdout);
+
+        int num_src = atoi(token_vec[1]);
+        printf("num_src: %d\n", num_src); fflush(stdout);
+        for(int i = 0; i < num_src; i++) {
+           unsigned int srcId = atoi(token_vec[i+2]);
+           printf("srcId: %d, size: %d\n", srcId, cLink->srcIds.size()); fflush(stdout);
+           cLink->srcIds.push_back(srcId);
+           if(srcId == d_id)
+             d_outCLinks.push_back(cLink->linkId);
+        }
+
+        int num_dst = atoi(token_vec[num_src+2]);
+        printf("num_dst: %d\n", num_dst); fflush(stdout);
+        for(int i = 0; i < num_dst; i++) {
+           unsigned int dstId = atoi(token_vec[num_src+3+i]);
+           printf("dstId: %d\n", dstId); fflush(stdout);
+           cLink->dstIds.push_back(dstId);
+           if(dstId == d_id)
+             d_inCLinks.push_back(cLink->linkId);
+        }
+
+        d_compositeLinkVector.push_back(cLink);
+
+
+        printf("\n");
+   }
+
+    fclose (fl);
 }

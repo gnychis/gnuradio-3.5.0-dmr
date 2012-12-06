@@ -58,7 +58,6 @@
 
 #define USE_ILP 0
 #define MAX_SENDERS 4
-#define MAX_RX 3
 //#define USE_HEADER_PLL 0
 
 #define NULL_OFDM_SYMBOLS (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1
@@ -71,7 +70,7 @@
 //#define MAX_OCCUPIED_CARRIERS 64
 //#define MAX_DATA_CARRIERS 48
 
-#define H_PRECODING 1
+//#define H_PRECODING 1
 
 
 
@@ -145,6 +144,7 @@ typedef struct flow_info_str {
 
 typedef vector<FlowInfo*> FlowInfoVector;
 
+#if 0
 /* composite links */
 typedef struct composite_link_str {
   unsigned char linkId;
@@ -152,6 +152,7 @@ typedef struct composite_link_str {
   vector<unsigned int> dstIds;
 } CompositeLink;
 typedef vector<CompositeLink*> CompositeLinkVector;
+#endif
 
 /* credits */
 typedef struct credit_str {
@@ -162,7 +163,8 @@ typedef struct credit_str {
 } CreditInfo;
 typedef vector<CreditInfo*> CreditInfoVector;
 
-#ifdef H_PRECODING
+#if 0
+//#ifdef H_PRECODING
 /* for exchanging h-values over the ethernet */
 // for recording the h-values between each pair of nodes. Every node maintains this info from 
 // itself->upstream node, and sends this to all upstream nodes (only single hop upstream)

@@ -61,6 +61,8 @@
 
 #define NULL_SYMBOL_COUNT (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1
 
+using namespace std;
+
 // whitening random tuple (from ofdm_packet_utils.py) //
 unsigned char random_mask_tuple1[] = {
   255,  63,   0,  16,   0,  12,   0,   5, 192,   3,  16,   1, 204,   0,  85, 192,
@@ -556,6 +558,41 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   uhd::time_spec_t rcv_mimo_trigger();
 
   bool is_CV_good(gr_complex cv1, gr_complex cv2);
+
+  // util functions //
+  int open_client_sock(int port, const char *addr);
+  void open_server_sock(int, vector<unsigned int>&, int);
+
+#ifdef H_PRECODING
+  void get_nextHop_rx(vector<int> &rx_ids);
+  void updateHInfo(HKey, HInfo);
+  void initHInfoMap();
+  void prepare_H_coding();
+  gr_complex predictH(unsigned int tx_id, unsigned int rx_id);
+  void populateEthernetAddress();
+
+  void check_HInfo_rx_sock(int);
+  void send_coeff_info_eth(gr_complex *coeffs);
+  int get_coFwd();
+  void get_coeffs_from_lead(CoeffInfo *coeffs);
+  void smart_selection_local(gr_complex*, gr_complex*);
+  void smart_selection_global(gr_complex*, CoeffInfo*);
+  HInfo* getHInfo(unsigned int tx_id, unsigned int rx_id);
+
+  void chooseCV_H(gr_complex *coeffs);
+  bool is_CV_good_H(gr_complex cv1, gr_complex cv2);
+
+  HInfoMap d_HInfoMap;
+  EthInfoMap d_ethInfoMap;
+  int d_coeff_tx_sock, d_coeff_rx_sock;
+  vector<unsigned int> d_h_rx_socks;
+#endif
+
+  CompositeLinkVector d_compositeLinkVector;
+  CompositeLink* getCompositeLink(int id);
+  void populateCompositeLinkInfo();
+  vector<int> d_outCLinks, d_inCLinks;
+
 };
 
 #endif

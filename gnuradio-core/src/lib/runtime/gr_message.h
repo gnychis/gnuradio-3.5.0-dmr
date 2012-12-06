@@ -24,6 +24,7 @@
 
 #include <gr_types.h>
 #include <string>
+#include <map>
 
 #define MAX_FFT_LENGTH 96
 #define MAX_DATA_CARRIERS 72
@@ -47,6 +48,9 @@
 #define DATA_TYPE       1 //0
 #define ACK_TYPE        2 //1
 #define TRIGGER_TYPE    3
+
+#define MAX_RX 3
+#define H_PRECODING 1
 
 typedef struct coeff_str {
   unsigned short phase;				// scaled
@@ -124,6 +128,41 @@ typedef struct trigger_type {
   unsigned char flow_id;
   int pkt_type;
 } TRIGGER_MSG_TYPE;
+
+typedef struct composite_link_str {
+  unsigned char linkId;
+  std::vector<unsigned int> srcIds;
+  std::vector<unsigned int> dstIds;
+} CompositeLink;
+typedef std::vector<CompositeLink*> CompositeLinkVector;
+
+#ifdef H_PRECODING
+/* for exchanging h-values over the ethernet */
+// for recording the h-values between each pair of nodes. Every node maintains this info from 
+// itself->upstream node, and sends this to all upstream nodes (only single hop upstream)
+typedef struct h_info {
+  unsigned int batch_num;
+  float slope;
+  gr_complex h_value;
+} HInfo;
+
+typedef std::pair<unsigned int, unsigned int> HKey;          // <from, to>
+typedef std::map<HKey, HInfo*> HInfoMap;                     // records between every pair of nodes
+
+typedef struct eth_info {
+  char addr[15];
+  int port;
+} EthInfo;
+
+typedef std::map<unsigned char, EthInfo*> EthInfoMap;                // to store ethernet add
+
+/* used by the co-ordinating transmitters to exchange coeff information */
+typedef struct coeff_info {
+  gr_complex coeffs[MAX_BATCH_SIZE];    // max batch size - these coeffs are reduced coeffs (2 for each rx) 
+  unsigned int rx_id;
+} CoeffInfo;
+#endif
+
 
 /* apurv++ end header type */
 /*
