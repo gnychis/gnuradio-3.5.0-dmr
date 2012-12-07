@@ -1613,7 +1613,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   int decimation = 128;
   double rate = 1.0/decimation;
  
-  int num_ofdm_symbols_to_wait = 3000;
+  int num_ofdm_symbols_to_wait = 400; //3000;
 
   int cp_length = d_fft_length/4;
   uint32_t num_samples = num_ofdm_symbols_to_wait * (d_fft_length+cp_length);
