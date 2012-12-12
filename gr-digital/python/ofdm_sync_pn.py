@@ -122,6 +122,7 @@ class ofdm_sync_pn(gr.hier_block2):
         #    Output 1: timing signal
         self.connect(self.sample_and_hold, (self,0))
 	#self.connect(self.pk_detect, (self,1))									#removed
+	#self.connect(self.f2b, gr.delay(gr.sizeof_char, 1), (self, 1))
 	self.connect(self.f2b, (self, 1))
 
         if logging:

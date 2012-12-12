@@ -22,9 +22,11 @@
 #ifndef INCLUDED_GR_MESSAGE_H
 #define INCLUDED_GR_MESSAGE_H
 
+#include <map>
+#include <list>
 #include <gr_types.h>
 #include <string>
-#include <map>
+#include <uhd/usrp/multi_usrp.hpp>
 
 #define MAX_FFT_LENGTH 96
 #define MAX_DATA_CARRIERS 72
@@ -129,10 +131,13 @@ typedef struct trigger_type {
   int pkt_type;
 } TRIGGER_MSG_TYPE;
 
+typedef unsigned char NodeId;
+typedef std::vector<unsigned char> NodeIds;
+
 typedef struct composite_link_str {
   unsigned char linkId;
-  std::vector<unsigned int> srcIds;
-  std::vector<unsigned int> dstIds;
+  NodeIds srcIds;
+  NodeIds dstIds;
 } CompositeLink;
 typedef std::vector<CompositeLink*> CompositeLinkVector;
 
@@ -141,27 +146,41 @@ typedef std::vector<CompositeLink*> CompositeLinkVector;
 // for recording the h-values between each pair of nodes. Every node maintains this info from 
 // itself->upstream node, and sends this to all upstream nodes (only single hop upstream)
 typedef struct h_info {
-  unsigned int batch_num;
+  int pkt_num;
   float slope;
   gr_complex h_value;
 } HInfo;
 
-typedef std::pair<unsigned int, unsigned int> HKey;          // <from, to>
+typedef std::pair<NodeId, NodeId> HKey;          // <from, to>
 typedef std::map<HKey, HInfo*> HInfoMap;                     // records between every pair of nodes
 
 typedef struct eth_info {
-  char addr[15];
+  char addr[16];
   int port;
 } EthInfo;
 
-typedef std::map<unsigned char, EthInfo*> EthInfoMap;                // to store ethernet add
+typedef std::map<NodeId, EthInfo*> EthInfoMap;                // to store ethernet add
 
 /* used by the co-ordinating transmitters to exchange coeff information */
 typedef struct coeff_info {
   gr_complex coeffs[MAX_BATCH_SIZE];    // max batch size - these coeffs are reduced coeffs (2 for each rx) 
-  unsigned int rx_id;
+  NodeId rx_id;
 } CoeffInfo;
+
+
+typedef std::pair<unsigned int, uhd::time_spec_t> PktTxInfo;		//(pkt_num, rx_time)
+typedef std::list<PktTxInfo> PktTxInfoList;				// records the out time for the packet
+
+#if 0
+typedef struct time_struct {
+  uint64_t full_secs;
+  double frac_secs; 
+} TimeInfo;
+
+typedef std::queue<HObsItem> HObsQ;                      
+typedef std::map<NodeId, HObsQ> HObsQMap;
 #endif
+#endif	// H_PRECODING
 
 
 /* apurv++ end header type */

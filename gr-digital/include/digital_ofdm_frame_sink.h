@@ -128,8 +128,8 @@ typedef struct innovative_pkt_str {
 typedef vector<PktInfo*> InnovativePktInfoVector;
 
 typedef struct flow_info_str {
-  unsigned char src;
-  unsigned char dst;
+  NodeId src;
+  NodeId dst;
   unsigned char flowId;
   unsigned int active_batch;
   unsigned int last_batch_acked;
@@ -589,7 +589,6 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   int d_active_batch;
   int d_last_batch_acked;
   
-  unsigned char d_id;
   unsigned int d_hdr_byte_offset;
   unsigned char d_header_bytes[HEADERBYTELEN]; 
  
@@ -597,6 +596,12 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   unsigned int d_nsenders;
   unsigned char d_lead_sender;
   unsigned int d_pkt_num;
+
+  NodeId d_id;
+  NodeId d_dst_id;
+  NodeId d_src_id;
+  NodeId d_prev_hop_id;
+
   //unsigned char d_flow; 
   int d_flow;
   unsigned int d_pkt_type;
@@ -933,23 +938,23 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
  /* util functions */
  void open_server_sock(int sock_port, vector<unsigned int>& connected_clients, int num_clients);
- int open_client_sock(int port, const char *addr);
+ int open_client_sock(int port, const char *addr, bool blocking);
 
 #ifdef H_PRECODING
- void get_nextHop_rx(vector<int> &rx_ids);
- void updateHInfo(HKey, HInfo);
+ void get_nextHop_rx(NodeIds &rx_ids);
+ void updateHInfo(HKey, HInfo, bool);
  void initHInfoMap();
  void prepare_H_coding();
- gr_complex predictH(unsigned int tx_id, unsigned int rx_id);
+ gr_complex predictH(NodeId tx_id, NodeId rx_id);
  void populateEthernetAddress();
  void txHInfo();
  void check_HInfo_rx_sock(int);
  void send_coeff_info_eth(gr_complex *coeffs);
- int get_coFwd();
+ NodeId get_coFwd();
  void get_coeffs_from_lead(CoeffInfo *coeffs);
  void smart_selection_local(gr_complex*, gr_complex*, FlowInfo*); 
  void smart_selection_global(gr_complex*, CoeffInfo*, FlowInfo*);
- HInfo* getHInfo(unsigned int tx_id, unsigned int rx_id);
+ HInfo* getHInfo(NodeId tx_id, NodeId rx_id);
 
  void chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs);
  bool is_CV_good_H(gr_complex cv1, gr_complex cv2);

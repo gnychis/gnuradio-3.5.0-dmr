@@ -528,7 +528,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 
   /* usrp instance */
   uhd::usrp::multi_usrp::sptr d_usrp;
-  uhd::time_spec_t d_last_pkt_time;
+  uhd::time_spec_t d_last_pkt_time, d_out_pkt_time;
   void make_time_tag1();  
 
   void test_socket(); 
@@ -560,24 +560,25 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   bool is_CV_good(gr_complex cv1, gr_complex cv2);
 
   // util functions //
-  int open_client_sock(int port, const char *addr);
+  int open_client_sock(int port, const char *addr, bool blocking);
   void open_server_sock(int, vector<unsigned int>&, int);
 
 #ifdef H_PRECODING
-  void get_nextHop_rx(vector<int> &rx_ids);
-  void updateHInfo(HKey, HInfo);
+  void get_nextHop_rx(NodeIds &rx_ids);
+  void updateHInfo(HKey, HInfo*);
   void initHInfoMap();
   void prepare_H_coding();
-  gr_complex predictH(unsigned int tx_id, unsigned int rx_id);
+  gr_complex predictH(NodeId tx_id, NodeId rx_id);
   void populateEthernetAddress();
 
   void check_HInfo_rx_sock(int);
   void send_coeff_info_eth(gr_complex *coeffs);
-  int get_coFwd();
+  NodeId get_coFwd();
   void get_coeffs_from_lead(CoeffInfo *coeffs);
   void smart_selection_local(gr_complex*, gr_complex*);
   void smart_selection_global(gr_complex*, CoeffInfo*);
-  HInfo* getHInfo(unsigned int tx_id, unsigned int rx_id);
+  HInfo* getHInfo(NodeId tx_id, NodeId rx_id);
+  uhd::time_spec_t getPktTimestamp(int); 
 
   void chooseCV_H(gr_complex *coeffs);
   bool is_CV_good_H(gr_complex cv1, gr_complex cv2);
@@ -586,6 +587,11 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   EthInfoMap d_ethInfoMap;
   int d_coeff_tx_sock, d_coeff_rx_sock;
   vector<unsigned int> d_h_rx_socks;
+  uhd::time_spec_t d_out_time;					// out_time for the packet is pre-decided in predict_H
+
+  PktTxInfoList d_pktTxInfoList;
+
+  //HObsQMap d_hObsQMap;						// to calculate the slope of H values for every receiver
 #endif
 
   CompositeLinkVector d_compositeLinkVector;
