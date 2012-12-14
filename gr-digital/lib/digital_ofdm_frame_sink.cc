@@ -198,7 +198,10 @@ digital_ofdm_frame_sink::extract_header(gr_complex h)
 
   HKey hkey(d_prev_hop_id, d_id);
   updateHInfo(hkey, hInfo, true);
-  txHInfo();
+
+  // only transmit after all the synch transmitters headers have been extracted //
+  if(d_nsenders > 1 && d_lead_sender == 0)
+     txHInfo();
 #endif
 }
 
@@ -1334,7 +1337,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 	}
 	
         // only logs the symbols //
-        //logFrequencyDomainRxSymbols();
+        logFrequencyDomainRxSymbols();
 
 #ifdef USE_PILOT
 	if(d_dst) {
@@ -2950,7 +2953,7 @@ digital_ofdm_frame_sink::populateCompositeLinkInfo()
         for(int i = 0; i < num_dst; i++) {
            //unsigned int dstId = atoi(token_vec[num_src+3+i]);
 	   NodeId dstId = atoi(token_vec[num_src+3+i]) + '0';
-           printf("dstId: %d\n", dstId); fflush(stdout);
+           printf("dstId: %c\n", dstId); fflush(stdout);
            cLink->dstIds.push_back(dstId);
 	   if(dstId == d_id)
 	     d_inCLinks.push_back(cLink->linkId);
@@ -7202,7 +7205,7 @@ digital_ofdm_frame_sink::is_CV_good(gr_complex cv1, gr_complex cv2) {
 inline NodeId
 digital_ofdm_frame_sink::get_coFwd()
 {
-   assert(d_fwd_index == 1);
+   assert(d_fwd_index >= 1);
    assert(d_outCLinks.size() == 1);                     // assume only 1 cofwd for now //
 
    int coLinkId = d_outCLinks[0];
@@ -7254,15 +7257,15 @@ digital_ofdm_frame_sink::get_coeffs_from_lead(CoeffInfo *coeffs)
    int num_rx = rx_ids.size(); assert(num_rx > 0);
 
    int buf_size = sizeof(CoeffInfo) * num_rx;
-   char *_buf = (char*) malloc(sizeof(buf_size));
-   memset(_buf, 0, sizeof(buf_size));
+   char *_buf = (char*) malloc(buf_size);
+   memset(_buf, 0, buf_size);
 
    int nbytes = recv(d_coeff_rx_sock, _buf, buf_size, MSG_PEEK);
    if(nbytes > 0) {
       int offset = 0;
       while(1) {
          nbytes = recv(d_coeff_rx_sock, _buf+offset, buf_size-offset, 0);
-         offset += nbytes;
+	 if(nbytes > 0) offset += nbytes;
          if(offset == buf_size) {
 	    memcpy(coeffs, _buf, buf_size); 
 	    break;
@@ -7573,33 +7576,39 @@ digital_ofdm_frame_sink::initHInfoMap() {
 inline void
 digital_ofdm_frame_sink::check_HInfo_rx_sock(int rx_sock) {
 
-   int buf_size = sizeof(HInfo) + sizeof(unsigned char);		// extra byte for the sender's id
+   int buf_size = sizeof(HInfo) + (sizeof(NodeId) * 2);;                // extra byte for the sender's+rx id
    char *_buf = (char*) malloc(buf_size);
    memset(_buf, 0, buf_size);
 
    int n_extracted = 0; 
    int nbytes = recv(rx_sock, _buf, buf_size, MSG_PEEK);
+   NodeId rxId[2];
    if(nbytes > 0) {
       int offset = 0;
       while(1) {
          nbytes = recv(rx_sock, _buf+offset, buf_size-offset, 0);
-         offset += nbytes;
+	 if(nbytes > 0) offset += nbytes;
          if(offset == buf_size) {
 
-	    unsigned char rxId = _buf[0];				// copy the sender's id
-	    HKey hkey(d_id, rxId);
-	
-	    HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
-	    memcpy(hInfo, &_buf[1], sizeof(HInfo));			// copy HInfo
+            rxId[n_extracted] = _buf[0];                               // copy the sender's id
+	    NodeId id = _buf[1];
 
-	    updateHInfo(hkey, *hInfo, false);
-	    free(hInfo);
+            // updateHInfo only if it is my H report //
+            if(id == d_id) {
+               HKey hkey(d_id, rxId[n_extracted]);
+
+               HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
+               memcpy(hInfo, _buf+2, sizeof(HInfo));                     // copy HInfo
+
+               updateHInfo(hkey, *hInfo, false);
+               free(hInfo);
+            }
 
 	    n_extracted++;
 	    
 	    if(n_extracted == 1) {
        	      // see if there's another packet - I'll try and get only one more, rest later //
-	      memset(_buf, 0, sizeof(buf_size));
+	      memset(_buf, 0, buf_size);
               nbytes = recv(rx_sock, _buf, buf_size, MSG_PEEK);
 	      if(nbytes > 0) {
 		 offset = 0;
@@ -7622,9 +7631,8 @@ digital_ofdm_frame_sink::txHInfo() {
    int num_clients = d_h_tx_socks.size();
    assert(num_clients >= 1);
 
-   int buf_size = sizeof(HInfo)*num_clients + sizeof(unsigned char);            // extra byte for my-id
+   int buf_size = (sizeof(HInfo) + 2*sizeof(NodeId))*num_clients;            	// also send (tx-id, rx-id) for each client
    char *_buf = (char*) malloc(buf_size);
-   memcpy(_buf, &d_id, 1); 
 
    // ids of clients 
    assert(d_inCLinks.size() == 1);                                              // can't envision more than 1 link that i'm part of
@@ -7637,15 +7645,25 @@ digital_ofdm_frame_sink::txHInfo() {
 
    // build the payload
    NodeIds::iterator it = tx_ids.begin();
-   int offset = 1;
+   int offset = 0;
    while(it != tx_ids.end()) {
        NodeId tx_id = *it;
        HInfo *hInfo = getHInfo(tx_id, d_id);
+
+       // copy my-id first //
+       memcpy(_buf+offset, &d_id, 1);	
+       offset += 1;
+
+       // copy tx-id now //
+       memcpy(_buf+offset, &tx_id, 1);
+       offset += 1;
+
+       // copy the hInfo now //
        memcpy(_buf+offset, hInfo, sizeof(HInfo));
        offset += sizeof(HInfo);
        it++;
-       //printf(" -- HInfo details: pkt: %d, val: (%.2f, %.2f), slope: %.2f\n", 
-	//	hInfo->pkt_num, hInfo->h_value.real(), hInfo->h_value.imag(), hInfo->slope); fflush(stdout);
+       printf(" -- HInfo details: pkt: %d, val: (%.2f, %.2f)\n", 
+			hInfo->pkt_num, hInfo->h_value.real(), hInfo->h_value.imag()); fflush(stdout);
    }
 
    // send msgs
@@ -7720,6 +7738,7 @@ digital_ofdm_frame_sink::populateEthernetAddress()
 /* util function */
 inline void
 digital_ofdm_frame_sink::open_server_sock(int sock_port, vector<unsigned int>& connected_clients, int num_clients) {
+  printf("open_server_sock start, #clients: %d\n", num_clients); fflush(stdout);
   int sockfd, _sock;
   struct sockaddr_in dest;
 
@@ -7756,11 +7775,13 @@ digital_ofdm_frame_sink::open_server_sock(int sock_port, vector<unsigned int>& c
   while(conn != num_clients) {
     _sock = accept(sockfd, (struct sockaddr*)&client_addr, (socklen_t*)&addrlen);
     if(_sock != -1) {
+      printf(" -- connected client: %d\n", conn); fflush(stdout);
       connected_clients.push_back(_sock);
       conn++;
     }
   }
 
+  printf("open_server_sock done.. #clients: %d\n", num_clients);
   assert(connected_clients.size() == num_clients);
 }
 

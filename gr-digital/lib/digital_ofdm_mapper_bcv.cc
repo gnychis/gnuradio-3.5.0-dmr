@@ -120,6 +120,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 #endif
   std::string arg("");
   d_usrp = uhd::usrp::multi_usrp::make(arg);
+  d_out_pkt_time = uhd::time_spec_t(0.0);
   d_last_pkt_time = uhd::time_spec_t(0.0);
 
   // this is not the final form of this solution since we still use the occupied_tones concept,
@@ -244,8 +245,10 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   }
   fill_all_carriers_map();  
 
-  d_hdr_nbits = (unsigned long)ceil(log10(float(d_hdr_constellation.size())) / log10(2.0));
-  d_data_nbits = (unsigned long)ceil(log10(float(d_data_constellation.size())) / log10(2.0));
+  d_hdr_nbits = (unsigned long)ceil(log10(float(d_hdr_constellation.size())) / log10((float) 2.0));
+  d_data_nbits = (unsigned long)ceil(log10(float(d_data_constellation.size())) / log10((float) 2.0));
+
+  printf("d_data_nbits: %d, const size: %d, d_hdr_bits: %d, const size: %d\n", d_data_nbits, d_data_constellation.size(), d_hdr_nbits, d_hdr_constellation.size()); fflush(stdout);
 
   // for offline analysis - apurv++ //
   d_fp_native_symbols = NULL;
@@ -734,19 +737,22 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
      printf("(mapper): send NULL\n"); fflush(stdout);
      d_null_symbol_cnt++;
      d_pending_flag = 3;
+#if 0
      if(!d_time_tag) {
           make_time_tag1();
           d_time_tag = true;
      }
+#endif
   }
   else
 #endif
   if(d_hdr_byte_offset < HEADERBYTELEN) {
+#if 0
       if(!d_time_tag) {
            make_time_tag1();
            d_time_tag = true;
         }
-
+#endif
       generateOFDMSymbolHeader(out); 					// send the header symbols out first //
 #ifdef PRE_NULL_SYMBOLS
      if(d_hdr_ofdm_index == 0) {
@@ -1627,7 +1633,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   int decimation = 128;
   double rate = 1.0/decimation;
  
-  int num_ofdm_symbols_to_wait = 400; //3000;
+  int num_ofdm_symbols_to_wait = 2000; //400; //3000;
 
   int cp_length = d_fft_length/4;
   int symbol_length = d_fft_length + cp_length;
@@ -1674,7 +1680,8 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
 
   printf("timestamp: curr (%llu, %f), out (%llu, %f) , last_time (%llu, %f), interval(%lld, %f), interval_samples(%llu), duration(%llu, %f)\n", (uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), (uint64_t) out_time.get_full_secs(), out_time.get_frac_secs(), (uint64_t) d_last_pkt_time.get_full_secs(), d_last_pkt_time.get_frac_secs(), (int64_t) interval_time.get_full_secs(), interval_time.get_frac_secs(), interval_samples, sync_secs, sync_frac_of_secs); fflush(stdout);
 
-  d_last_pkt_time = out_time;
+  assert(out_time > c_time);
+  d_out_pkt_time = out_time;
 
   const pmt::pmt_t key = pmt::pmt_string_to_symbol("tx_time");
   const pmt::pmt_t value = pmt::pmt_make_tuple(
@@ -1687,7 +1694,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
 
 #ifdef H_PRECODING
   d_pktTxInfoList.push_back(PktTxInfo(d_pkt_num, out_time));  
-  while(d_pktTxInfoList.size() > 10) {
+  while(d_pktTxInfoList.size() > 20) {
      d_pktTxInfoList.pop_front();
   }
 #endif
@@ -1708,6 +1715,7 @@ digital_ofdm_mapper_bcv::generateKnownSymbols() {
 
 void
 digital_ofdm_mapper_bcv::setup_mimo_tx() {
+  printf("setup_mimo_tx -- \n"); fflush(stdout);
   if(d_mimo == 1) {
      open_mimo_master_socket();
      if(d_mimo_master_sock != -1) {
@@ -1719,6 +1727,8 @@ digital_ofdm_mapper_bcv::setup_mimo_tx() {
         printf("MIMO SLAVE connected to MASTER\n"); fflush(stdout);
      }
   }
+
+  printf("setup_mimo tx done --\n"); fflush(stdout);
 }
 
 inline void
@@ -1730,7 +1740,7 @@ digital_ofdm_mapper_bcv::open_mimo_master_socket() {
 
 inline int
 digital_ofdm_mapper_bcv::open_mimo_slave_socket() {
-  return open_client_sock(9001, "", true);		// define the addr 
+  return open_client_sock(9001, "128.83.141.213", true);		// define the addr 
 }
 
 inline void
@@ -1766,7 +1776,7 @@ digital_ofdm_mapper_bcv::rcv_mimo_trigger() {
       int offset = 0;
       while(1) {
          nbytes = recv(d_mimo_slave_sock, eth_buf+offset, buf_size-offset, 0);
-         offset += nbytes;
+	 if(nbytes > 0) offset += nbytes;
          if(offset == buf_size) {
             break;
          }
@@ -1873,6 +1883,7 @@ digital_ofdm_mapper_bcv::is_CV_good(gr_complex cv1, gr_complex cv2) {
       }
    }
 
+   free(comb_mod);
    printf("min_dt: %.3f\n", min_dt);
    return true;
 }
@@ -1883,6 +1894,7 @@ digital_ofdm_mapper_bcv::open_server_sock(int sock_port, vector<unsigned int>& c
   int sockfd, _sock;
   struct sockaddr_in dest;
 
+  printf("open_server_sock, #clients: %d\n", num_clients); fflush(stdout);
   /* create socket */
   sockfd = socket(PF_INET, SOCK_STREAM, 0);
   fcntl(sockfd, F_SETFL, O_NONBLOCK);
@@ -1920,7 +1932,8 @@ digital_ofdm_mapper_bcv::open_server_sock(int sock_port, vector<unsigned int>& c
       conn++;
     }
   }
-
+  
+  printf("open_server_sock done, #clients: %d\n", num_clients); fflush(stdout);
   assert(connected_clients.size() == num_clients);
 }
 
@@ -1950,7 +1963,7 @@ digital_ofdm_mapper_bcv::open_client_sock(int port, const char *addr, bool block
 inline NodeId
 digital_ofdm_mapper_bcv::get_coFwd()
 {
-   assert(d_mimo == 1);
+   assert(d_mimo >= 1);
    assert(d_outCLinks.size() == 1);                     // assume only 1 cofwd for now //
 
    int coLinkId = d_outCLinks[0];
@@ -1968,6 +1981,7 @@ digital_ofdm_mapper_bcv::get_coFwd()
 /* spits all the next-hop rx-ids */
 inline void
 digital_ofdm_mapper_bcv::get_nextHop_rx(NodeIds &rx_ids) {
+   printf("get_nextHop_rx start -- #links: %d\n", d_outCLinks.size()); fflush(stdout);
    assert(d_outCLinks.size() == 1);
    CompositeLink *link = getCompositeLink(d_outCLinks[0]);
    NodeIds dstIds = link->dstIds;
@@ -1976,16 +1990,19 @@ digital_ofdm_mapper_bcv::get_nextHop_rx(NodeIds &rx_ids) {
       rx_ids.push_back(*it);
       it++;
    }
-   printf("get_nextHop_rx -- #: \n", rx_ids.size()); fflush(stdout);
+   printf("get_nextHop_rx -- #: %d\n", rx_ids.size()); fflush(stdout);
 }
 
 inline void
-digital_ofdm_mapper_bcv::send_coeff_info_eth(gr_complex *coeffs)
+digital_ofdm_mapper_bcv::send_coeff_info_eth(CoeffInfo *coeffs)
 {
-   NodeId coFwdId = get_coFwd();
+   NodeIds rx_ids;
+   get_nextHop_rx(rx_ids);
+   int num_rx = rx_ids.size(); assert(num_rx > 0);
 
-   int buf_size = sizeof(gr_complex) * d_batch_size;
-   printf("send_coeff_info_eth to node%d\n", coFwdId); fflush(stdout);
+   // convert the *coeffs into CoeffInfo //
+   int buf_size = sizeof(CoeffInfo) * num_rx; 
+   printf("send_coeff_info_eth to node%d\n", get_coFwd()); fflush(stdout);
    char *_buf = (char*) malloc(buf_size);
    memcpy(_buf, coeffs, buf_size);
 
@@ -1998,20 +2015,23 @@ digital_ofdm_mapper_bcv::send_coeff_info_eth(gr_complex *coeffs)
 inline void
 digital_ofdm_mapper_bcv::get_coeffs_from_lead(CoeffInfo *coeffs)
 {
+   printf("get_coeffs_from_lead start\n"); fflush(stdout);
    NodeIds rx_ids;
    get_nextHop_rx(rx_ids);
    int num_rx = rx_ids.size(); assert(num_rx > 0);
 
    int buf_size = sizeof(CoeffInfo) * num_rx;
-   char *_buf = (char*) malloc(sizeof(buf_size));
-   memset(_buf, 0, sizeof(buf_size));
+   char *_buf = (char*) malloc(buf_size);
+   memset(_buf, 0, buf_size);
 
    int nbytes = recv(d_coeff_rx_sock, _buf, buf_size, MSG_PEEK);
+  
+   printf("buf_size: %d, nbytes: %d, sizeof(CoeffInfo): %d\n", buf_size, nbytes, sizeof(CoeffInfo)); fflush(stdout);
+   int offset = 0;
    if(nbytes > 0) {
-      int offset = 0;
       while(1) {
          nbytes = recv(d_coeff_rx_sock, _buf+offset, buf_size-offset, 0);
-         offset += nbytes;
+	 if(nbytes > 0) offset += nbytes;
          if(offset == buf_size) {
             memcpy(coeffs, _buf, buf_size);
             break;
@@ -2019,11 +2039,15 @@ digital_ofdm_mapper_bcv::get_coeffs_from_lead(CoeffInfo *coeffs)
       }
       assert(offset == buf_size);
    }
+
+   assert(offset != 0);
+   printf("get_coeffs_from_lead end -- offset: %d\n", offset); fflush(stdout);
    free(_buf);
 }
 
 inline void
-digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, gr_complex *reduced_coeffs) {
+digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *coeffInfo) {
+
 
   int num_carriers = d_data_carriers.size();
   printf("smart_selection_local start\n"); fflush(stdout);
@@ -2034,7 +2058,6 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, gr_complex *r
      float phase = (rand() % 360 + 1) * M_PI/180;
 
      coeffs[i] = (amp * ToPhase_c(phase));
-     reduced_coeffs[i] = coeffs[i];
   }
 
   int last = d_batch_size-1;
@@ -2053,15 +2076,17 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, gr_complex *r
   while(1) {
      float phase = (rand() % 360 + 1) * M_PI/180;
      coeffs[last] = (amp * ToPhase_c(phase));
-     reduced_coeffs[last] = coeffs[last];
 
      // ensure its a good selection over all the next-hop rx //
      bool good = 1;
      for(int i = 0; i < rx_ids.size(); i++) {
+	CoeffInfo *cInfo = &(coeffInfo[i]);
+        cInfo->rx_id = rx_ids[i];
 
-        // include the channel effect //
+	// include the channel effect //
+	gr_complex *reduced_coeffs = cInfo->coeffs;
         for(int k = 0; k < d_batch_size; k++) {
-           reduced_coeffs[k] *= h_vec[i];
+	   reduced_coeffs[k] = coeffs[k] * h_vec[i];
         }
 
         if(!is_CV_good(reduced_coeffs[0], reduced_coeffs[1])) {
@@ -2079,6 +2104,7 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, gr_complex *r
 inline void
 digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo *others_coeffs) {
   unsigned int n_inno_pkts = d_batch_size;
+  printf("smart_selection_global start\n"); fflush(stdout);
 
   NodeIds rx_ids;
   get_nextHop_rx(rx_ids);
@@ -2100,11 +2126,14 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
   int last = n_inno_pkts-1;
   float amp = 1.0;
 
+  printf(" -- done till here\n"); fflush(stdout);
+
   while(1) {
      float phase = (rand() % 360 + 1) * M_PI/180;
      my_coeffs[last] = (amp * ToPhase_c(phase));
      new_coeffs[last] = my_coeffs[last];
 
+     printf("trying -- \n"); fflush(stdout);
      // now the receiver based stuff //
      bool good = 1;
      for(int i = 0; i < rx_ids.size(); i++) {
@@ -2112,6 +2141,10 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
         gr_complex h = predictH(d_id, rx_id);         //h-val from me to this rx
         gr_complex *o_coeffs = others_coeffs[i].coeffs;     // other senders coeffs for this rx
 
+        if(others_coeffs[i].rx_id != rx_id) {
+	   printf("others_coeff.rx_id: %c, rx_id: %c\n", others_coeffs[i].rx_id, rx_id); fflush(stdout);
+	   assert(false);
+        }
         assert(others_coeffs[i].rx_id == rx_id);           // ensure right value
 
         // combine with the other sender //    
@@ -2128,6 +2161,7 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
      if(good == 1)
         break;
   } //end while
+  printf("smart_selection_global end -- \n"); fflush(stdout);
 }
 
 inline void
@@ -2143,7 +2177,7 @@ digital_ofdm_mapper_bcv::chooseCV_H(gr_complex *coeffs) {
   }
 
   if(d_mimo <=1) {
-     gr_complex reduced_coeffs[MAX_BATCH_SIZE];
+     CoeffInfo reduced_coeffs[MAX_RX];
      smart_selection_local(coeffs, reduced_coeffs);
      if(d_mimo == 1)
         send_coeff_info_eth(reduced_coeffs);
@@ -2258,20 +2292,24 @@ digital_ofdm_mapper_bcv::prepare_H_coding() {
    /* create 1 tx socket to send the coeffs over, if lead sender */
    if(d_mimo == 1) {
       NodeId co_id = get_coFwd();
+      printf("COEFF socket - mimo master waiting for clients .... \n"); fflush(stdout);
       it = d_ethInfoMap.find(d_id);
       assert(it != d_ethInfoMap.end());
       EthInfo *ethInfo = (EthInfo*) it->second;
       vector<unsigned int> conn_socks;
       open_server_sock(ethInfo->port + 50, conn_socks, 1);              // only 1 client needs to be connected
+      printf("COEFF socket - mimo master has 1 client! \n"); fflush(stdout);
       d_coeff_tx_sock = conn_socks[0];
    }
    /* else open 1 rx socket to receive from the lead sender */
    else if (d_mimo == 2) {
       NodeId co_id = get_coFwd();
+      printf("COEFF socket - mimo slave connecting to mimo master .... \n"); fflush(stdout);
       it = d_ethInfoMap.find(co_id);
       assert(it != d_ethInfoMap.end());
       EthInfo *ethInfo = (EthInfo*) it->second;
       d_coeff_rx_sock = open_client_sock(ethInfo->port+50, ethInfo->addr, true);
+      printf("COEFF socket - mimo slave connected to mimo master!\n"); fflush(stdout);
    }
 
    initHInfoMap();
@@ -2310,10 +2348,14 @@ digital_ofdm_mapper_bcv::updateHInfo(HKey hkey, HInfo *_hInfo) {
 // called when receive HInfo packet over Ethernet from downstream receivers //
 inline void
 digital_ofdm_mapper_bcv::updateHInfo(HKey hkey, HInfo *_hInfo) {
-
+   printf("updateHInfo (%c -> %c)\n", hkey.first, hkey.second); fflush(stdout);
    HInfoMap::iterator it = d_HInfoMap.find(hkey);
    assert(it != d_HInfoMap.end());
    HInfo *hInfo = (HInfo*) it->second;
+
+   // discard if a repetitive report //
+   if(_hInfo->pkt_num == hInfo->pkt_num)
+        return;
 
    float old_angle = arg(hInfo->h_value);
    float new_angle = arg(_hInfo->h_value);
@@ -2422,36 +2464,42 @@ digital_ofdm_mapper_bcv::updateHObsQMap() {
 inline void
 digital_ofdm_mapper_bcv::check_HInfo_rx_sock(int rx_sock) {
    printf("check_HInfo_rx_sock start\n"); fflush(stdout);
-   int buf_size = sizeof(HInfo) + sizeof(unsigned char);                // extra byte for the sender's id
+   int buf_size = sizeof(HInfo) + (sizeof(NodeId) * 2);                // extra 2 bytes for the sender's+rx id
    char *_buf = (char*) malloc(buf_size);
    memset(_buf, 0, buf_size);
 
    int n_extracted = 0;
    int nbytes = recv(rx_sock, _buf, buf_size, MSG_PEEK);
+   NodeId rxId[2];
    if(nbytes > 0) {
       printf(" -- msg rcvd, nbytes: %d\n", nbytes); fflush(stdout);
       int offset = 0;
       while(1) {
          nbytes = recv(rx_sock, _buf+offset, buf_size-offset, 0);
-         offset += nbytes;
+	 if(nbytes > 0) offset += nbytes;
 	 printf("nbytes: %d, offset: %d\n", nbytes, offset); fflush(stdout);
          if(offset == buf_size) {
 
-            unsigned char rxId = _buf[0];                               // copy the sender's id
-            HKey hkey(d_id, rxId);
+            rxId[n_extracted] = _buf[0];                               // copy the sender's id
+	    NodeId id = _buf[1];
 
-            HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
-            memcpy(hInfo, _buf+1, sizeof(HInfo));                     // copy HInfo
+            // updateHInfo only if it is my H report //
+            if(id == d_id) {
+               HKey hkey(d_id, rxId[n_extracted]);
 
-            updateHInfo(hkey, hInfo);
-            free(hInfo);
+               HInfo *hInfo = (HInfo*) malloc(sizeof(HInfo));
+               memcpy(hInfo, _buf+2, sizeof(HInfo));                     // copy HInfo
+
+               updateHInfo(hkey, hInfo);
+               free(hInfo);
+            }
 
             n_extracted++;
 
             if(n_extracted == 1) {
               // see if there's another packet - I'll try and get only one more, rest later //
 	      printf("n_extracted: %d\n", n_extracted); fflush(stdout);
-              memset(_buf, 0, sizeof(buf_size));
+              memset(_buf, 0, buf_size);
               nbytes = recv(rx_sock, _buf, buf_size, MSG_PEEK);
               if(nbytes > 0) {
 		 printf("another packet rx, nbytes: %d\n", nbytes); fflush(stdout);
@@ -2497,8 +2545,6 @@ digital_ofdm_mapper_bcv::populateEthernetAddress()
            strtok_res = strtok (NULL, delim);
         }
 
-        printf("size: %d\n", token_vec.size()); fflush(stdout);
-
         EthInfo *ethInfo = (EthInfo*) malloc(sizeof(EthInfo));
         memset(ethInfo, 0, sizeof(EthInfo));
         NodeId node_id = (NodeId) atoi(token_vec[0]) + '0';
@@ -2509,7 +2555,6 @@ digital_ofdm_mapper_bcv::populateEthernetAddress()
         d_ethInfoMap.insert(pair<NodeId, EthInfo*> (node_id, ethInfo));
 
         std::cout<<"Inserting in the map: node " << node_id << " addr: " << ethInfo->addr << endl;
-        printf("\n");
    }
 
     fclose (fl);
@@ -2526,6 +2571,7 @@ digital_ofdm_mapper_bcv::getCompositeLink(int id)
             return cLink;
         it++;
    }
+   assert(false);
    return NULL;
 }
 
@@ -2573,7 +2619,7 @@ digital_ofdm_mapper_bcv::populateCompositeLinkInfo()
         printf("num_dst: %d\n", num_dst); fflush(stdout);
         for(int i = 0; i < num_dst; i++) {
            NodeId dstId = atoi(token_vec[num_src+3+i]) + '0';
-           printf("dstId: %d\n", dstId); fflush(stdout);
+           printf("dstId: %c\n", dstId); fflush(stdout);
            cLink->dstIds.push_back(dstId);
            if(dstId == d_id)
              d_inCLinks.push_back(cLink->linkId);

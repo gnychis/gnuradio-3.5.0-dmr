@@ -83,10 +83,8 @@ public:
 	if(_event_code == 8 || _event_code == 2) {
 	    printf("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx event_code: 8 *************************************\n", _event_code); fflush(stdout);
         }
-	else {
-            printf("----- ASYNC_MSG: event_code: %d, m_full_secs: %lld, m_frac_secs: %f, curr_full_secs: %llu, curr_frac_secs: %f----- \n", _event_code, (long long) _time_spec.get_full_secs(), _time_spec.get_frac_secs(), sync_secs, sync_frac_of_secs);
-            fflush(stdout);
-	}
+        printf("----- ASYNC_MSG: event_code: %d, m_full_secs: %lld, m_frac_secs: %f, curr_full_secs: %llu, curr_frac_secs: %f----- \n", _event_code, (long long) _time_spec.get_full_secs(), _time_spec.get_frac_secs(), sync_secs, sync_frac_of_secs);
+        fflush(stdout);
         msg.reset();
     }
 

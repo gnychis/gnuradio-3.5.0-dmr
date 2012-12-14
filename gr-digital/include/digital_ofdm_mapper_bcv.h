@@ -572,10 +572,10 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void populateEthernetAddress();
 
   void check_HInfo_rx_sock(int);
-  void send_coeff_info_eth(gr_complex *coeffs);
+  void send_coeff_info_eth(CoeffInfo *coeffs);
   NodeId get_coFwd();
   void get_coeffs_from_lead(CoeffInfo *coeffs);
-  void smart_selection_local(gr_complex*, gr_complex*);
+  void smart_selection_local(gr_complex*, CoeffInfo*);
   void smart_selection_global(gr_complex*, CoeffInfo*);
   HInfo* getHInfo(NodeId tx_id, NodeId rx_id);
   uhd::time_spec_t getPktTimestamp(int); 
