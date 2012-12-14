@@ -908,6 +908,8 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   prepare_H_coding();
 #endif
 
+  d_out_pkt_time = uhd::time_spec_t(0.0);
+  d_last_pkt_time = uhd::time_spec_t(0.0);
 }
 
 void
@@ -3979,13 +3981,21 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   gr_complex *out_symbols = (gr_complex*) malloc(sizeof(gr_complex) * n_symbols);
   memset(out_symbols, 0, sizeof(gr_complex) * n_symbols);
 
-  //reduceCoefficients_LSQ(flow_info);
-  //chooseCV(flow_info, coeffs);
+#if 0
+  reduceCoefficients_LSQ(flow_info);
+  chooseCV(flow_info, coeffs);
+#endif
+
+  // calculate the outgoing timestamp // 
+  uint64_t sync_secs; double sync_frac_of_secs;
+  if(sync_send) {
+     calc_outgoing_timestamp(sync_secs, sync_frac_of_secs);
+     d_out_pkt_time = uhd::time_spec_t(sync_secs, sync_frac_of_secs);
+  }
 
 #ifdef H_PRECODING
   reduceCoefficients_LSQ(flow_info);
   chooseCV_H(flow_info, coeffs);
-  
 #else
   /* pick new random <coeffs> for each innovative pkt to == new coded pkt */
   printf("selecting random coeffs::: --- \n"); fflush(stdout);
@@ -4067,73 +4077,10 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      }
   }
   
-  // extra for null symbol at the end //
-  //memset((out_msg->msg() + offset), 0, d_occupied_carriers/8);
-
-/*
-#ifdef USE_PILOT
-  printf("pilots first: \n"); fflush(stdout);
-  assert(d_all_carriers.size() == d_occupied_carriers);
-  for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
-     unsigned int index = i * d_occupied_carriers;
-     for(unsigned int j = 0; j < d_occupied_carriers; j++) {
-#ifdef SRC_PILOT
-	if(1) {
-#else
-	if(d_all_carriers[j] == 0) {
-#endif
-	    memcpy((out_msg->msg() + offset), (out_symbols + index + j), sizeof(gr_complex));
-	    if(d_all_carriers[j] == 1) {
-		std::cout<<out_symbols[index+j]<<" offset: "<<offset<<endl;
-	    }
-	    offset += sizeof(gr_complex);
-	}
-     }
-  }
-#endif
-*/
-
-#if 0
-  int dc_tones = d_occupied_carriers - d_data_carriers.size();
-  assert(dc_tones > 0 && (d_occupied_carriers % 2 == 0) && (dc_tones % 2 == 0));                // even occupied_tones and dc_tones //
-  unsigned int half_occupied_tones = (d_occupied_carriers - dc_tones)/2;
-  
-  for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
-      unsigned int index = i * d_occupied_carriers;
-      /* copy 1st half of the OFDM symbol */
-      memcpy((out_msg->msg() + offset), (out_symbols + index), sizeof(gr_complex) * half_occupied_tones);
-
-      offset += (sizeof(gr_complex) * half_occupied_tones);
-      index += (half_occupied_tones + dc_tones);						// bypass the DC tones //
-
-      /* copy 2nd half of the OFDM symbol */
-      memcpy((out_msg->msg() + offset), (out_symbols + index), sizeof(gr_complex) * half_occupied_tones);
-      offset += (sizeof(gr_complex) * half_occupied_tones);
-  }
-#endif
-
   //logSymbols(out_symbols, n_symbols);
-
-  /********************* debug start ********************
-  vector<gr_complex*> debug_sym_vec;
-
-  gr_complex *test_symbols = (gr_complex*) malloc(sizeof(gr_complex) * n_symbols);
-  memcpy(test_symbols, out_symbols, sizeof(gr_complex) * n_symbols);
-
-  decodeSignal(test_symbols, ToPhase_c(new_coeffs[0]));
-  debug_sym_vec.push_back(test_symbols);
-  demodulate(debug_sym_vec);
-  logSymbols(test_symbols, n_symbols);
-  ******************** debug end *************************/
-
-  //memcpy(out_msg->msg() + HEADERBYTELEN, (void*) out_symbols, sizeof(gr_complex) * n_symbols);      // copy payload symbols
 
   // set the tx timestamp, if its a sync send //
   if(sync_send) {
-     uint64_t sync_secs; 
-     double sync_frac_of_secs;
-     calc_outgoing_timestamp(sync_secs, sync_frac_of_secs);
-
      printf("RX timestamp: secs: %llu, frac_of_secs: %f\n", sync_secs, sync_frac_of_secs); fflush(stdout);
      out_msg->set_timestamp(sync_secs, sync_frac_of_secs);
      printf("FWD PACKET---- TX timestamp: secs: %llu, frac_of_secs: %f\n", sync_secs, sync_frac_of_secs); 
@@ -7234,12 +7181,15 @@ digital_ofdm_frame_sink::get_nextHop_rx(NodeIds &rx_ids) {
 }
 
 inline void
-digital_ofdm_frame_sink::send_coeff_info_eth(gr_complex *coeffs)
+digital_ofdm_frame_sink::send_coeff_info_eth(CoeffInfo *coeffs)
 {
-   NodeId coFwdId = get_coFwd();
-   
-   int buf_size = sizeof(gr_complex) * d_batch_size;			
-   printf("send_coeff_info_eth to node%d\n", coFwdId); fflush(stdout);
+   NodeIds rx_ids;
+   get_nextHop_rx(rx_ids);
+   int num_rx = rx_ids.size(); assert(num_rx > 0);
+
+   // convert the *coeffs into CoeffInfo //
+   int buf_size = sizeof(CoeffInfo) * num_rx;
+   printf("send_coeff_info_eth to node%d\n", get_coFwd()); fflush(stdout);
    char *_buf = (char*) malloc(buf_size);
    memcpy(_buf, coeffs, buf_size);
 
@@ -7277,13 +7227,14 @@ digital_ofdm_frame_sink::get_coeffs_from_lead(CoeffInfo *coeffs)
 }
 
 inline void
-digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, gr_complex *reduced_coeffs, FlowInfo *flowInfo) {
+digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cInfo, FlowInfo *flowInfo) {
   InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
   unsigned int n_inno_pkts = inno_pkts.size();
 
   int num_carriers = d_data_carriers.size();
 
   /* randomly choose every coefficient except for the last one and keep reducing to latest value */
+  gr_complex reduced_coeffs[MAX_BATCH_SIZE];
   for(unsigned int i = 0; i < n_inno_pkts-1; i++) {
      PktInfo *pInfo = inno_pkts[i];
      float amp = getAvgAmplificationFactor(pInfo->hestimates);
@@ -7301,28 +7252,30 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, gr_complex *r
   PktInfo *pInfo = inno_pkts[last];
   float amp = getAvgAmplificationFactor(pInfo->hestimates);
 
+  // get the predicted value of h for each of the receivers //
   vector<unsigned char> rx_ids;
   get_nextHop_rx(rx_ids);
+  vector<gr_complex> h_vec;
+  for(int i = 0; i < rx_ids.size(); i++) {
+      NodeId rx_id = rx_ids[i];
+      gr_complex h = predictH(d_id, rx_id);         //h-val from me to this rx
+      h_vec.push_back(h);
+  }
 
   while(1) {
      float phase = (rand() % 360 + 1) * M_PI/180;
      coeffs[last] = (amp * ToPhase_c(phase));
 
-     for(unsigned int k = 0; k < d_batch_size; k++)
-         reduced_coeffs[k] += (coeffs[last] * pkt_coeffs[k*num_carriers]);
-
      // ensure its a good selection over all the next-hop rx //
      bool good = 1;
      for(int i = 0; i < rx_ids.size(); i++) {
-	NodeId rx_id = rx_ids[i];
- 	gr_complex h = predictH(d_id, rx_id);         //h-val from me to this rx
 
-	// include the channel effect //
+	// include the channel effect for this rx //
 	for(int k = 0; k < d_batch_size; k++) {
-	   reduced_coeffs[k] *= h;
+	   cInfo->coeffs[k] = reduced_coeffs[k] * h_vec[i];
 	}	
 
-        if(!is_CV_good(reduced_coeffs[0], reduced_coeffs[1])) {
+        if(!is_CV_good(cInfo->coeffs[0], cInfo->coeffs[1])) {
 	    good = 0;
             break;
         }
@@ -7330,6 +7283,7 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, gr_complex *r
 
      if(good) break;
   }
+  printf("smart selection local -- \n"); fflush(stdout);
 }
 
 /* more exhaustive now, since it accounts for co-ordinating transmitters, multiple rx (if any) */
@@ -7337,6 +7291,7 @@ inline void
 digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo *others_coeffs, FlowInfo *flowInfo) {
   InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
   unsigned int n_inno_pkts = inno_pkts.size();
+  printf("smart_selection_global start\n"); fflush(stdout);
 
   NodeIds rx_ids;
   get_nextHop_rx(rx_ids); 
@@ -7398,8 +7353,9 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
 
 inline void
 digital_ofdm_frame_sink::chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs) {
-
+  printf("chooseCV_H -- \n"); fflush(stdout);
   assert(d_batch_size == 2);
+
   InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
   assert(inno_pkts.size() == d_batch_size);
 
@@ -7411,7 +7367,7 @@ digital_ofdm_frame_sink::chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs) {
   }
 
   if(d_fwd_index <=1) {
-     gr_complex reduced_coeffs[MAX_BATCH_SIZE];
+     CoeffInfo reduced_coeffs[MAX_RX];
      smart_selection_local(coeffs, reduced_coeffs, flowInfo);
      if(d_fwd_index == 1) 
         send_coeff_info_eth(reduced_coeffs);
@@ -7434,14 +7390,47 @@ digital_ofdm_frame_sink::getHInfo(NodeId tx_id, NodeId rx_id) {
 /* predict the value of H as a fn(slope, samples since last tx) */
 inline gr_complex 
 digital_ofdm_frame_sink::predictH(NodeId tx_id, NodeId rx_id) {
+
+  // calculate the # of samples since last packet sent //
+  uhd::time_spec_t interval = d_out_pkt_time - d_last_pkt_time;
+  time_t full_secs = interval.get_full_secs();
+  double frac_secs = interval.get_frac_secs();
+  double total_time = full_secs + frac_secs;
+
+  int decimation = 128;
+  double rate = 1.0/decimation;
+  double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
+  uint64_t interval_samples = total_time/time_per_sample;
+  std::cout<<"time/sample: "<<time_per_sample<<" samples: "<<interval_samples<<" total time: "<<total_time<<endl;
+  d_last_pkt_time = d_out_pkt_time;                                             // no use now, set it again
+
+  // now try and predict H based on interval_samples //
   HInfo *hInfo = getHInfo(tx_id, rx_id);
+  gr_complex h_val = hInfo->h_value;
+  float slope = hInfo->slope;
 
-  float slope  = hInfo->slope;
-  gr_complex h_value = hInfo->h_value;
+  //printf("predictH: pkt_num: %d, slope: %f\n", d_pkt_num, slope); fflush(stdout);
 
-  // TODO:  
+  if(d_pkt_num == 0 || slope == 0.0) {
+     return gr_complex(1.0, 0.0);
+  }
+  else {
+     float old_angle = arg(h_val);
+     float new_angle = old_angle + interval_samples * slope;
 
-  return h_value;
+     printf("old_angle: %.2f, new_angle: %.2f\n", old_angle, new_angle); fflush(stdout);
+     while(new_angle > M_PI)
+        new_angle = new_angle - 2*M_PI;
+
+     assert(new_angle <= M_PI && new_angle >= -M_PI);
+
+     printf("predictH: pkt_num: %d, slope: %.8f, samples: %llu, old_angle: %.2f, new_angle: %.2f\n", d_pkt_num, slope, interval_samples, old_angle, new_angle); fflush(stdout);
+     //printf("predictH: pkt_num: %d, slope: %f, old_angle: %.2f, new_angle: %.2f\n", d_pkt_num, slope, old_angle, new_angle); fflush(stdout);
+
+     return gr_expj(new_angle);
+  }
+  assert(false);
+  return gr_complex(1.0, 0.0);
 }
 
 /* opens the h_tx and h_rx sockets 

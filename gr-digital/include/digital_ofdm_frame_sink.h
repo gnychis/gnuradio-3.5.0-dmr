@@ -949,10 +949,10 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  void populateEthernetAddress();
  void txHInfo();
  void check_HInfo_rx_sock(int);
- void send_coeff_info_eth(gr_complex *coeffs);
+ void send_coeff_info_eth(CoeffInfo*);
  NodeId get_coFwd();
  void get_coeffs_from_lead(CoeffInfo *coeffs);
- void smart_selection_local(gr_complex*, gr_complex*, FlowInfo*); 
+ void smart_selection_local(gr_complex*, CoeffInfo*, FlowInfo*); 
  void smart_selection_global(gr_complex*, CoeffInfo*, FlowInfo*);
  HInfo* getHInfo(NodeId tx_id, NodeId rx_id);
 
@@ -966,11 +966,10 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  int d_coeff_tx_sock, d_coeff_rx_sock;				// for tx coefficients between the co-ordinating transmitters //
  vector<unsigned int> d_h_tx_socks, d_h_rx_socks; 		// for tx HInfo between upstream/dowstream nodes //
 
- //map<int, int> d_h_tx_socks;					// (toId, sock)	- used to send HInfo -> toId
- //vector<int> d_h_tx_socks;					// all the toIds, to whom I'd send the HInfo
- //map<int, int> d_h_rx_socks;					// (fromId, sock) - used to rcv HInfo <- fromId
-
 #endif
+
+ // to record the pkt timestamps 
+ uhd::time_spec_t d_last_pkt_time, d_out_pkt_time;
 
 };
 
