@@ -52,7 +52,7 @@
 #define TRIGGER_TYPE    3
 
 #define MAX_RX 3
-#define H_PRECODING 1
+//#define H_PRECODING 1
 
 typedef struct coeff_str {
   unsigned short phase;				// scaled
@@ -141,7 +141,6 @@ typedef struct composite_link_str {
 } CompositeLink;
 typedef std::vector<CompositeLink*> CompositeLinkVector;
 
-#ifdef H_PRECODING
 /* for exchanging h-values over the ethernet */
 // for recording the h-values between each pair of nodes. Every node maintains this info from 
 // itself->upstream node, and sends this to all upstream nodes (only single hop upstream)
@@ -180,7 +179,6 @@ typedef struct time_struct {
 typedef std::queue<HObsItem> HObsQ;                      
 typedef std::map<NodeId, HObsQ> HObsQMap;
 #endif
-#endif	// H_PRECODING
 
 
 /* apurv++ end header type */

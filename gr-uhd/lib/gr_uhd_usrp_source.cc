@@ -25,6 +25,7 @@
 #include <iostream>
 #include <boost/format.hpp>
 #include <boost/make_shared.hpp>
+#include <boost/thread.hpp>
 #include <cstdio>
 
 static const pmt::pmt_t TIME_KEY = pmt::pmt_string_to_symbol("rx_time");
@@ -87,6 +88,8 @@ public:
            this->set_clock_config(uhd::clock_config_t::external(), 0);
            this->set_time_next_pps(uhd::time_spec_t(0.0));
         }
+
+	boost::this_thread::sleep(boost::posix_time::milliseconds(1e3));
     }
 
     void set_subdev_spec(const std::string &spec, size_t mboard){

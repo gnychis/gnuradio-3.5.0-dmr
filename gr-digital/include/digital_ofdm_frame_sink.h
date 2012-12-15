@@ -92,7 +92,7 @@ digital_make_ofdm_frame_sink (const std::vector<gr_complex> &hdr_sym_position,
 			 float phase_gain=0.25, float freq_gain=0.25*0.25/4.0, unsigned int id=1, 
 			 unsigned int batch_size=1, unsigned int decode_flag=1, 
 			 int fwd_index=0, int replay_flag=0,
-			 int exp_size=400, int fec_n=0, int fec_k=0, int degree=4);
+			 int exp_size=400, int fec_n=0, int fec_k=0, int degree=4, int h_coding=0);
 
 typedef complex<double> comp_d;
 
@@ -473,7 +473,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   float phase_gain, float freq_gain, unsigned int id, 
 			   unsigned int batch_size, unsigned int decode_flag,
 			   int fwd_index, int replay_flag,
-			   int exp_size, int fec_n, int fec_k, int degree);
+			   int exp_size, int fec_n, int fec_k, int degree, int h_coding);
 
  private:
   enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_NULL, STATE_HAVE_TRAINING, STATE_HAVE_HEADER};
@@ -541,7 +541,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 		     float phase_gain, float freq_gain, unsigned int id, 
 		     unsigned int batch_size, unsigned int decode_flag, 
 		     int fwd_index, int replay_flag,
-		     int exp_size, int fec_n, int fec_k, int degree);
+		     int exp_size, int fec_n, int fec_k, int degree, int h_coding);
 
   void enter_search();
   void enter_have_sync();
@@ -940,7 +940,6 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  void open_server_sock(int sock_port, vector<unsigned int>& connected_clients, int num_clients);
  int open_client_sock(int port, const char *addr, bool blocking);
 
-#ifdef H_PRECODING
  void get_nextHop_rx(NodeIds &rx_ids);
  void updateHInfo(HKey, HInfo, bool);
  void initHInfoMap();
@@ -966,7 +965,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  int d_coeff_tx_sock, d_coeff_rx_sock;				// for tx coefficients between the co-ordinating transmitters //
  vector<unsigned int> d_h_tx_socks, d_h_rx_socks; 		// for tx HInfo between upstream/dowstream nodes //
 
-#endif
+ int d_h_coding;
 
  // to record the pkt timestamps 
  uhd::time_spec_t d_last_pkt_time, d_out_pkt_time;

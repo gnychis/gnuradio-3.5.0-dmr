@@ -191,18 +191,19 @@ digital_ofdm_frame_sink::extract_header(gr_complex h)
 
   printf("prev_hop: %c, src: %c, dst: %c\n", d_prev_hop_id, d_src_id, d_dst_id); fflush(stdout);
 
-#ifdef H_PRECODING
-  HInfo hInfo;
-  hInfo.pkt_num = d_pkt_num; //d_batch_number;
-  hInfo.h_value = gr_complex(1.0, 0.0)/h;			//h: equalizer, channel=1/eq
+  if(d_h_coding) {
+    HInfo hInfo;
+    hInfo.pkt_num = d_pkt_num; //d_batch_number;
+    hInfo.h_value = gr_complex(1.0, 0.0)/h;			//h: equalizer, channel=1/eq
 
-  HKey hkey(d_prev_hop_id, d_id);
-  updateHInfo(hkey, hInfo, true);
+    HKey hkey(d_prev_hop_id, d_id);
+    updateHInfo(hkey, hInfo, true);
 
-  // only transmit after all the synch transmitters headers have been extracted //
-  if(d_nsenders > 1 && d_lead_sender == 0)
-     txHInfo();
-#endif
+    // only transmit after all the synch transmitters headers have been extracted //
+    if(d_nsenders > 1 && d_lead_sender == 0)
+       txHInfo();
+  } // d_h_coding
+
 }
 
 unsigned char digital_ofdm_frame_sink::slicer_hdr(const gr_complex x)
@@ -593,7 +594,7 @@ digital_make_ofdm_frame_sink(const std::vector<gr_complex> &hdr_sym_position,
                         float phase_gain, float freq_gain, unsigned int id, 
 			unsigned int batch_size, unsigned int decode_flag, 
 			int fwd_index, int replay_flag,
-			int exp_size, int fec_n, int fec_k, int degree)
+			int exp_size, int fec_n, int fec_k, int degree, int h_coding)
 {
   return gnuradio::get_initial_sptr(new digital_ofdm_frame_sink(hdr_sym_position, hdr_sym_value_out,
 							data_sym_position, data_sym_value_out,
@@ -601,7 +602,7 @@ digital_make_ofdm_frame_sink(const std::vector<gr_complex> &hdr_sym_position,
 							occupied_carriers, fft_length,
                                                         phase_gain, freq_gain, id,
 							batch_size, decode_flag, fwd_index, replay_flag,
-							exp_size, fec_n, fec_k, degree));
+							exp_size, fec_n, fec_k, degree, h_coding));
 }
 
 
@@ -614,7 +615,7 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
                                        float phase_gain, float freq_gain, unsigned int id,
 				       unsigned int batch_size, unsigned int decode_flag, 
 				       int fwd_index, int replay_flag,
-				       int exp_size, int fec_n, int fec_k, int degree)
+				       int exp_size, int fec_n, int fec_k, int degree, int h_coding)
   : gr_sync_block ("ofdm_frame_sink",
                    //gr_make_io_signature2 (2, 2, sizeof(gr_complex)*occupied_carriers, sizeof(char)),  // apurv--
                    gr_make_io_signature4 (2, 4, sizeof(gr_complex)*occupied_carriers, sizeof(char), sizeof(gr_complex)*occupied_carriers, sizeof(gr_complex)*fft_length), //apurv++
@@ -636,7 +637,8 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
     d_expected_size(exp_size),
     d_fec_n(fec_n),
     d_fec_k(fec_k),
-    d_degree(degree)
+    d_degree(degree),
+    d_h_coding(h_coding)
 {
   std::string carriers = "F00F";                //8-DC subcarriers      // apurv++
   //std::string carriers = "FC3F";		  // 4-dc
@@ -904,9 +906,8 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
 
   d_agg_total_symbols = 0; d_agg_correct_symbols = 0;
 
-#ifdef H_PRECODING
-  prepare_H_coding();
-#endif
+  if(d_h_coding)
+     prepare_H_coding();
 
   d_out_pkt_time = uhd::time_spec_t(0.0);
   d_last_pkt_time = uhd::time_spec_t(0.0);
@@ -2944,7 +2945,7 @@ digital_ofdm_frame_sink::populateCompositeLinkInfo()
         for(int i = 0; i < num_src; i++) {
            //unsigned int srcId = atoi(token_vec[i+2]);
 	   NodeId srcId = atoi(token_vec[i+2]) + '0';
-           printf("srcId: %d, size: %d\n", srcId, cLink->srcIds.size()); fflush(stdout);
+           printf("srcId: %c, size: %d\n", srcId, cLink->srcIds.size()); fflush(stdout);
            cLink->srcIds.push_back(srcId);
 	   if(srcId == d_id)
 	     d_outCLinks.push_back(cLink->linkId);
@@ -3993,21 +3994,22 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      d_out_pkt_time = uhd::time_spec_t(sync_secs, sync_frac_of_secs);
   }
 
-#ifdef H_PRECODING
-  reduceCoefficients_LSQ(flow_info);
-  chooseCV_H(flow_info, coeffs);
-#else
-  /* pick new random <coeffs> for each innovative pkt to == new coded pkt */
-  printf("selecting random coeffs::: --- \n"); fflush(stdout);
-  float phase[MAX_BATCH_SIZE];
-  for(unsigned int i = 0; i < n_innovative_pkts; i++) {
-     PktInfo *pInfo = inno_pkts[i];
+  if(d_h_coding) {
+     reduceCoefficients_LSQ(flow_info);
+     chooseCV_H(flow_info, coeffs);
+  }
+  else {
+     /* pick new random <coeffs> for each innovative pkt to == new coded pkt */
+     printf("selecting random coeffs::: --- \n"); fflush(stdout);
+     float phase[MAX_BATCH_SIZE];
+     for(unsigned int i = 0; i < n_innovative_pkts; i++) {
+         PktInfo *pInfo = inno_pkts[i];
 
-     gr_complex *symbols = (gr_complex*) malloc(sizeof(gr_complex) * n_symbols);
-     memcpy(symbols, pInfo->symbols, sizeof(gr_complex) * n_symbols);
+	 gr_complex *symbols = (gr_complex*) malloc(sizeof(gr_complex) * n_symbols);
+	 memcpy(symbols, pInfo->symbols, sizeof(gr_complex) * n_symbols);
 
-     phase[i] = rand() % 360 + 1;
-     float amp = getAvgAmplificationFactor(pInfo->hestimates);
+	 phase[i] = rand() % 360 + 1;
+	 float amp = getAvgAmplificationFactor(pInfo->hestimates);
 
 #if 0
      phase[i] = 0.0;
@@ -4016,22 +4018,22 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      printf("amp: %.3f, extra_amp: %.3f\n", amp, extra_amp); fflush(stdout);
      amp += extra_amp;
 #endif
-     coeffs[i] = amp * gr_expj(phase[i] * M_PI/180);
+         coeffs[i] = amp * gr_expj(phase[i] * M_PI/180);
 
 #ifndef DEBUG
-     printf("generateCodeVector: [A: %f, P: %f] <-> (%f, %f)\n", amp, phase[i], coeffs[i].real(), coeffs[i].imag()); fflush(stdout);
+	 printf("generateCodeVector: [A: %f, P: %f] <-> (%f, %f)\n", amp, phase[i], coeffs[i].real(), coeffs[i].imag()); fflush(stdout);
 #endif
-     encodeSignal(symbols, coeffs[i]);
+	 encodeSignal(symbols, coeffs[i]);
 
 #ifdef SRC_PILOT
-     equalizePilot(symbols, pInfo);			// equalize the pilot tones to remove the channel effect //
+	 equalizePilot(symbols, pInfo);			// equalize the pilot tones to remove the channel effect //
 #endif
-     combineSignal(out_symbols, symbols, i);
+	 combineSignal(out_symbols, symbols, i);
 
-     free(symbols);
+	 free(symbols);
+     }
+     printf("--------------------------------------------------------------------- \n"); fflush(stdout);
   }
-  printf("--------------------------------------------------------------------- \n"); fflush(stdout);
-#endif	// H_PRECODING
 
   float factor = normalizeSignal(out_symbols, n_innovative_pkts, ((d_fwd_index==0)?1:2));
 
@@ -7145,7 +7147,6 @@ digital_ofdm_frame_sink::is_CV_good(gr_complex cv1, gr_complex cv2) {
    return true;
 }
 
-#ifdef H_PRECODING
 /* the lead sender selects the coeffs and sends them over the socket to the 
    slave sender. The slave then uses that knowledge to figure out its own 
    coefficients */
@@ -7357,7 +7358,7 @@ digital_ofdm_frame_sink::chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs) {
   assert(d_batch_size == 2);
 
   InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
-  assert(inno_pkts.size() == d_batch_size);
+  assert(inno_pkts.size() <= d_batch_size);
 
   // first check if any outstanding HInfo available //
   vector<unsigned int>:: iterator it = d_h_rx_socks.begin();
@@ -7721,7 +7722,6 @@ digital_ofdm_frame_sink::populateEthernetAddress()
    } 
 #endif
 }
-#endif
 
 
 /* util function */

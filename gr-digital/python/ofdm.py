@@ -147,7 +147,7 @@ class ofdm_mod(gr.hier_block2):
                                              options.occupied_tones, options.fft_length,
                                              options.id, options.src,
                                              options.batch_size, options.encode_flag, 
-					     options.fwd, options.dst_id, options.degree, options.mimo)
+					     options.fwd, options.dst_id, options.degree, options.mimo, options.h_smart)
 	
 
         self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, options.fwd, padded_preambles)
@@ -269,6 +269,8 @@ class ofdm_mod(gr.hier_block2):
                           help="hop number (for preamble) [default=%default]")
         expert.add_option("","--mimo", type="intx", default=0,
                          help="enable MIMO TX [default=%default]")
+	expert.add_option("","--h-smart", type="intx", default=0,
+                         help="enables smart coefficients using H exchange [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation
@@ -417,7 +419,7 @@ class ofdm_demod(gr.hier_block2):
                                              self._batch_size, self._decode_flag, 
                                              options.fwd, 
                                              options.replay,
-                                             self._size, self._fec_n, self._fec_k, options.degree)
+                                             self._size, self._fec_n, self._fec_k, options.degree, options.h_smart)
 
         self.connect(self, self.ofdm_recv)
 
@@ -499,6 +501,8 @@ class ofdm_demod(gr.hier_block2):
                           help="LSQ degree (if applicable) [default=%default]")
         expert.add_option("", "--hop", type="intx", default=0,
                           help="hop number (for preamble) [default=%default]")
+        expert.add_option("","--h-smart", type="intx", default=0,
+                         help="enables smart coefficients using H exchange [default=%default]")
         # apurv++ end #
 
     # Make a static method to call before instantiation

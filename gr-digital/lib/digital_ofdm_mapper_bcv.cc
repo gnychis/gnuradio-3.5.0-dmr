@@ -59,9 +59,9 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation,
 			 unsigned int batch_size,
 			 unsigned int encode_flag,
 			 int fwd_index, unsigned int dst_id, unsigned int degree,
-			 unsigned int mimo)
+			 unsigned int mimo, int h_coding)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (hdr_constellation, data_constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree, mimo));
+  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (hdr_constellation, data_constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree, mimo, h_coding));
 }
 
 // Consumes 1 packet and produces as many OFDM symbols of fft_length to hold the full packet
@@ -73,7 +73,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 					unsigned int batch_size,
 					unsigned int encode_flag,
 					int fwd_index, unsigned int dst_id, unsigned int degree, 
-					unsigned int mimo)
+					unsigned int mimo, int h_coding)
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
 		   gr_make_io_signature2 (1, 2, sizeof(gr_complex)*fft_length, sizeof(char))),
@@ -99,7 +99,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_fwd_index(fwd_index),
     d_dst_id(dst_id),
     d_degree(degree),
-    d_mimo(mimo)
+    d_mimo(mimo),
+    d_h_coding(h_coding)
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
@@ -274,9 +275,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 
   populateCompositeLinkInfo();
 
-#ifdef H_PRECODING
-  prepare_H_coding();
-#endif
+  if(d_h_coding && d_source == 1)
+     prepare_H_coding();
 }
 
 digital_ofdm_mapper_bcv::~digital_ofdm_mapper_bcv(void)
@@ -1237,35 +1237,36 @@ digital_ofdm_mapper_bcv::generateCodeVector()
 
   printf("generateCodeVector -- \n"); fflush(stdout);
 
-#ifdef H_PRECODING
-  gr_complex coeffs[2];
-  chooseCV_H(coeffs);
-  for(unsigned int k = 0; k < d_batch_size; k++) {
-     float cv = arg(coeffs[k]) * 180/M_PI;
-     d_header.coeffs[k].phase = cv * SCALE_FACTOR_PHASE;
-     d_header.coeffs[k].amplitude = 1.0 * SCALE_FACTOR_AMP;
-     float rad = cv * M_PI/180;
-     gr_complex t_coeff = ToPhase_c(rad);
-     printf("cv: %f degrees <-> %f radians <-> (%f, %f) \n", cv, rad, t_coeff.real(), t_coeff.imag()); fflush(stdout);
+  if(d_h_coding) {
+     gr_complex coeffs[2];
+     chooseCV_H(coeffs);
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+         float cv = arg(coeffs[k]) * 180/M_PI;
+	 d_header.coeffs[k].phase = cv * SCALE_FACTOR_PHASE;
+	 d_header.coeffs[k].amplitude = 1.0 * SCALE_FACTOR_AMP;
+	 float rad = cv * M_PI/180;
+	 gr_complex t_coeff = ToPhase_c(rad);
+	 printf("cv: %f degrees <-> %f radians <-> (%f, %f) \n", cv, rad, t_coeff.real(), t_coeff.imag()); fflush(stdout);
+     }
   }
-#else
-  float cv = 0.0;
-  for(unsigned int k = 0; k < d_batch_size; k++) {
-      cv = rand() % 360 + 1;				// degree
+  else {
+     float cv = 0.0;
+     for(unsigned int k = 0; k < d_batch_size; k++) {
+         cv = rand() % 360 + 1;				// degree
 
-      float LO = 0.5; float HI = 1.5;
-      float amp = 1.0; //LO + (float)rand()/((float)RAND_MAX/(HI-LO));
+	 float LO = 0.5; float HI = 1.5;
+	 float amp = 1.0; //LO + (float)rand()/((float)RAND_MAX/(HI-LO));
 
-      // store the scaled versions in header (space constraints) //
-      d_header.coeffs[k].phase = cv * SCALE_FACTOR_PHASE;
-      d_header.coeffs[k].amplitude = amp * SCALE_FACTOR_AMP;
+	 // store the scaled versions in header (space constraints) //
+	 d_header.coeffs[k].phase = cv * SCALE_FACTOR_PHASE;
+	 d_header.coeffs[k].amplitude = amp * SCALE_FACTOR_AMP;
 #ifndef DEBUG
-      float rad = cv * M_PI/180;
-      gr_complex t_coeff = ToPhase_c(rad);
-      printf("cv: %f degrees <-> %f radians <-> (%f, %f) \n", cv, rad, t_coeff.real(), t_coeff.imag()); fflush(stdout);
+         float rad = cv * M_PI/180;
+         gr_complex t_coeff = ToPhase_c(rad);
+         printf("cv: %f degrees <-> %f radians <-> (%f, %f) \n", cv, rad, t_coeff.real(), t_coeff.imag()); fflush(stdout);
 #endif	// DEBUG
-  }
-#endif	// H_PRECODING
+     }
+  } // if(d_h_coding)
 
 
 #ifdef LSQ_COMPRESSION
@@ -1363,6 +1364,7 @@ digital_ofdm_mapper_bcv::makeHeader()
  
    generateCodeVector();	// also fills up d_header.coeffs
 
+   d_last_pkt_time = d_out_pkt_time;
    printf("\t Using code vectors: ");
    for(unsigned int k = 0; k < d_batch_size; k++) {
       COEFF coeff = d_header.coeffs[k];
@@ -1692,12 +1694,12 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   add_item_tag(1/*chan0*/, nitems_written(1), key, value, srcid);
   printf("(MAPPER) make_time_tag, at offset: %llu\n", nitems_written(1)); fflush(stdout);
 
-#ifdef H_PRECODING
-  d_pktTxInfoList.push_back(PktTxInfo(d_pkt_num, out_time));  
-  while(d_pktTxInfoList.size() > 20) {
-     d_pktTxInfoList.pop_front();
+  if(d_h_coding) {
+     d_pktTxInfoList.push_back(PktTxInfo(d_pkt_num, out_time));  
+     while(d_pktTxInfoList.size() > 20) {
+        d_pktTxInfoList.pop_front();
+     }
   }
-#endif
 }
 
 /* at BSPK, generate 2 training symbols (helps in deducing snr and noise variance) */
@@ -1959,7 +1961,6 @@ digital_ofdm_mapper_bcv::open_client_sock(int port, const char *addr, bool block
   return sockfd;
 }
 
-#ifdef H_PRECODING
 inline NodeId
 digital_ofdm_mapper_bcv::get_coFwd()
 {
@@ -2559,7 +2560,6 @@ digital_ofdm_mapper_bcv::populateEthernetAddress()
 
     fclose (fl);
 }
-#endif	// H_PRECODING
 
 CompositeLink*
 digital_ofdm_mapper_bcv::getCompositeLink(int id)

@@ -33,7 +33,7 @@ digital_make_ofdm_frame_sink(const std::vector<gr_complex> &hdr_sym_position,
                         unsigned int id=1, 
                         unsigned int batch_size=1, unsigned int decode_flag=1, 
                         int fwd_index=0, int replay_flag=0,
-                        int exp_size=400, int fec_n=0, int fec_k=0, int degree=4);
+                        int exp_size=400, int fec_n=0, int fec_k=0, int degree=4, int h_coding=0);
 
 class digital_ofdm_frame_sink : public gr_sync_block
 {
@@ -47,7 +47,7 @@ class digital_ofdm_frame_sink : public gr_sync_block
 		     float phase_gain, float freq_gain, unsigned int id,
                      unsigned int batch_size, unsigned int decode_flag,
                      int fwd_index, int replay_flag,
-                     int exp_size, int fec_n, int fec_k, int degree);
+                     int exp_size, int fec_n, int fec_k, int degree, int h_coding);
 
  public:
   ~digital_ofdm_frame_sink();
