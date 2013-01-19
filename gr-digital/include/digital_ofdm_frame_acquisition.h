@@ -33,7 +33,8 @@ typedef boost::shared_ptr<digital_ofdm_frame_acquisition> digital_ofdm_frame_acq
 DIGITAL_API digital_ofdm_frame_acquisition_sptr 
 digital_make_ofdm_frame_acquisition (unsigned int occupied_carriers, unsigned int fft_length,
 				unsigned int cplen,
-				const std::vector<gr_complex> &known_symbol, 
+				//const std::vector<gr_complex> &known_symbol, 
+				const std::vector<std::vector<gr_complex> >  &known_symbol,
 				unsigned int max_fft_shift_len=10);
 
 /*!
@@ -68,13 +69,15 @@ class DIGITAL_API digital_ofdm_frame_acquisition : public gr_block
   friend DIGITAL_API digital_ofdm_frame_acquisition_sptr
   digital_make_ofdm_frame_acquisition (unsigned int occupied_carriers, unsigned int fft_length,
 				  unsigned int cplen,
-				  const std::vector<gr_complex> &known_symbol, 
+				  //const std::vector<gr_complex> &known_symbol, 
+				  const std::vector<std::vector<gr_complex> >  &known_symbol,
 				  unsigned int max_fft_shift_len);
   
 protected:
   digital_ofdm_frame_acquisition (unsigned int occupied_carriers, unsigned int fft_length,
 			     unsigned int cplen,
-			     const std::vector<gr_complex> &known_symbol, 
+			     //const std::vector<gr_complex> &known_symbol, 
+			     const std::vector<std::vector<gr_complex> >  &known_symbol,
 			     unsigned int max_fft_shift_len);
   
  private:
@@ -87,7 +90,8 @@ protected:
   unsigned int d_fft_length;         // !< \brief length of FFT vector
   unsigned int d_cplen;              // !< \brief length of cyclic prefix in samples
   unsigned int d_freq_shift_len;     // !< \brief number of surrounding bins to look at for correlation
-  std::vector<gr_complex> d_known_symbol; // !< \brief known symbols at start of frame
+  //std::vector<gr_complex> d_known_symbol; // !< \brief known symbols at start of frame
+  const std::vector<std::vector<gr_complex> >  d_known_symbol;
   std::vector<float> d_known_phase_diff; // !< \brief factor used in correlation from known symbol
   std::vector<float> d_symbol_phase_diff; // !< \brief factor used in correlation from received symbol
   //std::vector<gr_complex> d_hestimate;  // !< channel estimate
@@ -101,6 +105,7 @@ protected:
   void forecast(int noutput_items, gr_vector_int &ninput_items_required);
 
   // apurv++ start //
+  unsigned int d_cur_symbol;
   void log_hestimate();
   bool open_log();
   int d_fd;

@@ -85,12 +85,16 @@ class ofdm_mod(gr.hier_block2):
         start_index = (options.hop) * self._occupied_tones
         ksfreq = known_symbols_4512_3[start_index:start_index + self._occupied_tones]
 
+        # allow another full preamble (no intermediate 0s for accurate channel estimate/snr measurement)
+        preamble2_offset = 10*self._occupied_tones;
+        ksfreq2 = known_symbols_4512_3[preamble2_offset:preamble2_offset+self._occupied_tones]
+
         for i in range(len(ksfreq)):
             if((zeros_on_left + i) & 1):
                 ksfreq[i] = 0
 
         # hard-coded known symbols
-        preambles = (ksfreq,)
+        preambles = (ksfreq, ksfreq2, ksfreq2)
                 
         padded_preambles = list()
         for pre in preambles:
@@ -143,14 +147,14 @@ class ofdm_mod(gr.hier_block2):
             data_rotated_const = map(lambda pt: pt * data_rot, data_constel.points())
         self._bits_per_symbol = int(math.log(mods[self._modulation], 2))                # just a useless parameter now #
 
-        self._pkt_input = digital_swig.ofdm_mapper_bcv(hdr_rotated_const, data_rotated_const, msgq_limit,
+        self._pkt_input = digital_swig.ofdm_mapper_bcv(hdr_rotated_const, data_rotated_const, 
+					     padded_preambles,msgq_limit,
                                              options.occupied_tones, options.fft_length,
                                              options.id, options.src,
                                              options.batch_size, options.encode_flag, 
 					     options.fwd, options.dst_id, options.degree, options.mimo, options.h_smart)
 	
 
-        self.preambles = digital_swig.ofdm_insert_preamble(self._fft_length, options.fwd, padded_preambles)
         self.ifft = gr.fft_vcc(self._fft_length, False, win, True)
 
         self.cp_adder = digital_swig.ofdm_cyclic_prefixer(self._fft_length, symbol_length)
@@ -163,21 +167,16 @@ class ofdm_mod(gr.hier_block2):
 
         manual = options.tx_manual
         if manual == 0:
-	   # the default tx flow-graph #
-           self.connect((self._pkt_input, 0), (self.preambles, 0))
-           self.connect((self._pkt_input, 1), (self.preambles, 1))
-
            if use_burst_tagger == 0:
-	       self.connect(self.preambles, self.ifft, self.cp_adder, self.scale, self)
+	       self.connect((self._pkt_input, 0), self.ifft, self.cp_adder, self.scale, self)
 	   else:
 	       # some burst tagger connections #
-	       self.connect(self.preambles, self.ifft, self.cp_adder, self.burst_tagger, self.scale, self)
-	       self.connect((self.preambles, 1), (self.cp_adder, 1), (self.burst_tagger,1))   # Connect Apurv's trigger data to the burst tagger
-	       #self.connect((self.cp_adder, 1), gr.file_sink(gr.sizeof_short, "burst_trigger_tx.dat"))
+	       self.connect((self._pkt_input, 0), self.ifft, self.cp_adder, self.burst_tagger, self.scale, self)
+               self.connect((self._pkt_input, 1), (self.cp_adder, 1), (self.burst_tagger,1))   # Connect Apurv's trigger data to the burst tagger	
 
            # apurv++: log the transmitted data in the time domain #
-           # self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
-           # self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
+           #self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
+           #self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 	   #if options.src == 0:
               #self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"))
 	      #self.connect((self.preambles, 1), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
@@ -186,22 +185,22 @@ class ofdm_mod(gr.hier_block2):
 	   # punt the pkt_input and use file source # 
            self.connect(gr.file_source(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"), self.cp_adder, self.scale, self)
 
+
+	self.connect(self.scale, gr.file_sink(gr.sizeof_gr_complex, "ofdm_fwd.dat"))
+
         if options.verbose:
             self._print_verbage()
 
         if options.log:
             self.connect(self._pkt_input, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
                                                        "ofdm_mapper_c.dat"))
-            self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
-                                                      "ofdm_preambles.dat"))
             self.connect(self.ifft, gr.file_sink(gr.sizeof_gr_complex*options.fft_length,
                                                  "ofdm_ifft_c.dat"))
             self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex,
                                                      "ofdm_cp_adder_c.dat"))
 
 	#self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex, "ofdm_cp_adder_c.dat"))
-
-        #self.connect(self.preambles, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "ofdm_preambles.dat"))
+	self.connect(self._pkt_input, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
         #self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
 
     def send_pkt(self, payload, type=0, eof=False):
@@ -349,12 +348,16 @@ class ofdm_demod(gr.hier_block2):
 	start_index = (options.hop-1) * self._occupied_tones
 	ksfreq = known_symbols_4512_3[start_index:start_index + self._occupied_tones]
 
+	# allow another full preamble (no intermediate 0s for accurate channel estimate/snr measurement)
+	preamble2_offset = 10*self._occupied_tones;
+	ksfreq2 = known_symbols_4512_3[preamble2_offset:preamble2_offset+self._occupied_tones]
+
         for i in range(len(ksfreq)):
             if((zeros_on_left + i) & 1):
                 ksfreq[i] = 0
 
         # hard-coded known symbols
-        preambles = (ksfreq,)
+        preambles = (ksfreq, ksfreq2) #, ksfreq2, ksfreq2, ksfreq2)			# coarse_offset from 1st preamble, equalizer from the rest
         
         symbol_length = self._fft_length + self._cp_length
         self.ofdm_recv = ofdm_receiver(self._fft_length, self._cp_length,
@@ -411,8 +414,11 @@ class ofdm_demod(gr.hier_block2):
 					     self._size, self._fec_n, self._fec_k, options.degree)
 	"""
 
+	# preambles contains all the 'preambles' used in frame_acquisition + 1 (for snr calculation)
+	preambles = (ksfreq, ksfreq2, ksfreq2) #, ksfreq2, ksfreq2, ksfreq2)						# send the extra symbol for snr calculation
         self.ofdm_demod = digital_swig.ofdm_frame_sink(hdr_rotated_const, range(hdr_arity),
 					     data_rotated_const, range(data_arity),
+					     preambles,
                                              self._rcvd_pktq, self._out_pktq,
                                              self._occupied_tones, self._fft_length,
                                              phgain, frgain, self._id,

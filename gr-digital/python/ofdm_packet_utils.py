@@ -118,6 +118,14 @@ def make_packet(payload, samples_per_symbol, bps, fec_n, fec_k, pad_for_usrp=Tru
     if not whitener_offset >=0 and whitener_offset < 16:
         raise ValueError, "whitener_offset must be between 0 and 15, inclusive (%i)" % (whitener_offset,)
 
+    # generate 1 OFDM symbol of training payload #
+    training_symbol = ''
+    data_carriers = 72
+    if 1:
+        training_boundary = (data_carriers*bps)/8
+        training_symbol = payload[0:training_boundary]
+        payload = payload[training_boundary:]
+
     payload_with_crc = crc.gen_and_append_crc32(payload)
     #print "outbound crc =", string_to_hex_list(payload_with_crc[-4:])
 
@@ -126,6 +134,8 @@ def make_packet(payload, samples_per_symbol, bps, fec_n, fec_k, pad_for_usrp=Tru
     else:
 	enc_payload_with_crc = payload_with_crc
  
+    enc_payload_with_crc = training_symbol + enc_payload_with_crc
+
     L = len(enc_payload_with_crc)
     MAXLEN = len(random_mask_tuple)
     if L > MAXLEN:

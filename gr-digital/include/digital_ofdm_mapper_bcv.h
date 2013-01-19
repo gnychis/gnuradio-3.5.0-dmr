@@ -59,8 +59,6 @@
 
 //#define TESTING        0
 
-#define NULL_SYMBOL_COUNT (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1
-
 using namespace std;
 
 // whitening random tuple (from ofdm_packet_utils.py) //
@@ -329,6 +327,7 @@ typedef boost::shared_ptr<digital_ofdm_mapper_bcv> digital_ofdm_mapper_bcv_sptr;
 DIGITAL_API digital_ofdm_mapper_bcv_sptr 
 digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
 			 const std::vector<gr_complex> &data_constellation,
+			 const std::vector<std::vector<gr_complex> > &preamble,
 			 unsigned msgq_limit, 
 			 unsigned occupied_carriers, unsigned int fft_length, unsigned int id=1,
 			 unsigned int source_flag=0,
@@ -349,6 +348,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   friend DIGITAL_API digital_ofdm_mapper_bcv_sptr
   digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
 			   const std::vector<gr_complex> &data_constellation,
+			   const std::vector<std::vector<gr_complex> > &preamble,
 			   unsigned msgq_limit, 
 			   unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			   unsigned int source_flag,
@@ -357,6 +357,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
  protected:
   digital_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
 			 const std::vector<gr_complex> &data_constellation,
+			 const std::vector<std::vector<gr_complex> > &preamble,
 			 unsigned msgq_limit, 
 		         unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source_flag,
@@ -488,6 +489,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   bool open_log();
   bool d_init_log;
   unsigned int d_num_ofdm_symbols;
+  unsigned int d_num_hdr_symbols;
   unsigned int d_ofdm_symbol_index;
 
   // ack //
@@ -557,7 +559,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void send_mimo_trigger(uhd::time_spec_t);
   uhd::time_spec_t rcv_mimo_trigger();
 
-  bool is_CV_good(gr_complex cv1, gr_complex cv2);
+  bool is_CV_good(gr_complex cv1, gr_complex cv2, float&);
 
   // util functions //
   int open_client_sock(int port, const char *addr, bool blocking);
@@ -598,6 +600,16 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void populateCompositeLinkInfo();
   vector<int> d_outCLinks, d_inCLinks;
 
+  float getNormalizationFactor();
+  float getTimingOffset();
+  void removeTimingOffset(gr_complex*);
+
+  int d_mimo_wait_cnt;
+
+  // preamble related
+  void generatePreamble(gr_complex *out);
+  int d_preambles_sent;
+  const std::vector<std::vector<gr_complex> >   d_preamble;
 };
 
 #endif

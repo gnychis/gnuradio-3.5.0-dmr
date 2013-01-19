@@ -53,6 +53,7 @@ using namespace arma;
 digital_ofdm_mapper_bcv_sptr
 digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
 			 const std::vector<gr_complex> &data_constellation,
+			 const std::vector<std::vector<gr_complex> > &preamble,
 			 unsigned int msgq_limit, 
                          unsigned int occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source,
@@ -61,12 +62,13 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation,
 			 int fwd_index, unsigned int dst_id, unsigned int degree,
 			 unsigned int mimo, int h_coding)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (hdr_constellation, data_constellation, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree, mimo, h_coding));
+  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (hdr_constellation, data_constellation, preamble, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree, mimo, h_coding));
 }
 
 // Consumes 1 packet and produces as many OFDM symbols of fft_length to hold the full packet
 digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
 					const std::vector<gr_complex> &data_constellation,
+					const std::vector<std::vector<gr_complex> > &preamble,
 					unsigned int msgq_limit, 
 					unsigned int occupied_carriers, unsigned int fft_length, unsigned int id,
 					unsigned int source,
@@ -76,7 +78,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 					unsigned int mimo, int h_coding)
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
-		   gr_make_io_signature2 (1, 2, sizeof(gr_complex)*fft_length, sizeof(char))),
+		   gr_make_io_signature3 (1, 3, sizeof(gr_complex)*fft_length, sizeof(short), sizeof(char))),
     d_hdr_constellation(hdr_constellation),
     d_data_constellation(data_constellation),
     d_msgq(gr_make_msg_queue(msgq_limit)), d_eof(false),
@@ -100,10 +102,18 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_dst_id(dst_id),
     d_degree(degree),
     d_mimo(mimo),
-    d_h_coding(h_coding)
+    d_h_coding(h_coding),
+    d_preambles_sent(0),
+    d_preamble(preamble)
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
+
+  // sanity check preamble symbols
+  for (size_t i = 0; i < d_preamble.size(); i++){
+    if (d_preamble[i].size() != (size_t) d_fft_length)
+      throw std::invalid_argument("digital_ofdm_mapper_bcv: invalid length for preamble symbol");
+  }
 
   // MIMO_TX
   if(d_mimo != 0) {
@@ -259,6 +269,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   d_ofdm_symbol_index = 0;
   // apurv++ end //
 
+  d_num_hdr_symbols = (HEADERBYTELEN*8)/d_data_carriers.size();
+
   /* for mimo_tx, rand_seed = 1, else rand_seed = d_id */
   if(d_mimo != 0) 
      srand(1);
@@ -268,7 +280,6 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   d_time_pkt_sent = 0;
   d_log_open = false;
   d_log_open_native = false;
-  printf("NULL_SYMBOL_COUNT: %d\n", NULL_SYMBOL_COUNT); fflush(stdout);
 
   if(NUM_TRAINING_SYMBOLS > 0)
      generateKnownSymbols();
@@ -339,12 +350,22 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
     d_send_null = false;
     d_null_symbol_cnt = 0;
     d_training_symbol_cnt = 0;
+    d_preambles_sent = 0;
   }
 
   char *out_flag = 0;
   if(output_items.size() == 2)
-    out_flag = (char *) output_items[1];
+    out_flag = (char *) output_items[2];
   
+  /* for burst tagger trigger */
+  unsigned short *burst_trigger = NULL;
+  if(output_items.size() >= 2) {
+     burst_trigger = (unsigned short*) output_items[1];
+     memset(burst_trigger, 0, sizeof(short));
+  }
+  burst_trigger[0] = 1;
+  /* end */
+
   bool tx_pilot = false;
 
   /* single OFDM symbol: Initialize all bins to 0 to set unused carriers */
@@ -358,7 +379,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 #ifdef SRC_PILOT
      // slave fwd will transmit NULL symbols prior to the header, so that by the time data is sent out, both the senders
      // are at the same offset (to counter the fine offset rotation) 
-     if(d_fwd_index == 2 && (d_null_symbol_cnt < NULL_SYMBOL_COUNT) && 0) {
+     if(d_fwd_index == 2 && (d_null_symbol_cnt < (d_preamble.size()+d_num_hdr_symbols)) && 0) {
         d_null_symbol_cnt++;
 	d_pending_flag = 3;
 	if(!d_time_tag) {
@@ -368,8 +389,14 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
      }
      else
 #endif
+        /* preambles */
+     if(d_preambles_sent < d_preamble.size()) {
+	generatePreamble(out);
+	d_preambles_sent++;
+	tx_pilot = false;
+     }
 	/* data */
-     if(d_msg_offset[0] < HEADERBYTELEN) {
+     else if(d_msg_offset[0] < HEADERBYTELEN) {
 	generateOFDMSymbol(out, HEADERBYTELEN);
         if(!d_time_tag) {
            make_time_tag(d_msg[0]);
@@ -387,7 +414,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
         memcpy(out, d_known_symbols, sizeof(gr_complex) * d_fft_length);
         d_training_symbol_cnt++;
      }
-     else if(d_fwd_index == 1 && (d_null_symbol_cnt < (NULL_SYMBOL_COUNT+NUM_TRAINING_SYMBOLS))) {	// lead_fwder: send NULL symbols to accomodate slave fwders
+     else if(d_fwd_index == 1 && (d_null_symbol_cnt < (d_preamble.size()+d_num_hdr_symbols+NUM_TRAINING_SYMBOLS))) {	// lead_fwder: send NULL symbols to accomodate slave fwders
 	d_null_symbol_cnt++;
      }
      else if(!d_send_null) {
@@ -455,6 +482,10 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 
   if (out_flag)
     out_flag[0] = d_pending_flag;
+
+  if(d_pending_flag == 2)
+    burst_trigger[0] = 0;
+
   d_pending_flag = 0;
 
   return 1;  // produced symbol
@@ -686,7 +717,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	    assert(d_msg[b]->length() > 0);	
 	    d_packetlen = d_msg[b]->length();		// assume: all pkts in batch are of same length //
 	    d_num_ofdm_symbols = ceil(((float) ((d_packetlen) * 8))/(d_data_carriers.size() * d_data_nbits)); // include 'x55'
-	    printf("d_num_ofdm_symbols: %d\n", d_num_ofdm_symbols); fflush(stdout);
+	    printf("d_num_ofdm_symbols: %d, d_num_hdr_symbols: %d\n", d_num_ofdm_symbols, d_num_hdr_symbols); fflush(stdout);
 	}
 
 	initializeBatchParams();
@@ -714,16 +745,12 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	  assert(false);
      }
 
-     if(!d_time_tag) {
-         make_time_tag1();
-         d_time_tag = true; 
-     }
      makeHeader();
      initHeaderParams();
 
-     d_time_tag = false;
-     d_null_symbol_cnt = 0;
-     d_hdr_ofdm_index = 0;
+     d_preambles_sent = d_ofdm_symbol_index = d_null_symbol_cnt = d_hdr_ofdm_index = d_mimo_wait_cnt = 0; 
+     make_time_tag1();
+     d_pkt_num++;
   }
 
   bool tx_pilot = false;
@@ -732,35 +759,26 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   gr_complex *out = (gr_complex *)output_items[0];
   memset(out, 0, sizeof(gr_complex) * d_fft_length);
 
-#ifdef PRE_NULL_SYMBOLS
-  if(d_null_symbol_cnt < NULL_SYMBOL_COUNT) {
-     printf("(mapper): send NULL\n"); fflush(stdout);
-     d_null_symbol_cnt++;
-     d_pending_flag = 3;
-#if 0
-     if(!d_time_tag) {
-          make_time_tag1();
-          d_time_tag = true;
-     }
-#endif
+  /* for burst tagger trigger */
+  unsigned short *burst_trigger = NULL;
+  if(output_items.size() >= 2) {
+     burst_trigger = (unsigned short*) output_items[1];
+     memset(burst_trigger, 0, sizeof(short));
   }
-  else
-#endif
-  if(d_hdr_byte_offset < HEADERBYTELEN) {
-#if 0
-      if(!d_time_tag) {
-           make_time_tag1();
-           d_time_tag = true;
-        }
-#endif
+  burst_trigger[0] = 1;
+  /* end */
+
+  if(d_preambles_sent < d_preamble.size()) {
+     generatePreamble(out);
+     d_preambles_sent++;
+     tx_pilot = false;
+  }
+  else if(d_hdr_byte_offset < HEADERBYTELEN) {
       generateOFDMSymbolHeader(out); 					// send the header symbols out first //
-#ifdef PRE_NULL_SYMBOLS
-     if(d_hdr_ofdm_index == 0) {
-        d_pending_flag = 1;
-     }
-     d_hdr_ofdm_index++;
-#endif
       tx_pilot = true;
+  }
+  else if(d_mimo == 1 && (d_mimo_wait_cnt < (d_preamble.size()+d_num_hdr_symbols))) {
+      d_mimo_wait_cnt++;
   }
   else if(!d_send_null) {
        // offline analysis //
@@ -834,7 +852,6 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       d_pending_flag = 2;
       d_packets_sent_for_batch += 1;
       assert(d_ofdm_symbol_index == d_num_ofdm_symbols);
-      d_ofdm_symbol_index = 0;
       d_send_null = false;
       d_modulated = true;
       if(!d_log_open_native) {
@@ -853,20 +870,27 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
          cur_pilot = -cur_pilot;
       }
   }
-  else {
+  else if(d_ofdm_symbol_index > 0) {
       for(int i = 0; i < d_pilot_carriers.size(); i++) {
 	out[d_pilot_carriers[i]] = gr_complex(0.0, 0.0);
       }
   }
 #endif
+
+  if(d_h_coding) {
+     removeTimingOffset(out);
+  }
  
   char *out_flag = 0;
-  if(output_items.size() == 2)
-    out_flag = (char *) output_items[1];
-
+  if(output_items.size() >= 3)
+    out_flag = (char *) output_items[2];
 
   if (out_flag)
     out_flag[0] = d_pending_flag;
+
+  if(d_pending_flag == 2) {
+    burst_trigger[0] = 0;
+  }
 
   d_pending_flag = 0;  
   return 1;  // produced symbol
@@ -1228,6 +1252,23 @@ digital_ofdm_mapper_bcv::ToPhase_c(COEFF coeff) {
   return amp * gr_expj(angle_rad);
 }
 
+float
+digital_ofdm_mapper_bcv::getNormalizationFactor() {
+  float avg_amp = 0.0;
+  for(int i = 0; i < d_data_carriers.size(); i++) {
+     gr_complex sym(0.0, 0.0);
+     for(int k = 0; k < d_batch_size; k++) {
+        gr_complex cv = ToPhase_c(d_header.coeffs[k]);
+        sym += (cv*d_data_constellation[randsym()]);
+     }
+     avg_amp += abs(sym);
+  }
+
+  avg_amp = avg_amp/((float) d_data_carriers.size());
+  printf("getNormalizationFactor, avg_amp: %f\n", avg_amp); fflush(stdout);
+  return avg_amp/0.9;
+}
+
 #if 1 
 void 
 digital_ofdm_mapper_bcv::generateCodeVector()
@@ -1242,6 +1283,8 @@ digital_ofdm_mapper_bcv::generateCodeVector()
      chooseCV_H(coeffs);
      for(unsigned int k = 0; k < d_batch_size; k++) {
          float cv = arg(coeffs[k]) * 180/M_PI;
+	 if(cv < 0) cv += 360.0;
+
 	 d_header.coeffs[k].phase = cv * SCALE_FACTOR_PHASE;
 	 d_header.coeffs[k].amplitude = 1.0 * SCALE_FACTOR_AMP;
 	 float rad = cv * M_PI/180;
@@ -1295,14 +1338,18 @@ digital_ofdm_mapper_bcv::generateCodeVector()
 void
 digital_ofdm_mapper_bcv::encodeSignal(gr_complex *symbols, unsigned int batch_num)
 {
+  COEFF coeff = d_header.coeffs[batch_num];
   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
-      COEFF coeff = d_header.coeffs[batch_num];
 #ifdef SCALE
       symbols[d_data_carriers[i]] *= (ToPhase_c(coeff) * gr_complex(SCALE));
 #else
+      gr_complex sym = symbols[d_data_carriers[i]];
+      //gr_complex 
+      if(d_ofdm_symbol_index == 0 && 0)
+            printf("(%.2f, %.2f)  * (%.2f, %.2f) = ", sym.real(), sym.imag(), ToPhase_c(coeff).real(), ToPhase_c(coeff).imag()); 
       symbols[d_data_carriers[i]] *= ToPhase_c(coeff);
 #endif
-      if(i == 0 && d_ofdm_symbol_index == 0)
+      if(d_ofdm_symbol_index == 0 && 0)
          printf(" (%.8f, %.8f)\n", symbols[d_data_carriers[i]].real(), symbols[d_data_carriers[i]].imag()); fflush(stdout);
   }
 }
@@ -1310,22 +1357,83 @@ digital_ofdm_mapper_bcv::encodeSignal(gr_complex *symbols, unsigned int batch_nu
 inline void
 digital_ofdm_mapper_bcv::normalizeSignal(gr_complex* out, int k)
 {
+#if 0 
+  // just output the avg_amp in the first OFDM symbol //
+  if(d_ofdm_symbol_index == 0) {
+     float avg_amp = 0.0;
+     for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+        avg_amp += abs(out[d_data_carriers[i]]);
+     }
+     avg_amp /= ((float) d_data_carriers.size());
+     printf(" -- avg_amp (before normalization): %f\n", avg_amp); fflush(stdout);
+  }
+
+
+  // the straightforward way //
   float factor = sqrt(k) * sqrt(d_header.nsenders);
   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
      out[d_data_carriers[i]] /= gr_complex(factor);
+  }
+
+  // just output the avg_amp in the first OFDM symbol //
+  if(d_ofdm_symbol_index == 0) {
+     float avg_amp = 0.0;
+     for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+        avg_amp += abs(out[d_data_carriers[i]]);
+     }
+     avg_amp /= ((float) d_data_carriers.size());
+     printf(" -- avg_amp (after normalization): %f\n", avg_amp); fflush(stdout);
+  }
+#else
+  // just output the avg_amp in the first OFDM symbol //
+  if(d_ofdm_symbol_index == 0) {
+     float avg_amp = 0.0;
+     for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+        avg_amp += abs(out[d_data_carriers[i]]);
+     }
+     avg_amp /= ((float) d_data_carriers.size());
+     printf(" -- avg_amp (before normalization): %f\n", avg_amp); fflush(stdout);
+  }
+
+  float factor = d_header.factor;
+  printf("normalizeSignal, factor: %f\n", factor); fflush(stdout);
+  for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+     out[d_data_carriers[i]] /= gr_complex(factor);
+  }
+
+  if(d_ofdm_symbol_index == 0 || 1) {
+     float avg_amp = 0.0;
+     for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+        avg_amp += abs(out[d_data_carriers[i]]);
+     }
+     avg_amp /= ((float) d_data_carriers.size());
+     printf(" -- avg_amp (after normalization): %f\n", avg_amp); fflush(stdout);
+  }
+
+#endif
+}
+
+inline void
+digital_ofdm_mapper_bcv::removeTimingOffset(gr_complex *out) {
+  float t_o = d_header.timing_offset;
+  printf("removeTimingOffset, pkt_num: %d, offset: %f\n", d_pkt_num-1, t_o);
+  if(t_o != 0) {
+     for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
+        out[d_data_carriers[i]] *= gr_expj(t_o*i);
+     }
   }
 }
 
 void
 digital_ofdm_mapper_bcv::combineSignal(gr_complex *out, gr_complex* symbols)
 {
+  printf("combineSignal ------------------------------------ \n"); fflush(stdout);
   for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
-      /*
-      if(i == 0 && d_ofdm_symbol_index == 0) {
+      if(d_ofdm_symbol_index == 0 && 0) {
          printf("(%.8f, %.8f) + (%.8f, %.8f) = ", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag(), symbols[d_data_carriers[i]].real(), symbols[d_data_carriers[i]].imag()); fflush(stdout);
-      }*/
+      }
      out[d_data_carriers[i]] += symbols[d_data_carriers[i]];
-     //if(i == 0 && d_ofdm_symbol_index == 0)  printf(" (%.8f, %.8f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
+     if(d_ofdm_symbol_index == 0 && 0)  printf(" (%.8f, %.8f)\n", out[d_data_carriers[i]].real(), out[d_data_carriers[i]].imag()); fflush(stdout);
   }
 }
 
@@ -1342,7 +1450,6 @@ digital_ofdm_mapper_bcv::combineSignal(gr_complex *out, gr_complex* symbols)
 void
 digital_ofdm_mapper_bcv::makeHeader()
 {
-   printf("makeHeader for batch: %d, pkt: %d, len: %d\n", d_batch_to_send, d_pkt_num, d_packetlen); fflush(stdout);
    memset(&d_header, 0, sizeof(d_header));
    d_header.dst_id = d_dst_id;
    d_header.flow_id = 0;
@@ -1357,12 +1464,20 @@ digital_ofdm_mapper_bcv::makeHeader()
    d_header.nsenders = (d_mimo == 0)?1:2;
    d_header.pkt_type = DATA_TYPE;
 
-   d_header.factor = sqrt(d_header.nsenders);
+   //d_header.factor = sqrt(d_header.nsenders);
   
-   d_header.pkt_num = d_pkt_num++;
+   d_header.pkt_num = d_pkt_num;
    d_header.link_id = 0;
  
    generateCodeVector();	// also fills up d_header.coeffs
+
+#if 1
+   if(d_h_coding)
+     d_header.timing_offset = getTimingOffset();
+#endif
+
+   printf("makeHeader for batch: %d, pkt: %d, len: %d, timing_off: %f\n", d_batch_to_send, d_pkt_num, d_packetlen, d_header.timing_offset); fflush(stdout);
+   d_header.factor = getNormalizationFactor() * sqrt(d_header.nsenders);
 
    d_last_pkt_time = d_out_pkt_time;
    printf("\t Using code vectors: ");
@@ -1391,6 +1506,19 @@ digital_ofdm_mapper_bcv::makeHeader()
    //debugHeader();  
    whiten();
    //debugHeader();
+}
+
+inline float
+digital_ofdm_mapper_bcv::getTimingOffset()
+{
+   NodeIds rx_ids;
+   get_nextHop_rx(rx_ids);
+
+   if(rx_ids.size() == 1) {
+      HInfo *hInfo = getHInfo(d_id, rx_ids[0]);
+      return hInfo->timing_slope;
+   }
+   return 0;
 }
 
 void
@@ -1659,8 +1787,6 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   }
 
   uint64_t interval_samples = (interval_time.get_frac_secs() * 1e8)/decimation;
-
-  int hdr_symbols = (HEADERBYTELEN * 8) / d_data_carriers.size();
   switch(d_mimo) {
     case 0: break;
     case 1:
@@ -1670,7 +1796,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
             out_time = rcv_mimo_trigger();
 	    printf("rx again: out_time (%llu, %f)\n", (uint64_t) out_time.get_full_secs(), out_time.get_frac_secs()); fflush(stdout); 
 #ifndef PRE_NULL_SYMBOLS
-            num_samples = (1+hdr_symbols+NUM_TRAINING_SYMBOLS) * (d_fft_length+cp_length);
+            num_samples = (d_preamble.size()+d_num_hdr_symbols+NUM_TRAINING_SYMBOLS) * (d_fft_length+cp_length);
             duration = num_samples * time_per_sample;
             sync_secs = (uint64_t) duration;
             sync_frac_of_secs = duration - (uint64_t) duration;
@@ -1842,25 +1968,12 @@ digital_ofdm_mapper_bcv::generateCodeVector()
 #endif
 
 bool
-digital_ofdm_mapper_bcv::is_CV_good(gr_complex cv1, gr_complex cv2) {
+digital_ofdm_mapper_bcv::is_CV_good(gr_complex cv1, gr_complex cv2, float &min_dt) {
    int M = d_data_constellation.size();
    float threshold = 0.7;
 
-   float min_dt = 1000.0;
-#if 0
-   for(int m1 = 0; m1 < M; m1++) {
-      gr_complex p1 = cv1 * d_data_constellation[m1];
-      for(int m2 = 0; m2 < M; m2++) {
-         gr_complex p2 = cv2 * d_data_constellation[m2];
-         float dt = abs(p1 - p2);
-         if(min_dt < dt) {
-            min_dt = dt;
-         }
-         if(dt < threshold)
-             return false;
-      }
-   }
-#endif
+   float avg_amp = 0.0;
+   float highest_amp = 0.0;
 
    int n_entries = pow(double(d_data_constellation.size()), double(d_batch_size));
    int index = 0;
@@ -1870,23 +1983,37 @@ digital_ofdm_mapper_bcv::is_CV_good(gr_complex cv1, gr_complex cv2) {
       for(int m2 = 0; m2 < M; m2++) {
          gr_complex p2 = cv2 * d_data_constellation[m2];
          comb_mod[index++] = p1 + p2;
+
+         float amp = abs(p1+p2);
+         avg_amp += amp;
+         if(amp > highest_amp)
+           highest_amp = amp;
       }
    }
    assert(index == n_entries);
+   avg_amp /= ((float) n_entries);
 
+   float avg_dt = 0.0;
+   int count = 0;
    for(int i = 0; i < n_entries; i++) {
       for(int j = i+1; j < n_entries; j++) {
          float dt = abs(comb_mod[i] - comb_mod[j]);
          if(dt < min_dt) {
             min_dt = dt;
          }
-         if(min_dt < threshold)
-            return false;
+	 avg_dt += dt; count++;
       }
    }
 
+   if(min_dt < threshold) {
+      //printf("false -- min_dt: %f\n", min_dt); fflush(stdout);
+      return false;
+   }
+   avg_dt = avg_dt/((float)count);
+
    free(comb_mod);
-   printf("min_dt: %.3f\n", min_dt);
+   printf("avg_amp: %f, highest_amp: %f\n", avg_amp, highest_amp); fflush(stdout);
+   printf("M: %d, min_dt: %.3f, avg_dt: %f, cv1: (%.2f, %.2f), cv2: (%.2f, %.2f)\n", M, min_dt, avg_dt, cv1.real(), cv1.imag(), cv2.real(), cv2.imag());
    return true;
 }
 
@@ -1957,7 +2084,9 @@ digital_ofdm_mapper_bcv::open_client_sock(int port, const char *addr, bool block
   dest.sin_port = htons(port);
   dest.sin_addr.s_addr = inet_addr(addr);
   /* Connecting to server */
-  connect(sockfd, (struct sockaddr*)&dest, sizeof(struct sockaddr_in));
+  while(connect(sockfd, (struct sockaddr*)&dest, sizeof(struct sockaddr_in)) == -1)
+	continue;
+  printf("sockfd: %d, errno: %d\n", sockfd, errno); fflush(stdout);
   return sockfd;
 }
 
@@ -2073,6 +2202,11 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
      h_vec.push_back(h);
   }
 
+  // to cap the max iterations //
+  int max_iter = 1000, iter = 0;
+  gr_complex best_coeff;
+  float max_min_dt = 0.0;
+  gr_complex *reduced_coeffs;
 
   while(1) {
      float phase = (rand() % 360 + 1) * M_PI/180;
@@ -2085,20 +2219,39 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
         cInfo->rx_id = rx_ids[i];
 
 	// include the channel effect //
-	gr_complex *reduced_coeffs = cInfo->coeffs;
+	reduced_coeffs = cInfo->coeffs;
         for(int k = 0; k < d_batch_size; k++) {
 	   reduced_coeffs[k] = coeffs[k] * h_vec[i];
         }
 
-        if(!is_CV_good(reduced_coeffs[0], reduced_coeffs[1])) {
+	if(d_batch_size == 1)
+           break;
+
+	float dt = 1000.0;
+        if(!is_CV_good(reduced_coeffs[0], reduced_coeffs[1], dt)) {
             good = 0;
+	    if(dt > max_min_dt) {
+                max_min_dt = dt;
+                best_coeff = coeffs[last];
+            }
             break;
         }
      }
 
-     if(good) break;
+     iter++;
+     if(good || iter == max_iter) {
+        printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
+        coeffs[last] = best_coeff;
+        break;
+     }
   }
-  printf("smart selection local -- \n"); fflush(stdout);
+
+  if(d_batch_size == 2) {
+     printf("smart selection local -- coeffs1 (%.2f, %.2f) coeffs2 (%.2f, %.2f) red1 (%.2f, %.2f) red2 (%.2f, %.2f)\n",
+                                  coeffs[0].real(), coeffs[0].imag(), coeffs[1].real(), coeffs[1].imag(),
+                                  reduced_coeffs[0].real(), reduced_coeffs[0].imag(), reduced_coeffs[1].real(), reduced_coeffs[1].imag());
+     fflush(stdout);
+  }
 }
 
 /* more exhaustive now, since it accounts for co-ordinating transmitters, multiple rx (if any) */
@@ -2123,44 +2276,58 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
      new_coeffs[i] = my_coeffs[i];
   } /* step 1 done */
 
+  // to cap the max iterations //
+  int max_iter = 1000, iter = 0;
+  gr_complex best_coeff;
+  float max_min_dt = 0.0;
+
   /* as for the last one, take the global knowledge into account */
   int last = n_inno_pkts-1;
   float amp = 1.0;
 
-  printf(" -- done till here\n"); fflush(stdout);
+  // predict H for all the receivers and 
+  gr_complex h_arr[4];
+  for(int i = 0; i < rx_ids.size(); i++) {
+     h_arr[i] = predictH(d_id, rx_ids[i]);               // h-val from me to this rx
+  }
 
   while(1) {
      float phase = (rand() % 360 + 1) * M_PI/180;
      my_coeffs[last] = (amp * ToPhase_c(phase));
      new_coeffs[last] = my_coeffs[last];
 
-     printf("trying -- \n"); fflush(stdout);
      // now the receiver based stuff //
      bool good = 1;
      for(int i = 0; i < rx_ids.size(); i++) {
-        NodeId rx_id = rx_ids[i];
-        gr_complex h = predictH(d_id, rx_id);         //h-val from me to this rx
         gr_complex *o_coeffs = others_coeffs[i].coeffs;     // other senders coeffs for this rx
 
-        if(others_coeffs[i].rx_id != rx_id) {
-	   printf("others_coeff.rx_id: %c, rx_id: %c\n", others_coeffs[i].rx_id, rx_id); fflush(stdout);
+        if(others_coeffs[i].rx_id != rx_ids[i]) {
+	   printf("others_coeff.rx_id: %c, rx_id: %c\n", others_coeffs[i].rx_id, rx_ids[i]); fflush(stdout);
 	   assert(false);
         }
-        assert(others_coeffs[i].rx_id == rx_id);           // ensure right value
 
         // combine with the other sender //    
         for(unsigned int k = 0; k < d_batch_size; k++) {
-           new_coeffs[k] = (new_coeffs[k] * h) + o_coeffs[k];
+           new_coeffs[k] = (new_coeffs[k] * h_arr[i]) + o_coeffs[k];
         }
-
-        if(!is_CV_good(new_coeffs[0], new_coeffs[1])) {
+	
+	float dt = 1000.0;
+        if(!is_CV_good(new_coeffs[0], new_coeffs[1], dt)) {
             good = 0;
+            if(dt > max_min_dt) {
+               max_min_dt = dt;
+               best_coeff = my_coeffs[last];
+            }
             break;
         }
      }
 
-     if(good == 1)
+     iter++;
+     if(good == 1 || (iter == max_iter)) {
+	printf("good: %d, iter: %d, min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
+	my_coeffs[last] = best_coeff;
         break;
+     }
   } //end while
   printf("smart_selection_global end -- \n"); fflush(stdout);
 }
@@ -2201,7 +2368,7 @@ digital_ofdm_mapper_bcv::getHInfo(NodeId tx_id, NodeId rx_id) {
 /* predict the value of H as a fn(slope, samples since last tx) */
 inline gr_complex
 digital_ofdm_mapper_bcv::predictH(NodeId tx_id, NodeId rx_id) {
- 
+#if 0 
   // calculate the # of samples since last packet sent //
   uhd::time_spec_t interval = d_out_pkt_time - d_last_pkt_time;  
   time_t full_secs = interval.get_full_secs();
@@ -2214,34 +2381,44 @@ digital_ofdm_mapper_bcv::predictH(NodeId tx_id, NodeId rx_id) {
   uint64_t interval_samples = total_time/time_per_sample;
   std::cout<<"time/sample: "<<time_per_sample<<" samples: "<<interval_samples<<" total time: "<<total_time<<endl;
   d_last_pkt_time = d_out_pkt_time;                                             // no use now, set it again
+#endif
 
   // now try and predict H based on interval_samples //
   HInfo *hInfo = getHInfo(tx_id, rx_id);
   gr_complex h_val = hInfo->h_value;
+  int h_pkt_num = hInfo->pkt_num;
   float slope = hInfo->slope;
 
-  //printf("predictH: pkt_num: %d, slope: %f\n", d_pkt_num, slope); fflush(stdout);
-
-  if(d_pkt_num == 0 || slope == 0.0) { 
+  if(h_pkt_num == -1 || slope == 0.0)
      return gr_complex(1.0, 0.0);
-  }
-  else {
-     float old_angle = arg(h_val);
-     float new_angle = old_angle + interval_samples * slope;
 
-     printf("old_angle: %.2f, new_angle: %.2f\n", old_angle, new_angle); fflush(stdout);
-     while(new_angle > M_PI)
-	new_angle = new_angle - 2*M_PI; 
+  // calculate the # of samples since the pkt_num that corresponds to the latest known h_val //
+  uhd::time_spec_t h_val_ts = getPktTimestamp(h_pkt_num);
+  uhd::time_spec_t interval = d_out_pkt_time - h_val_ts;
+  time_t full_secs = interval.get_full_secs();
+  double frac_secs = interval.get_frac_secs();
+  double total_time = full_secs + frac_secs;
 
-     assert(new_angle <= M_PI && new_angle >= -M_PI); 
+  int decimation = 128;
+  double rate = 1.0/decimation;
+  double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
+  uint64_t interval_samples = total_time/time_per_sample;
+  std::cout<<"time/sample: "<<time_per_sample<<" samples: "<<interval_samples<<" total time: "<<total_time<<endl;
+  d_last_pkt_time = d_out_pkt_time;                                             // no use now, set it again
 
-     printf("predictH: pkt_num: %d, slope: %.8f, samples: %llu, old_angle: %.2f, new_angle: %.2f\n", d_pkt_num, slope, interval_samples, old_angle, new_angle); fflush(stdout);
-     //printf("predictH: pkt_num: %d, slope: %f, old_angle: %.2f, new_angle: %.2f\n", d_pkt_num, slope, old_angle, new_angle); fflush(stdout);
+  float old_angle = arg(h_val);
+  float new_angle = old_angle + interval_samples * slope;
 
-     return gr_expj(new_angle);	
-  }
-  assert(false);
-  return gr_complex(1.0, 0.0);
+  printf("old_angle: %.2f, new_angle: %.2f\n", old_angle, new_angle); fflush(stdout);
+  while(new_angle > M_PI)
+	  new_angle = new_angle - 2*M_PI; 
+
+  assert(new_angle <= M_PI && new_angle >= -M_PI); 
+
+  printf("predictH: pkt_num: %d, slope: %.8f, samples: %llu, old_angle: %.2f, new_angle: %.2f\n", d_pkt_num, slope, interval_samples, old_angle, new_angle); fflush(stdout);
+  //printf("predictH: pkt_num: %d, slope: %f, old_angle: %.2f, new_angle: %.2f\n", d_pkt_num, slope, old_angle, new_angle); fflush(stdout);
+
+  return gr_expj(new_angle);	
 
 #if 0  
   float o_angle = arg(h_val);
@@ -2393,10 +2570,13 @@ digital_ofdm_mapper_bcv::updateHInfo(HKey hkey, HInfo *_hInfo) {
    }
 
    // now update the hInfo //
-   printf("updateHInfo - pkt_num: %d, old_pkt: %d, slope: %f, old_angle: %.2f, new_angle: %.2f \n", _hInfo->pkt_num, hInfo->pkt_num, hInfo->slope, old_angle, arg(_hInfo->h_value)); fflush(stdout);
+   printf("updateHInfo - pkt_num: %d, old_pkt: %d, slope: %f, old_angle: %.2f, new_angle: %.2f, timing_off: %f \n", _hInfo->pkt_num, hInfo->pkt_num, hInfo->slope, old_angle, arg(_hInfo->h_value), _hInfo->timing_slope); fflush(stdout);
 
    hInfo->pkt_num = _hInfo->pkt_num;
    hInfo->h_value = _hInfo->h_value;
+
+   if(hInfo->timing_slope == 0)
+      hInfo->timing_slope = _hInfo->timing_slope;
 }
 
 // initializes the HInfoMap to have keys for all the relevant entries //
@@ -2609,7 +2789,7 @@ digital_ofdm_mapper_bcv::populateCompositeLinkInfo()
         printf("num_src: %d\n", num_src); fflush(stdout);
         for(int i = 0; i < num_src; i++) {
            NodeId srcId = atoi(token_vec[i+2]) + '0';
-           printf("srcId: %d, size: %d\n", srcId, cLink->srcIds.size()); fflush(stdout);
+           printf("srcId: %c, size: %d\n", srcId, cLink->srcIds.size()); fflush(stdout);
            cLink->srcIds.push_back(srcId);
            if(srcId == d_id)
              d_outCLinks.push_back(cLink->linkId);
@@ -2632,4 +2812,9 @@ digital_ofdm_mapper_bcv::populateCompositeLinkInfo()
    }
 
     fclose (fl);
+}
+
+inline void
+digital_ofdm_mapper_bcv::generatePreamble(gr_complex *out) {
+    memcpy(out, &d_preamble[d_preambles_sent][0], d_fft_length*sizeof(gr_complex));
 }

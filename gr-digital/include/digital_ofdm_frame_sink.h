@@ -60,7 +60,6 @@
 #define MAX_SENDERS 4
 //#define USE_HEADER_PLL 0
 
-#define NULL_OFDM_SYMBOLS (sizeof(MULTIHOP_HDR_TYPE)*8)/MAX_DATA_CARRIERS+1
 #define MAX_OFDM_SYMBOLS 170
 #define MAX_OCCUPIED_CARRIERS 88
 #define MAX_PKT_LEN 4096
@@ -87,6 +86,7 @@ digital_make_ofdm_frame_sink (const std::vector<gr_complex> &hdr_sym_position,
 			 const std::vector<unsigned char> &hdr_sym_value_out,
                          const std::vector<gr_complex> &data_sym_position,
                          const std::vector<unsigned char> &data_sym_value_out,
+			 const std::vector<std::vector<gr_complex> > &preamble,
 			 gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 			 unsigned int occupied_tones, unsigned int fft_length,
 			 float phase_gain=0.25, float freq_gain=0.25*0.25/4.0, unsigned int id=1, 
@@ -468,6 +468,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   const std::vector<unsigned char> &hdr_sym_value_out,
                            const std::vector<gr_complex> &data_sym_position,
                            const std::vector<unsigned char> &data_sym_value_out,
+			   const std::vector<std::vector<gr_complex> > &preamble,
 			   gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 			   unsigned int occupied_tones, unsigned int fft_length,
 			   float phase_gain, float freq_gain, unsigned int id, 
@@ -526,16 +527,12 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   std::vector<int> d_pilot_carriers;
   std::vector<int> d_all_carriers;			// tracks which are data(0), pilot(1) or dc(2) 
 
-  /* for pilot vs data DFE comparison */
-  FILE *d_fp_dfe_data, *d_fp_dfe_pilot;
-  bool d_log_dfe_data_open, d_log_dfe_pilot_open;
-
-
  protected:
   digital_ofdm_frame_sink(const std::vector<gr_complex> &hdr_sym_position, 
 		     const std::vector<unsigned char> &hdr_sym_value_out,
                      const std::vector<gr_complex> &data_sym_position,
                      const std::vector<unsigned char> &data_sym_value_out,
+		     const std::vector<std::vector<gr_complex> > &preamble,
 		     gr_msg_queue_sptr target_queue, gr_msg_queue_sptr fwd_queue, 
 		     unsigned int occupied_tones, unsigned int fft_length,
 		     float phase_gain, float freq_gain, unsigned int id, 
@@ -673,14 +670,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   bool open_hestimates_log();
 
   /* offline analysis/stitching to test time domain combination of signals */
-  FILE *d_fp_sampler;
-  FILE *d_fp_timing;
   int d_fft_length;
-  bool d_log_pkt;
-  int d_log_ofdm_index;
-  gr_complex *pkt_symbols;
-  char *timing_symbols;
-  bool open_sampler_log();
   /* apurv end */
 
   /* fwder operations */
@@ -766,18 +756,11 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
 
   /* for offline combination in the frequency domain */
-  FILE *d_fp_corrected_symbols;
-  FILE *d_fp_uncorrected_symbols;
-
   void logCorrectedSymbols(FlowInfo *flowInfo);  
   void matchSymbol(gr_complex x, gr_complex &closest_sym, gr_complex* sym_position);
   bool open_corrected_symbols_log();
-  gr_complex *d_corrected_symbols;
-  gr_complex *d_uncorrected_symbols;
 
   int d_replay_flag;
-
-  FILE *d_fp_corr_log;
   /* end offline */
 
 
@@ -908,7 +891,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   void adjust_H_estimate(int);
 
-  void logFrequencyDomainRxSymbols();
+  void logFrequencyDomainRxSymbols(bool);
   void openRxSymbolLog();
 
   gr_complex d_known_symbols[NUM_TRAINING_SYMBOLS * MAX_OCCUPIED_CARRIERS];
@@ -934,7 +917,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 #endif
 
  void chooseCV(FlowInfo *flowInfo, gr_complex *coeffs);
- bool is_CV_good(gr_complex cv1, gr_complex cv2);
+ bool is_CV_good(gr_complex cv1, gr_complex cv2, float&);
 
  /* util functions */
  void open_server_sock(int sock_port, vector<unsigned int>& connected_clients, int num_clients);
@@ -954,6 +937,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  void smart_selection_local(gr_complex*, CoeffInfo*, FlowInfo*); 
  void smart_selection_global(gr_complex*, CoeffInfo*, FlowInfo*);
  HInfo* getHInfo(NodeId tx_id, NodeId rx_id);
+ uhd::time_spec_t getPktTimestamp(int);
 
  void chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs);
  bool is_CV_good_H(gr_complex cv1, gr_complex cv2);
@@ -965,11 +949,28 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  int d_coeff_tx_sock, d_coeff_rx_sock;				// for tx coefficients between the co-ordinating transmitters //
  vector<unsigned int> d_h_tx_socks, d_h_rx_socks; 		// for tx HInfo between upstream/dowstream nodes //
 
+ PktTxInfoList d_pktTxInfoList;
  int d_h_coding;
 
  // to record the pkt timestamps 
  uhd::time_spec_t d_last_pkt_time, d_out_pkt_time;
 
+ FILE *d_fp_dfe_symbols;
+ void logDFECorrectedSignals(gr_complex*, vector<gr_complex>, gr_complex, PktInfo*);
+ void openDFESymbolLog();
+ float getNormalizationFactor(gr_complex*, int);
+
+ void logGeneratedTxSymbols(gr_complex *out);
+ bool openLogTxFwdSymbols();
+
+ float get_eq_slope();
+ float d_timing_offset;
+ void get_phase_offset(float *ph_offset);
+
+ // preamble related //
+ void calculate_snr(gr_complex*);
+ const std::vector<std::vector<gr_complex> >   d_preamble; 
+ int d_preamble_cnt;
 };
 
 

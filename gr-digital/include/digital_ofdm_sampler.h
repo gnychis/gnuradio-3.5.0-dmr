@@ -33,6 +33,7 @@ typedef boost::shared_ptr<digital_ofdm_sampler> digital_ofdm_sampler_sptr;
 
 DIGITAL_API digital_ofdm_sampler_sptr digital_make_ofdm_sampler (unsigned int fft_length, 
 					   unsigned int symbol_length,
+					   unsigned int num_preambles,
 					   unsigned int timeout=100);
 
 /*!
@@ -43,10 +44,12 @@ class DIGITAL_API digital_ofdm_sampler : public gr_block
 {
   friend DIGITAL_API digital_ofdm_sampler_sptr digital_make_ofdm_sampler (unsigned int fft_length, 
 						    unsigned int symbol_length,
+						    unsigned int num_preambles,
 						    unsigned int timeout);
 
   digital_ofdm_sampler (unsigned int fft_length, 
 		   unsigned int symbol_length,
+		   unsigned int num_preambles,
 		   unsigned int timeout);
 
  private:
@@ -82,6 +85,8 @@ class DIGITAL_API digital_ofdm_sampler : public gr_block
   // fine offset correction //
   void correct_freq_offset(gr_complex *out, int noutput_items, float phase);
   float d_phase;
+
+  unsigned int d_num_preambles;
 };
 
 #endif

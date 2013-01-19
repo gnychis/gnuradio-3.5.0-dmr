@@ -74,19 +74,21 @@ double last_sync_frac_sec;
 digital_ofdm_sampler_sptr
 digital_make_ofdm_sampler (unsigned int fft_length, 
 		      unsigned int symbol_length,
+		      unsigned int num_preambles,
 		      unsigned int timeout)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_sampler (fft_length, symbol_length, timeout));
+  return gnuradio::get_initial_sptr(new digital_ofdm_sampler (fft_length, symbol_length, num_preambles, timeout));
 }
 
 digital_ofdm_sampler::digital_ofdm_sampler (unsigned int fft_length, 
 				  unsigned int symbol_length,
+				  unsigned int num_preambles,
 				  unsigned int timeout)
   : gr_block ("ofdm_sampler",
 	      gr_make_io_signature3 (2, 3, sizeof (gr_complex), sizeof(char), sizeof(float)),
 	      gr_make_io_signature3 (2, 3, sizeof (gr_complex)*fft_length, sizeof(char)*fft_length, sizeof(gr_complex)*fft_length)),
     d_state(STATE_NO_SIG), d_timeout_max(timeout), d_fft_length(fft_length), d_symbol_length(symbol_length),
-    d_fp(NULL), d_fd(0), d_file_opened(false) 
+    d_fp(NULL), d_fd(0), d_file_opened(false), d_num_preambles(num_preambles) 
 {
   lts_samples_since=0;
   set_relative_rate(1.0/(double) fft_length);   // buffer allocator hint
@@ -171,7 +173,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
     if(trigger[index] && !d_joint_rx_on) {
 
       unsigned int allowed_misalignment = 4;
-      unsigned int gap = (((sizeof(MULTIHOP_HDR_TYPE) * 8)/MAX_DATA_CARRIERS)+1+NUM_TRAINING_SYMBOLS) * (d_symbol_length);
+      unsigned int gap = (((sizeof(MULTIHOP_HDR_TYPE) * 8)/MAX_DATA_CARRIERS)+d_num_preambles+NUM_TRAINING_SYMBOLS) * (d_symbol_length);		// 2 preambles
       unsigned left_boundary = gap - allowed_misalignment;
       unsigned right_boundary = gap + allowed_misalignment;
 
@@ -267,7 +269,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
   unsigned int i, pos, ret;
   switch(d_state) {
   case(STATE_PREAMBLE):
-    printf("Set SYMBOL BOUNDARY here .. freq_offset: %.3f\n", freq_offset[index]); fflush(stdout);
+    //printf("Set SYMBOL BOUNDARY here .. freq_offset: %.3f\n", freq_offset[index]); fflush(stdout);
     // When we found a preamble trigger, get it and set the symbol boundary here
     //correct_freq_offset(&iptr[index-d_symbol_length+1], d_symbol_length, freq_offset[index]);
     for(i = (index - d_fft_length + 1); i <= index; i++) {

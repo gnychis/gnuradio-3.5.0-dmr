@@ -24,6 +24,7 @@ GR_SWIG_BLOCK_MAGIC(digital,ofdm_mapper_bcv);
 digital_ofdm_mapper_bcv_sptr
 digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation,
                          const std::vector<gr_complex> &data_constellation,
+                         const std::vector<std::vector<gr_complex> > &preamble,
                          unsigned int msgq_limit,
                          unsigned int bits_per_symbol,
                          unsigned int fft_length,
@@ -41,6 +42,7 @@ class digital_ofdm_mapper_bcv : public gr_sync_block
  protected:
   digital_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation,
                       const std::vector<gr_complex> &data_constellation,
+                      const std::vector<std::vector<gr_complex> > &preamble,
                       unsigned int msgq_limit,
                       unsigned int bits_per_symbol,
                       unsigned int fft_length,

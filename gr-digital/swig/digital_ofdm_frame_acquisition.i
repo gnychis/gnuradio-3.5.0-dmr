@@ -28,7 +28,8 @@ digital_ofdm_frame_acquisition_sptr
 digital_make_ofdm_frame_acquisition (unsigned int occupied_carriers, 
 				unsigned int fft_length,
 				unsigned int cplen,
-				const std::vector<gr_complex> &known_symbol, 
+				/*const std::vector<gr_complex> &known_symbol, */
+                                const std::vector<std::vector<gr_complex> >  &known_symbol,
 				unsigned int max_fft_shift_len=4);
 
 class digital_ofdm_frame_acquisition : public gr_sync_decimator
@@ -37,7 +38,8 @@ class digital_ofdm_frame_acquisition : public gr_sync_decimator
   digital_ofdm_frame_acquisition (unsigned int occupied_carriers,
 			     unsigned int fft_length,
 			     unsigned int cplen,
-			     const std::vector<gr_complex> &known_symbol, 
+			     /*const std::vector<gr_complex> &known_symbol, */
+                             const std::vector<std::vector<gr_complex> >  &known_symbol,
 			     unsigned int max_fft_shift_len);
 
  public:

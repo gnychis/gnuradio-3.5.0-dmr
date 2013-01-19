@@ -39,7 +39,7 @@
 /* apurv++ define header type */
 #define MAX_BATCH_SIZE     2 
 #ifdef LSQ_COMPRESSION
-#define PADDING_SIZE       7
+#define PADDING_SIZE       3
 #else
 #define PADDING_SIZE       2
 #endif
@@ -96,6 +96,7 @@ typedef struct multihop_hdr_type {
   // 1
   unsigned char link_id;                             // composite link id
   float factor;
+  float timing_offset;
 
   // 4
   unsigned int hdr_crc;
@@ -147,6 +148,7 @@ typedef std::vector<CompositeLink*> CompositeLinkVector;
 typedef struct h_info {
   int pkt_num;
   float slope;
+  float timing_slope;
   gr_complex h_value;
 } HInfo;
 

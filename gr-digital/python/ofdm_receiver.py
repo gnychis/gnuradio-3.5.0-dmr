@@ -112,10 +112,10 @@ class ofdm_receiver(gr.hier_block2):
 
         self.nco = gr.frequency_modulator_fc(nco_sensitivity)         # generate a signal proportional to frequency error of sync block
         self.sigmix = gr.multiply_cc()				     
-        self.sampler = digital_swig.ofdm_sampler(fft_length, fft_length+cp_length, 100)
+        self.sampler = digital_swig.ofdm_sampler(fft_length, fft_length+cp_length, len(ks)+1, 100)	# 1 for the extra preamble which ofdm_rx doesn't know about (check frame_sink)
         self.fft_demod = gr.fft_vcc(fft_length, True, win, True)
         self.ofdm_frame_acq = digital_swig.ofdm_frame_acquisition(occupied_tones, fft_length,
-                                                        cp_length, ks[0])
+                                                        cp_length, ks)
 
         if options.verbose:
             self._print_verbage(options)
@@ -176,7 +176,7 @@ class ofdm_receiver(gr.hier_block2):
 
 	    # route received time domain to sink (all-the-way) for offline analysis #
 	    self.connect((self.sampler, 0), (self.ofdm_frame_acq, 2))
-	    #self.connect((self.sampler, 1), gr.file_sink(gr.sizeof_char*fft_length, "sampler_timing.dat"))
+	    self.connect((self.sampler, 1), gr.file_sink(gr.sizeof_char*fft_length, "sampler_timing.dat"))
 
 	elif method == 0:
             # NORMAL functioning #
@@ -223,7 +223,7 @@ class ofdm_receiver(gr.hier_block2):
 
 	# apurv++ ends #
 
-	self.connect(self.ofdm_frame_acq, gr.file_sink(gr.sizeof_gr_complex*occupied_tones, "ofdm_receiver-frame_acq_c.dat"))
+	#self.connect(self.ofdm_frame_acq, gr.file_sink(gr.sizeof_gr_complex*occupied_tones, "ofdm_receiver-frame_acq_c.dat"))
 	self.connect((self.ofdm_frame_acq,1), gr.file_sink(1, "ofdm_receiver-found_corr_b.dat"))
 
 

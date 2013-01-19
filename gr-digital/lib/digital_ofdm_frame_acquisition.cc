@@ -67,7 +67,8 @@ static const pmt::pmt_t SYNC_TIME = pmt::pmt_string_to_symbol("sync_time");
 digital_ofdm_frame_acquisition_sptr
 digital_make_ofdm_frame_acquisition (unsigned int occupied_carriers, unsigned int fft_length, 
 				unsigned int cplen,
-				const std::vector<gr_complex> &known_symbol,
+				const std::vector<std::vector<gr_complex> > &known_symbol,
+				//const std::vector<gr_complex> &known_symbol,
 				unsigned int max_fft_shift_len)
 {
   return gnuradio::get_initial_sptr(new digital_ofdm_frame_acquisition (occupied_carriers, fft_length, cplen,
@@ -76,7 +77,8 @@ digital_make_ofdm_frame_acquisition (unsigned int occupied_carriers, unsigned in
 
 digital_ofdm_frame_acquisition::digital_ofdm_frame_acquisition (unsigned occupied_carriers, unsigned int fft_length, 
 						      unsigned int cplen,
-						      const std::vector<gr_complex> &known_symbol,
+						      const std::vector<std::vector<gr_complex> > &known_symbol,
+						      //const std::vector<gr_complex> &known_symbol,
 						      unsigned int max_fft_shift_len)
   : gr_block ("ofdm_frame_acquisition",
 	      //gr_make_io_signature2 (2, 2, sizeof(gr_complex)*fft_length, sizeof(char)*fft_length),   // apurv--: input
@@ -104,9 +106,10 @@ digital_ofdm_frame_acquisition::digital_ofdm_frame_acquisition (unsigned occupie
 
   unsigned int i = 0, j = 0;
 
+  const std::vector<gr_complex> &first = d_known_symbol[0];
   std::fill(d_known_phase_diff.begin(), d_known_phase_diff.end(), 0);
-  for(i = 0; i < d_known_symbol.size()-2; i+=2) {
-    d_known_phase_diff[i] = norm(d_known_symbol[i] - d_known_symbol[i+2]);
+  for(i = 0; i < first.size()-2; i+=2) {
+    d_known_phase_diff[i] = norm(first[i] - first[i+2]);
   }
   
   d_phase_lut = new gr_complex[(2*d_freq_shift_len+1) * MAX_NUM_SYMBOLS];
@@ -135,7 +138,6 @@ digital_ofdm_frame_acquisition::forecast (int noutput_items, gr_vector_int &ninp
 }
 
 gr_complex
-//digital_ofdm_frame_acquisition::coarse_freq_comp(int freq_delta, int symbol_count)
 digital_ofdm_frame_acquisition::coarse_freq_comp(float freq_delta, int symbol_count)
 {
   //  return gr_complex(cos(-M_TWOPI*freq_delta*d_cplen/d_fft_length*symbol_count),
@@ -181,33 +183,45 @@ void
 digital_ofdm_frame_acquisition::calculate_equalizer(const gr_complex *symbol, int zeros_on_left)
 {
   unsigned int i=0;
+  const std::vector<gr_complex> &known_symbol = d_known_symbol[d_cur_symbol];
+  gr_complex comp = coarse_freq_comp(d_coarse_freq, d_cur_symbol);
+  printf("calculate_equalizer, cur_symbol: %d, comp (%f, %f)\n", d_cur_symbol, comp.real(), comp.imag()); fflush(stdout);
+ 
+  if(d_cur_symbol == 0) {
+     // Set first tap of equalizer
+     d_hestimate[0] = known_symbol[0] / 
+        (coarse_freq_comp(d_coarse_freq,1)*symbol[zeros_on_left+d_coarse_freq]);
 
-  // Set first tap of equalizer
-  d_hestimate[0] = d_known_symbol[0] / 
-    (coarse_freq_comp(d_coarse_freq,1)*symbol[zeros_on_left+d_coarse_freq]);
+    // set every even tap based on known symbol
+    // linearly interpolate between set carriers to set zero-filled carriers
+    // FIXME: is this the best way to set this?
+    for(i = 2; i < d_occupied_carriers; i+=2) {
+       d_hestimate[i] = known_symbol[i] / 
+         (coarse_freq_comp(d_coarse_freq,1)*(symbol[i+zeros_on_left+d_coarse_freq]));
+       d_hestimate[i-1] = (d_hestimate[i] + d_hestimate[i-2]) / gr_complex(2.0, 0.0);    
+    }
 
-  // set every even tap based on known symbol
-  // linearly interpolate between set carriers to set zero-filled carriers
-  // FIXME: is this the best way to set this?
-  for(i = 2; i < d_occupied_carriers; i+=2) {
-    d_hestimate[i] = d_known_symbol[i] / 
-      (coarse_freq_comp(d_coarse_freq,1)*(symbol[i+zeros_on_left+d_coarse_freq]));
-    d_hestimate[i-1] = (d_hestimate[i] + d_hestimate[i-2]) / gr_complex(2.0, 0.0);    
+    // with even number of carriers; last equalizer tap is wrong
+    if(!(d_occupied_carriers & 1)) {
+       d_hestimate[d_occupied_carriers-1] = d_hestimate[d_occupied_carriers-2];
+    }
+  }
+  else {
+    for(i = 0; i < d_occupied_carriers; ++i) {
+       gr_complex tx = known_symbol[i];
+       gr_complex rx = symbol[i+zeros_on_left+d_coarse_freq];
+       d_hestimate[i] = tx/(rx*comp);
+    }
   }
 
-  // with even number of carriers; last equalizer tap is wrong
-  if(!(d_occupied_carriers & 1)) {
-    d_hestimate[d_occupied_carriers-1] = d_hestimate[d_occupied_carriers-2];
-  }
-
-  if(VERBOSE) {
+  if(VERBOSE || 1) {
     fprintf(stderr, "Equalizer setting:\n");
     for(i = 0; i < d_occupied_carriers; i++) {
-      gr_complex sym = coarse_freq_comp(d_coarse_freq,1)*symbol[i+zeros_on_left+d_coarse_freq];
+      gr_complex sym = coarse_freq_comp(d_coarse_freq,d_cur_symbol)*symbol[i+zeros_on_left+d_coarse_freq];
       gr_complex output = sym * d_hestimate[i];
       fprintf(stderr, "sym: %+.4f + j%+.4f  ks: %+.4f + j%+.4f  eq: %+.4f + j%+.4f  ==>  %+.4f + j%+.4f\n", 
 	      sym .real(), sym.imag(),
-	      d_known_symbol[i].real(), d_known_symbol[i].imag(),
+	      d_known_symbol[d_cur_symbol][i].real(), d_known_symbol[d_cur_symbol][i].imag(),
 	      d_hestimate[i].real(), d_hestimate[i].imag(),
 	      output.real(), output.imag());
     }
@@ -245,14 +259,21 @@ digital_ofdm_frame_acquisition::general_work(int noutput_items,
       hout = (gr_complex *) output_items[2];
   
   if(signal_in[0]) {
+    d_cur_symbol = 0;
     d_phase_count = 1;
     correlate(symbol, zeros_on_left);
-    calculate_equalizer(symbol, zeros_on_left);
+    //calculate_equalizer(symbol, zeros_on_left);
     signal_out[0] = 1;
   }
   else {
     signal_out[0] = 0;
   } 
+
+  if(d_cur_symbol < d_known_symbol.size()) {
+     calculate_equalizer(symbol, zeros_on_left);
+  }
+  d_cur_symbol++;
+ 
 
 #if 1
   if(output_items.size() >= 3) {
@@ -267,88 +288,17 @@ digital_ofdm_frame_acquisition::general_work(int noutput_items,
   }
 #endif
 
-  //log_hestimate();  	// apurv++: will now log the d_hestimate * coarse_freq_comp(a,b)
-
   d_phase_count++;
   if(d_phase_count == MAX_NUM_SYMBOLS) {
     d_phase_count = 1;
   }
-
-  //log_symbols(out);
 
   //test_timestamp(1);				// enable to track tag propagation
   consume_each(1);
   return 1;
 }
 
-// apurv++ start //
-bool
-digital_ofdm_frame_acquisition::open_log()
-{
 #if 0
-  printf("open_log called\n"); fflush(stdout);
-
-  // open the hestimates log file //
-  char *filename = "h_estimate.dat";
-  if ((d_fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
-     perror(filename);
-     return false;
-  }
-  else {
-      if((d_fp = fdopen (d_fd, true ? "wb" : "w")) == NULL) {
-            fprintf(stderr, "h estimates file cannot be opened\n");
-            close(d_fd);
-            return false;
-      }
-  }
-#endif
-
-  // the rx signal log file //
-  char *filename = "acq_out.dat";
-  if ((d_fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
-     perror(filename);
-     return false;
-  }
-  else {
-      if((d_fp = fdopen (d_fd, true ? "wb" : "w")) == NULL) {
-            fprintf(stderr, "h estimates file cannot be opened\n");
-            close(d_fd);
-            return false;
-      }
-  }
-
-  return true;
-}
-
-void
-digital_ofdm_frame_acquisition::log_symbols(gr_complex *out)
-{
-  if(!d_file_opened)
-  {
-      d_file_opened = open_log();
-      assert(d_file_opened);
-  }
-  assert(d_fp != NULL);
-  int count = ftell(d_fp);
-  count = fwrite_unlocked(&out[0], sizeof(gr_complex), d_occupied_carriers, d_fp);
-}
-
-void
-digital_ofdm_frame_acquisition::log_hestimate()
-{
-  if(!d_file_opened)
-  {
-      d_file_opened = open_log();
-      assert(d_file_opened);
-      fprintf(stderr, "h estimates file opened!\n");
-  }
-  assert(d_fp != NULL);
-  int count = ftell(d_fp);
-  count = fwrite_unlocked(&d_hest_freq_prod[0], sizeof(gr_complex), d_occupied_carriers, d_fp);
-  //printf("logged %d estimates\n", count); fflush(stdout);
-}
-// apurv++ end //
-
 /* just for debugging - tracking propagation of tags from sampler to sink */
 inline void
 digital_ofdm_frame_acquisition::test_timestamp(int output_items) {
@@ -370,3 +320,4 @@ digital_ofdm_frame_acquisition::test_timestamp(int output_items) {
      //std::cerr << "ACQ---- Header received, with no sync timestamp1?\n";
   }
 }
+#endif
