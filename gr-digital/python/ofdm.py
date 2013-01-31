@@ -201,7 +201,8 @@ class ofdm_mod(gr.hier_block2):
 
 	#self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex, "ofdm_cp_adder_c.dat"))
 	self.connect(self._pkt_input, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
-        #self.connect((self.preambles, 2), gr.file_sink(gr.sizeof_char*options.fft_length, "fwd_tx_timing.dat"))
+	self.connect((self._pkt_input, 2), gr.file_sink(gr.sizeof_char, "timing.dat"))
+        self.connect((self._pkt_input, 3), gr.file_sink(gr.sizeof_char*options.fft_length, "timing_src.dat"))
 
     def send_pkt(self, payload, type=0, eof=False):
         """

@@ -626,7 +626,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void generateCodeVector(MULTIHOP_HDR_TYPE &header);
 
   /* make header and packet */
-  void makeHeader(MULTIHOP_HDR_TYPE &header, unsigned char *header_bytes, FlowInfo *flowInfo, unsigned int nextLinkId);
+  void makeHeader(MULTIHOP_HDR_TYPE &header, unsigned char *header_bytes, FlowInfo *flowInfo, unsigned int nextLinkId, float timing_offset=0.0);
 
   /* decoding/demodulating */
   void demodulate(vector<gr_complex*> out_sym_vec);
@@ -736,6 +736,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void getCandidateSymbols(gr_complex *x, vector<gr_complex*> batched_sym_position, vector<int> &filtered_batches);
 
   /* pilots */
+  void assign_subcarriers();
   void fill_all_carriers_map();
   void equalize_interpolate_dfe(const gr_complex *in, gr_complex *out);
 
@@ -966,11 +967,15 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  float get_eq_slope();
  float d_timing_offset;
  void get_phase_offset(float *ph_offset);
+ float getTimingOffset();
+ void removeTimingOffset();
 
  // preamble related //
  void calculate_snr(gr_complex*);
  const std::vector<std::vector<gr_complex> >   d_preamble; 
  int d_preamble_cnt;
+
+
 };
 
 

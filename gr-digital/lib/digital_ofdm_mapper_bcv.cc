@@ -78,7 +78,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 					unsigned int mimo, int h_coding)
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
-		   gr_make_io_signature3 (1, 3, sizeof(gr_complex)*fft_length, sizeof(short), sizeof(char))),
+		   gr_make_io_signature4 (1, 4, sizeof(gr_complex)*fft_length, sizeof(short), sizeof(char), sizeof(char)*fft_length)),
     d_hdr_constellation(hdr_constellation),
     d_data_constellation(data_constellation),
     d_msgq(gr_make_msg_queue(msgq_limit)), d_eof(false),
@@ -104,7 +104,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_mimo(mimo),
     d_h_coding(h_coding),
     d_preambles_sent(0),
-    d_preamble(preamble)
+    d_preamble(preamble),
+    d_timing_offset(0.0)
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
@@ -124,131 +125,12 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
   d_sock_fd = openACKSocket();
 #endif
 
-#ifdef TRIGGER_ON_ETHERNET
-  d_trigger_src_ip_addr = "128.83.141.213";
-  d_trigger_src_sock_port = 9001;
-  d_trigger_sock = -1;
-#endif
   std::string arg("");
   d_usrp = uhd::usrp::multi_usrp::make(arg);
   d_out_pkt_time = uhd::time_spec_t(0.0);
   d_last_pkt_time = uhd::time_spec_t(0.0);
 
-  // this is not the final form of this solution since we still use the occupied_tones concept,
-  // which would get us into trouble if the number of carriers we seek is greater than the occupied carriers.
-  // Eventually, we will get rid of the occupied_carriers concept.
-  std::string carriers = "F00F";		// apurv++,  8 DC subcarriers
-  //std::string carriers = "FC3F";              // apurv++,  4 DC subcarriers
- 
-  // A bit hacky to fill out carriers to occupied_carriers length
-  int diff = (d_occupied_carriers - 4*carriers.length()); 
-  while(diff > 7) {
-    carriers.insert(0, "f");
-    carriers.insert(carriers.length(), "f");
-    diff -= 8;
-  }
-
-  // if there's extras left to be processed
-  // divide remaining to put on either side of current map
-  // all of this is done to stick with the concept of a carrier map string that
-  // can be later passed by the user, even though it'd be cleaner to just do this
-  // on the carrier map itself
-  int diff_left=0;
-  int diff_right=0;
-
-  // dictionary to convert from integers to ascii hex representation
-  char abc[16] = {'0', '1', '2', '3', '4', '5', '6', '7', 
-		  '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
-  if(diff > 0) {
-    char c[2] = {0,0};
-
-    diff_left = (int)ceil((float)diff/2.0f);   // number of carriers to put on the left side
-    c[0] = abc[(1 << diff_left) - 1];          // convert to bits and move to ASCI integer
-    carriers.insert(0, c);
-    
-    diff_right = diff - diff_left;	       // number of carriers to put on the right side
-    c[0] = abc[0xF^((1 << diff_right) - 1)];   // convert to bits and move to ASCI integer
-        carriers.insert(carriers.length(), c);
-  }
-  
-  // find out how many zeros to pad on the sides; the difference between the fft length and the subcarrier
-  // mapping size in chunks of four. This is the number to pack on the left and this number plus any 
-  // residual nulls (if odd) will be packed on the right. 
-  diff = (d_fft_length/4 - carriers.length())/2; 
-
-#ifdef USE_PILOT 
-  /* pilot configuration */ 
-  int num_pilots = 8; //12; //4;
-  unsigned int pilot_index = 0;			     // tracks the # of pilots carriers added   
-  unsigned int data_index = 0;			     // tracks the # of data carriers added
-  unsigned int count = 0;			     // tracks the total # of carriers added
-  unsigned int pilot_gap = 11; //7; //18;
-  unsigned int start_offset = 0; //8;
-#if 0
-  /* pilot configuration */ 
-  int num_pilots = 4;
-  unsigned int pilot_index = 0;                      // tracks the # of pilots carriers added   
-  unsigned int data_index = 0;                       // tracks the # of data carriers added
-  unsigned int count = 0;                            // tracks the total # of carriers added
-  unsigned int pilot_gap = 14; 
-  unsigned int start_offset = 2;
-#endif
-#endif
-
-  unsigned int i,j,k;
-  //for(i = 0; i < (d_occupied_carriers/4)+diff_left; i++) {
-  for(i = 0; i < carriers.length(); i++) {
-    char c = carriers[i];                            // get the current hex character from the string
-    for(j = 0; j < 4; j++) {                         // walk through all four bits
-      k = (strtol(&c, NULL, 16) >> (3-j)) & 0x1;     // convert to int and extract next bit
-      if(k) {                                        // if bit is a 1, 
-	int carrier_index = 4*(i+diff) + j - diff_left;
-	//int carrier_index = 4*i + j - diff_left;
-
-#ifdef USE_PILOT
-	// check if it should be pilot, else add as data //
-	if(count == (start_offset + (pilot_index * pilot_gap))) {		// check notes below !
-	   d_pilot_carriers.push_back(carrier_index);
-	   pilot_index++;
-	}
-	else {
-   	   d_data_carriers.push_back(carrier_index);  // use this subcarrier
-	   data_index++;
-	}
-	count++;
-#else
-	d_data_carriers.push_back(carrier_index);
-#endif	
-      }
-    }
-  }
-
-#ifdef USE_PILOT 
-  assert(pilot_index + data_index == count);
-
-  /* debug carriers */ 
-  printf("pilot carriers (%d): \n", d_pilot_carriers.size()); 
-  for(int i = 0; i < d_pilot_carriers.size(); i++) {
-     printf("%d ", d_pilot_carriers[i]); fflush(stdout);
-  }
-  printf("\n");
-  assert(d_pilot_carriers.size() == pilot_index);
-  assert(d_data_carriers.size() == data_index); 
-  
-  // hack the above to populate the d_pilots_carriers map and remove the corresponding entries from d_data_carriers //
-  /* if # of data carriers = 72
-	# of pilots        = 6
-	gap b/w pilots     = 72/6 = 12
- 	start pilot	   = 5
-	other pilots	   = 5, 17, 29, .. so on
-	P.S: DC tones should not be pilots!
-  */  
-#endif
-  printf("data carriers (%d): \n", d_data_carriers.size());
-  for(int i = 0; i < d_data_carriers.size(); i++) {
-     printf("%d ", d_data_carriers[i]); fflush(stdout);
-  }
-  printf("\n");
+  assign_subcarriers();
 
   // make sure we stay in the limit currently imposed by the occupied_carriers
   if(d_data_carriers.size() > d_occupied_carriers) {
@@ -310,6 +192,14 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
     return -1;
   }
 
+  /* optional - for out timing signal required only for debugging */
+  unsigned char *out_signal = NULL;
+  if (output_items.size() >= 3){
+    out_signal = (unsigned char*) output_items[3];
+    memset(out_signal, 0, sizeof(char) * d_fft_length);
+  }
+  /* end */
+
   if(!d_msg[0]) {
     d_msg[0] = d_msgq->delete_head();			   // block, waiting for a message
     d_hdr_ofdm_index = 0;
@@ -351,10 +241,16 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
     d_null_symbol_cnt = 0;
     d_training_symbol_cnt = 0;
     d_preambles_sent = 0;
+    make_time_tag(d_msg[0]);
+
+    // forwarder needs to extract it from the message already created in frame_sink //
+    if(d_h_coding) {
+      d_timing_offset = (d_msg[0])->timing_offset();
+    }
   }
 
   char *out_flag = 0;
-  if(output_items.size() == 2)
+  if(output_items.size() >= 3)
     out_flag = (char *) output_items[2];
   
   /* for burst tagger trigger */
@@ -382,10 +278,6 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
      if(d_fwd_index == 2 && (d_null_symbol_cnt < (d_preamble.size()+d_num_hdr_symbols)) && 0) {
         d_null_symbol_cnt++;
 	d_pending_flag = 3;
-	if(!d_time_tag) {
-	   make_time_tag(d_msg[0]);
-	   d_time_tag = true;
-	}
      }
      else
 #endif
@@ -394,14 +286,11 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 	generatePreamble(out);
 	d_preambles_sent++;
 	tx_pilot = false;
+	if(d_preambles_sent == 1 && output_items.size() >= 3) out_signal[0]=1;
      }
 	/* data */
      else if(d_msg_offset[0] < HEADERBYTELEN) {
 	generateOFDMSymbol(out, HEADERBYTELEN);
-        if(!d_time_tag) {
-           make_time_tag(d_msg[0]);
-           d_time_tag = true;
-        }
 	tx_pilot = true;
 #ifdef SRC_PILOT
 	if(d_hdr_ofdm_index == 0) {
@@ -480,6 +369,10 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
       d_send_null = true;
   }
 
+  if(d_h_coding) {
+     removeTimingOffset(out, d_timing_offset);
+  }
+
   if (out_flag)
     out_flag[0] = d_pending_flag;
 
@@ -489,7 +382,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
   d_pending_flag = 0;
 
   return 1;  // produced symbol
-}
+} // work() //forwarder
 
 /*
 void
@@ -768,10 +661,19 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   burst_trigger[0] = 1;
   /* end */
 
+  /* optional - for out timing signal required only for debugging */
+  unsigned char *out_signal = NULL;
+  if (output_items.size() >= 3){
+    out_signal = (unsigned char*) output_items[3];
+    memset(out_signal, 0, sizeof(char) * d_fft_length);
+  }
+  /* end */
+
   if(d_preambles_sent < d_preamble.size()) {
      generatePreamble(out);
      d_preambles_sent++;
      tx_pilot = false;
+     if(d_preambles_sent == 1 && output_items.size() >= 3) out_signal[0]=1;
   }
   else if(d_hdr_byte_offset < HEADERBYTELEN) {
       generateOFDMSymbolHeader(out); 					// send the header symbols out first //
@@ -878,7 +780,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 #endif
 
   if(d_h_coding) {
-     removeTimingOffset(out);
+     removeTimingOffset(out, d_header.timing_offset);
   }
  
   char *out_flag = 0;
@@ -939,6 +841,47 @@ digital_ofdm_mapper_bcv::logNativeTxSymbols()
 
   close(fd);
   fp = NULL;
+}
+
+void
+digital_ofdm_mapper_bcv::assign_subcarriers() {
+  int dc_tones = 8;
+  int num_pilots = 8;
+  int pilot_gap = 11;
+
+  int half1_end = (d_occupied_carriers-dc_tones)/2;     //40
+  int half2_start = half1_end+dc_tones;                 //48
+
+  int off = (d_fft_length-d_occupied_carriers)/2;       //4
+
+  // first half
+  for(int i = 0; i < half1_end; i++) {
+     if(i%pilot_gap == 0)
+        d_pilot_carriers.push_back(i+off);
+     else
+        d_data_carriers.push_back(i+off);
+  }
+
+  // second half
+  for(int i = half2_start, j = 0; i < d_occupied_carriers; i++, j++) {
+     if(j%pilot_gap == 0)
+        d_pilot_carriers.push_back(i+off);
+     else
+        d_data_carriers.push_back(i+off);
+  }
+
+  /* debug carriers */
+  printf("pilot carriers: \n");
+  for(int i = 0; i < d_pilot_carriers.size(); i++) {
+     printf("%d ", d_pilot_carriers[i]); fflush(stdout);
+  }
+  printf("\n");
+
+  printf("data carriers: \n");
+  for(int i = 0; i < d_data_carriers.size(); i++) {
+     printf("%d ", d_data_carriers[i]); fflush(stdout);
+  }
+  printf("\n");
 }
 
 void
@@ -1266,7 +1209,7 @@ digital_ofdm_mapper_bcv::getNormalizationFactor() {
 
   avg_amp = avg_amp/((float) d_data_carriers.size());
   printf("getNormalizationFactor, avg_amp: %f\n", avg_amp); fflush(stdout);
-  return avg_amp/0.9;
+  return avg_amp/0.95;
 }
 
 #if 1 
@@ -1414,12 +1357,13 @@ digital_ofdm_mapper_bcv::normalizeSignal(gr_complex* out, int k)
 }
 
 inline void
-digital_ofdm_mapper_bcv::removeTimingOffset(gr_complex *out) {
-  float t_o = d_header.timing_offset;
+digital_ofdm_mapper_bcv::removeTimingOffset(gr_complex *out, float t_o) {
+  unsigned int index = (d_fft_length - d_occupied_carriers)/2;			// start filling from here
+
   printf("removeTimingOffset, pkt_num: %d, offset: %f\n", d_pkt_num-1, t_o);
   if(t_o != 0) {
-     for(unsigned int i = 0; i < d_data_carriers.size(); i++) {
-        out[d_data_carriers[i]] *= gr_expj(t_o*i);
+     for(unsigned int i = 0; i < d_occupied_carriers; i++) {
+        out[index++] *= gr_expj(t_o*i);
      }
   }
 }
@@ -1763,7 +1707,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   int decimation = 128;
   double rate = 1.0/decimation;
  
-  int num_ofdm_symbols_to_wait = 2000; //400; //3000;
+  int num_ofdm_symbols_to_wait = 4000; //400; //3000;
 
   int cp_length = d_fft_length/4;
   int symbol_length = d_fft_length + cp_length;
@@ -1822,7 +1766,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
 
   if(d_h_coding) {
      d_pktTxInfoList.push_back(PktTxInfo(d_pkt_num, out_time));  
-     while(d_pktTxInfoList.size() > 20) {
+     while(d_pktTxInfoList.size() > 300) {
         d_pktTxInfoList.pop_front();
      }
   }

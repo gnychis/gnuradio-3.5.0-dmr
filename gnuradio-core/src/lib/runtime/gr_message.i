@@ -57,6 +57,7 @@ public:
   bool timestamp_valid() const { return d_timestamp_valid; }
   long preamble_sec() const { return (long)d_preamble_sec; }
   double preamble_frac_sec() const { return d_preamble_frac_sec; }
+  float timing_offset() const { return d_timing_offset; }
 
   size_t length() const;
   std::string to_string() const;

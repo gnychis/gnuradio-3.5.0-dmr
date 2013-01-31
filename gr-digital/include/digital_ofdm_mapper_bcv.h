@@ -501,6 +501,8 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   FILE *d_fp_log; bool d_log_open;
 
   void logNativeTxSymbols();
+
+  void assign_subcarriers();
   void fill_all_carriers_map();
   FILE *d_fp_native; bool d_log_open_native;
 
@@ -602,7 +604,8 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 
   float getNormalizationFactor();
   float getTimingOffset();
-  void removeTimingOffset(gr_complex*);
+  void removeTimingOffset(gr_complex*, float);
+  float d_timing_offset;
 
   int d_mimo_wait_cnt;
 

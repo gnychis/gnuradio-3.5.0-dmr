@@ -214,7 +214,7 @@ digital_ofdm_frame_acquisition::calculate_equalizer(const gr_complex *symbol, in
     }
   }
 
-  if(VERBOSE || 1) {
+  if(VERBOSE) {
     fprintf(stderr, "Equalizer setting:\n");
     for(i = 0; i < d_occupied_carriers; i++) {
       gr_complex sym = coarse_freq_comp(d_coarse_freq,d_cur_symbol)*symbol[i+zeros_on_left+d_coarse_freq];

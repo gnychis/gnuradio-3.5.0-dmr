@@ -67,7 +67,7 @@ gr_burst_tagger::work(int noutput_items,
   for(int i = 0; i < noutput_items; i++) {
     if(trigger[i] > 0) {
       if(d_state == false) {
-	printf("burst_tagger: SOB, i: %d, noutput_items: %d, nitems_written: %d\n", i, noutput_items, nitems_written(0)); fflush(stdout);
+	//printf("burst_tagger: SOB, i: %d, noutput_items: %d, nitems_written: %d\n", i, noutput_items, nitems_written(0)); fflush(stdout);
 	d_state = true;
 	pmt::pmt_t value = pmt::PMT_T;
 	d_key = pmt::pmt_string_to_symbol("tx_sob");
@@ -79,7 +79,7 @@ gr_burst_tagger::work(int noutput_items,
     }
     else {
        if(d_state == true) {
-	 printf("burst_tagger: EOB, i: %d, noutput_items: %d, nitems_written: %d\n", i, noutput_items, nitems_written(0)); fflush(stdout);
+	 //printf("burst_tagger: EOB, i: %d, noutput_items: %d, nitems_written: %d\n", i, noutput_items, nitems_written(0)); fflush(stdout);
 	 d_state = false;
 	 //pmt::pmt_t value = pmt::PMT_F;
 	 d_key = pmt::pmt_string_to_symbol("tx_eob");
@@ -108,7 +108,7 @@ gr_burst_tagger::modify_timestamp(int output_items, int index) {
      size_t t = rx_tags.size()-1;
      uint64_t offset = rx_tags[t].offset;
 
-     printf("test_timestamp1 (BURST):: found %d tags, offset: %llu, output_items: %d, nread1: %llu, nwritten1: %llu, index: %d\n", rx_tags.size(), rx_tags[t].offset, output_items, nread1, nitems_written(0), index); fflush(stdout);
+     //printf("test_timestamp1 (BURST):: found %d tags, offset: %llu, output_items: %d, nread1: %llu, nwritten1: %llu, index: %d\n", rx_tags.size(), rx_tags[t].offset, output_items, nread1, nitems_written(0), index); fflush(stdout);
 
      const pmt::pmt_t &value = rx_tags[t].value;
      uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));

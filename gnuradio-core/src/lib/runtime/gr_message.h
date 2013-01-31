@@ -473,6 +473,7 @@ class gr_message {
   bool 			d_timestamp_valid;		// whether the timestamp is valid
   uint64_t 	d_preamble_sec;				// the preamble sync time in seconds
   double 		d_preamble_frac_sec;	// the preamble sync time's fractional seconds
+  float			d_timing_offset;
 
   unsigned char	 *d_buf_start;	// start of allocated buffer
   unsigned char  *d_msg_start;	// where the msg starts
@@ -509,6 +510,9 @@ public:
   bool timestamp_valid() const { return d_timestamp_valid; }
   long preamble_sec() const { return (long)d_preamble_sec; }
   double preamble_frac_sec() const { return d_preamble_frac_sec; }
+
+  void set_timing_offset(float timing_offset) { d_timing_offset = timing_offset; }
+  float timing_offset() const { return d_timing_offset; }
 
   unsigned char *msg() const { return d_msg_start; }
   size_t length() const      { return d_msg_end - d_msg_start; }
