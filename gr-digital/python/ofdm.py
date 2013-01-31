@@ -235,11 +235,11 @@ class ofdm_mod(gr.hier_block2):
         """
         normal.add_option("-m", "--modulation", type="string", default="bpsk",
                           help="set modulation type (bpsk, qpsk, 8psk, qam{16,64}) [default=%default]")
-        expert.add_option("", "--fft-length", type="intx", default=512,
+        expert.add_option("", "--fft-length", type="intx", default=96,
                           help="set the number of FFT bins [default=%default]")
-        expert.add_option("", "--occupied-tones", type="intx", default=200,
+        expert.add_option("", "--occupied-tones", type="intx", default=88,
                           help="set the number of occupied FFT bins [default=%default]")
-        expert.add_option("", "--cp-length", type="intx", default=128,
+        expert.add_option("", "--cp-length", type="intx", default=24,
                           help="set the number of bits in the cyclic prefix [default=%default]")
 
 	# apurv++ adding options #
@@ -249,7 +249,7 @@ class ofdm_mod(gr.hier_block2):
                           help="set the 'k' parameter in (n,k) for FEC encoding [default=0(no fec)]")
         expert.add_option("", "--src", type="intx", default=0,
                           help="puts the node in SRC mode if 1 [default=%default]")
-	expert.add_option("", "--batch-size", type="intx", default=1,
+	expert.add_option("", "--batch-size", type="intx", default=2,
 			  help="sets the batch size [default=%default]")
 	expert.add_option("", "--encode-flag", type="intx", default=1,
 			  help="encodes the symbols (if true) [default=%default]")
@@ -465,11 +465,11 @@ class ofdm_demod(gr.hier_block2):
         """
         normal.add_option("-m", "--modulation", type="string", default="bpsk",
                           help="set modulation type (bpsk or qpsk) [default=%default]")
-        expert.add_option("", "--fft-length", type="intx", default=512,
+        expert.add_option("", "--fft-length", type="intx", default=96,
                           help="set the number of FFT bins [default=%default]")
-        expert.add_option("", "--occupied-tones", type="intx", default=200,
+        expert.add_option("", "--occupied-tones", type="intx", default=88,
                           help="set the number of occupied FFT bins [default=%default]")
-        expert.add_option("", "--cp-length", type="intx", default=128,
+        expert.add_option("", "--cp-length", type="intx", default=24,
                           help="set the number of bits in the cyclic prefix [default=%default]")
 	expert.add_option("", "--snr", type="float", default=30.0,
                          help="SNR estimate [default=%default]")
@@ -481,7 +481,7 @@ class ofdm_demod(gr.hier_block2):
                           help="set the 'k' parameter in (n,k) for FEC encoding [default=0(no fec)]")
         expert.add_option("-s", "--size", type="intx", default=400,
                           help="expected size (in bytes) of the rx packet [default=400]")
-        expert.add_option("", "--batch-size", type="intx", default=1,
+        expert.add_option("", "--batch-size", type="intx", default=2,
                           help="sets the batch size [default=%default]")
         expert.add_option("", "--decode-flag", type="intx", default=1,
                           help="decodes the symbols (if true) [default=%default]")

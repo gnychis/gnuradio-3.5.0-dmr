@@ -89,7 +89,7 @@ class receive_path(gr.hier_block2):
         Adds receiver-specific options to the Options Parser
         """
         normal.add_option("-W", "--bandwidth", type="eng_float",
-                          default=500e3,
+                          default=781250,
                           help="set symbol bandwidth [default=%default]")
         normal.add_option("-v", "--verbose", action="store_true", default=False)
         expert.add_option("", "--log", action="store_true", default=False,
