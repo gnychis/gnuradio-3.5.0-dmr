@@ -3572,7 +3572,7 @@ digital_ofdm_frame_sink::getNormalizationFactor(gr_complex *symbols, int nsender
   }
   avg_amp = avg_amp/((float) n_data_carriers);
   printf("getNormalizationFactor, avg_amp: %f\n", avg_amp); fflush(stdout);
-  return avg_amp/0.95;
+  return avg_amp/0.85;
 }
 
 /* just to test */
