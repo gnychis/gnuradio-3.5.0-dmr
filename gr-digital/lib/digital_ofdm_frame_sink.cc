@@ -4476,7 +4476,7 @@ digital_ofdm_frame_sink::crc_check(std::string msg, std::string& decoded_str)
   memcpy(msg_data, msg.data(), len); 
 
   /* dewhiten the msg first */
-  printf("crc_check begin! len: %d\n", len); fflush(stdout);
+  //printf("crc_check begin! len: %d\n", len); fflush(stdout);
   dewhiten(msg_data, len);
   std::string dewhitened_msg((const char*) msg_data, len);
 
@@ -4492,7 +4492,7 @@ digital_ofdm_frame_sink::crc_check(std::string msg, std::string& decoded_str)
 
   // remove the training symbol (1 OFDM symbol at the start of the payload 
   // refer to ofdm_packet_utils.py at the transmitter for the addition of this symbol
-  int num_training_bytes = (d_data_carriers.size() * d_data_nbits)/8;
+  int num_training_bytes = 2*(d_data_carriers.size() * d_data_nbits)/8;
   dewhitened_msg = dewhitened_msg.substr(num_training_bytes);
   exp_len -= num_training_bytes;
 
@@ -4512,7 +4512,7 @@ digital_ofdm_frame_sink::crc_check(std::string msg, std::string& decoded_str)
   unsigned int calculated_crc = digital_crc32(msg_wo_crc);
   char hex_crc[15];
   snprintf(hex_crc, sizeof(hex_crc), "%08x", calculated_crc);
-  printf("hex calculated crc: %s  int calculated crc: %u\n", hex_crc, calculated_crc); 
+  //printf("hex calculated crc: %s  int calculated crc: %u\n", hex_crc, calculated_crc); 
 
  
   /* get the msg crc from the end of the msg */
@@ -4554,12 +4554,12 @@ digital_ofdm_frame_sink::test_timestamp(int output_items) {
 //get_tags_in_range(rx_sync_tags, tag_port, nread1, nread1+output_items, SYNC_TIME);
   get_tags_in_range(rx_sync_tags, tag_port, nread1, nread1+17, SYNC_TIME); 
 
-  printf("(SINK) nread1: %llu, output_items: %d\n", nread1, output_items); fflush(stdout);
+  //printf("(SINK) nread1: %llu, output_items: %d\n", nread1, output_items); fflush(stdout);
   if(rx_sync_tags.size()>0) {
      size_t t = rx_sync_tags.size()-1;
      uint64_t offset = rx_sync_tags[t].offset;
 
-     printf("test_timestamp1 (SINK):: found %d tags, offset: %llu, output_items: %d, nread1: %llu\n", rx_sync_tags.size(), rx_sync_tags[t].offset, output_items, nread1); fflush(stdout);
+     //printf("test_timestamp1 (SINK):: found %d tags, offset: %llu, output_items: %d, nread1: %llu\n", rx_sync_tags.size(), rx_sync_tags[t].offset, output_items, nread1); fflush(stdout);
 
      const pmt::pmt_t &value = rx_sync_tags[t].value;
      uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
@@ -5145,7 +5145,7 @@ void digital_ofdm_frame_sink::track_pilot_dfe_SRC(gr_complex *in, vector<gr_comp
       dfe_pilot[i] += d_eq_gain * (pilot_sym/sigeq - dfe_pilot[i]);
   }
   d_end_angle[sender] = angle;
-  printf("  d_end_angle: %f\n", d_end_angle[sender]); fflush(stdout);
+  //printf("  d_end_angle: %f\n", d_end_angle[sender]); fflush(stdout);
 }
 
 inline void
@@ -5190,7 +5190,7 @@ digital_ofdm_frame_sink::logDFECorrectedSignals(gr_complex *in, vector<gr_comple
         count += fwrite_unlocked(&symbol, sizeof(gr_complex), 1, d_fp_dfe_symbols);
      }
   }
-  printf("logDFESymbols, count: %d\n", ftell(d_fp_dfe_symbols)); fflush(stdout);
+  //printf("logDFESymbols, count: %d\n", ftell(d_fp_dfe_symbols)); fflush(stdout);
 }
 
 inline void

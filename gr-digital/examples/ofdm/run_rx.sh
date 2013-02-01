@@ -28,11 +28,11 @@ freq=2480M
 pkt_size=104
 
 # rx-parameters
-thresh=1e-4
+thresh=3e-6
 rx_gain=10
 
 # the command
-cmd="sudo ./benchmark_rx.py -f $freq --threshold=$thresh --rx-gain=$rx_gain --id=$id --batch-size=$batch_size -s $pkt_size -m $mod --h-smart=$h_smart"
+cmd="sudo ./benchmark_rx.py -f $freq --threshold=$thresh --rx-gain=$rx_gain --id=$id -s $pkt_size -m $mod --h-smart=$h_smart"
 
 echo $cmd			# print the command
 $cmd				# execute the command

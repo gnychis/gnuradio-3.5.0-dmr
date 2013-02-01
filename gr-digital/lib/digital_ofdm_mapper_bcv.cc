@@ -1209,7 +1209,7 @@ digital_ofdm_mapper_bcv::getNormalizationFactor() {
 
   avg_amp = avg_amp/((float) d_data_carriers.size());
   printf("getNormalizationFactor, avg_amp: %f\n", avg_amp); fflush(stdout);
-  return avg_amp/0.95;
+  return avg_amp/0.85;
 }
 
 #if 1 

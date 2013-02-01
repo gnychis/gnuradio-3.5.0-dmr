@@ -269,7 +269,7 @@ class ofdm_mod(gr.hier_block2):
                           help="hop number (for preamble) [default=%default]")
         expert.add_option("","--mimo", type="intx", default=0,
                          help="enable MIMO TX [default=%default]")
-	expert.add_option("","--h-smart", type="intx", default=0,
+	expert.add_option("","--h-smart", type="intx", default=1,
                          help="enables smart coefficients using H exchange [default=%default]")
 	# apurv++ end #
 
@@ -506,9 +506,9 @@ class ofdm_demod(gr.hier_block2):
                           help="forwarder ranking (1:lead forwarder, 2: 2nd slave, 3:3rd slave, etc [default=%default]")
         expert.add_option("", "--degree", type="intx", default=4,
                           help="LSQ degree (if applicable) [default=%default]")
-        expert.add_option("", "--hop", type="intx", default=0,
+        expert.add_option("", "--hop", type="intx", default=1,
                           help="hop number (for preamble) [default=%default]")
-        expert.add_option("","--h-smart", type="intx", default=0,
+        expert.add_option("","--h-smart", type="intx", default=1,
                          help="enables smart coefficients using H exchange [default=%default]")
         # apurv++ end #
 

@@ -204,7 +204,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
       //uint64_t samples_passed = lts_samples_since + index;
       double elapsed = samples_passed * time_per_sample;
 
-      printf("sample index (PREAMBLE): %llu\n", samples_passed); fflush(stdout);      
+      //printf("sample index (PREAMBLE): %llu\n", samples_passed); fflush(stdout);      
 
       // Use the last time stamp to calculate the time of the premable synchronization
       uint64_t sync_sec = (int)elapsed + lts_secs;
@@ -217,7 +217,7 @@ digital_ofdm_sampler::general_work (int noutput_items,
       uint64_t interval_sec = sync_sec - last_sync_sec;
       double interval_frac_sec = sync_frac_sec - last_sync_frac_sec;
 
-      if(VERBOSE || 1) {
+      if(VERBOSE) {
         std::cout << "got a preamble.... calculating timestamp of sync\n";
         std::cout << "... relative_rate: " << rate << "\n";
         std::cout << "... time_per_sample: " << time_per_sample << "\n";
@@ -253,14 +253,12 @@ digital_ofdm_sampler::general_work (int noutput_items,
       add_item_tag(1, tag.offset, tag.key, tag.value, tag.srcid);
       uhd::time_spec_t proc_time = d_usrp->get_time_now() - uhd::time_spec_t(sync_sec, sync_frac_sec);
   
-      printf("(SAMPLER) RX timestamp (%llu, %f), proc_time (%llu, %f)\n", sync_sec, sync_frac_sec, (uint64_t) proc_time.get_full_secs(), proc_time.get_frac_secs());
-      fflush(stdout);
-
-      if(1) 
+      if(0) {
+        printf("(SAMPLER) RX timestamp (%llu, %f), proc_time (%llu, %f)\n", sync_sec, sync_frac_sec, (uint64_t) proc_time.get_full_secs(), proc_time.get_frac_secs());
+        fflush(stdout);
         std::cout << "--- added sync tag in ofdm_sampler stream at " << nitems_written(1) << "\n";
-      if(1)
         std::cout << "--- found sync at: " << (int)elapsed << " and " << elapsed-(int)elapsed << " (" << elapsed << ")\n";
-
+      }
     }
     else
       index++;

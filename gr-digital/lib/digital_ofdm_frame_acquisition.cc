@@ -185,7 +185,7 @@ digital_ofdm_frame_acquisition::calculate_equalizer(const gr_complex *symbol, in
   unsigned int i=0;
   const std::vector<gr_complex> &known_symbol = d_known_symbol[d_cur_symbol];
   gr_complex comp = coarse_freq_comp(d_coarse_freq, d_cur_symbol);
-  printf("calculate_equalizer, cur_symbol: %d, comp (%f, %f)\n", d_cur_symbol, comp.real(), comp.imag()); fflush(stdout);
+  //printf("calculate_equalizer, cur_symbol: %d, comp (%f, %f)\n", d_cur_symbol, comp.real(), comp.imag()); fflush(stdout);
  
   if(d_cur_symbol == 0) {
      // Set first tap of equalizer

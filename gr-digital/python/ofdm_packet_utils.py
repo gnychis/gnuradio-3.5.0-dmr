@@ -122,7 +122,7 @@ def make_packet(payload, samples_per_symbol, bps, fec_n, fec_k, pad_for_usrp=Tru
     training_symbol = ''
     data_carriers = 72
     if 1:
-        training_boundary = (data_carriers*bps)/8
+        training_boundary = 2*(data_carriers*bps)/8
         training_symbol = payload[0:training_boundary]
         payload = payload[training_boundary:]
 
