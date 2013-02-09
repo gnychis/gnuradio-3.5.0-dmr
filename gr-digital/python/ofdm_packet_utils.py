@@ -120,7 +120,7 @@ def make_packet(payload, samples_per_symbol, bps, fec_n, fec_k, pad_for_usrp=Tru
 
     # generate 1 OFDM symbol of training payload #
     training_symbol = ''
-    data_carriers = 72
+    data_carriers = 64
     if 1:
         training_boundary = 2*(data_carriers*bps)/8
         training_symbol = payload[0:training_boundary]
@@ -157,7 +157,8 @@ def make_packet(payload, samples_per_symbol, bps, fec_n, fec_k, pad_for_usrp=Tru
     """
 
     ### apurv++: replace above code by this one ###
-    pkt_dt = ''.join((enc_payload_with_crc, '\x55'))
+    #pkt_dt = ''.join((enc_payload_with_crc, '\x55'))
+    pkt_dt = enc_payload_with_crc
 
     if 0:
           print "original: "

@@ -161,7 +161,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 
   d_time_pkt_sent = 0;
   d_log_open = false;
-  d_log_open_native = false;
+  //d_log_open_native = false;
 
   if(NUM_TRAINING_SYMBOLS > 0)
      generateKnownSymbols();
@@ -756,10 +756,11 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       assert(d_ofdm_symbol_index == d_num_ofdm_symbols);
       d_send_null = false;
       d_modulated = true;
+	/*
       if(!d_log_open_native) {
          logNativeTxSymbols();
          d_log_open_native = true;
-      }
+      } */
   }
 #endif
 
@@ -1198,6 +1199,7 @@ digital_ofdm_mapper_bcv::ToPhase_c(COEFF coeff) {
 float
 digital_ofdm_mapper_bcv::getNormalizationFactor() {
   float avg_amp = 0.0;
+  float avg_mag = 0.0;
   for(int i = 0; i < d_data_carriers.size(); i++) {
      gr_complex sym(0.0, 0.0);
      for(int k = 0; k < d_batch_size; k++) {
@@ -1205,11 +1207,15 @@ digital_ofdm_mapper_bcv::getNormalizationFactor() {
         sym += (cv*d_data_constellation[randsym()]);
      }
      avg_amp += abs(sym);
+     avg_mag += norm(sym);
   }
 
   avg_amp = avg_amp/((float) d_data_carriers.size());
+  avg_mag /= ((float) d_data_carriers.size());
+
   printf("getNormalizationFactor, avg_amp: %f\n", avg_amp); fflush(stdout);
-  return avg_amp/0.85;
+  //return avg_amp/0.85;
+  return sqrt(avg_mag);
 }
 
 #if 1 
@@ -1403,7 +1409,7 @@ digital_ofdm_mapper_bcv::makeHeader()
    d_header.src_id = d_id;
    d_header.prev_hop_id = d_id;
 
-   d_header.packetlen = d_packetlen - 1;		// -1 for '55' appended (ref ofdm_packet_utils)
+   d_header.packetlen = d_packetlen;		// -1 for '55' appended (ref ofdm_packet_utils)
    d_header.batch_number = d_batch_to_send;
    d_header.nsenders = (d_mimo == 0)?1:2;
    d_header.pkt_type = DATA_TYPE;
@@ -1914,7 +1920,7 @@ digital_ofdm_mapper_bcv::generateCodeVector()
 bool
 digital_ofdm_mapper_bcv::is_CV_good(gr_complex cv1, gr_complex cv2, float &min_dt) {
    int M = d_data_constellation.size();
-   float threshold = 0.7;
+   float threshold = 0.8;
 
    float avg_amp = 0.0;
    float highest_amp = 0.0;
@@ -2121,6 +2127,77 @@ digital_ofdm_mapper_bcv::get_coeffs_from_lead(CoeffInfo *coeffs)
 
 inline void
 digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *coeffInfo) {
+  int num_carriers = d_data_carriers.size();
+  printf("smart_selection_local start\n"); fflush(stdout);
+
+  // get the predicted value of h for each of the receivers //
+  NodeIds rx_ids;
+  get_nextHop_rx(rx_ids);
+  vector<gr_complex> h_vec;
+  for(int i = 0; i < rx_ids.size(); i++) {
+     gr_complex h = predictH(d_id, rx_ids[i]);
+     h_vec.push_back(h);
+  }
+
+  // to cap the max iterations //
+  int max_iter = 1000, iter = 0;
+  gr_complex best_coeff[MAX_BATCH_SIZE];
+  float max_min_dt = 0.0;
+
+  gr_complex *reduced_coeffs;
+  while(1) {
+
+     for(int k = 0; k < d_batch_size; k++) {
+        float amp = 1.0;
+        float phase = (rand() % 360 + 1) * M_PI/180;
+        coeffs[k] = (amp * ToPhase_c(phase));
+     }
+
+     // ensure its a good selection over all the next-hop rx //
+     bool good = 1;
+     for(int i = 0; i < rx_ids.size(); i++) {
+        CoeffInfo *cInfo = &(coeffInfo[i]);
+        cInfo->rx_id = rx_ids[i];
+
+        // include the channel effect //
+        reduced_coeffs = cInfo->coeffs;
+        for(int k = 0; k < d_batch_size; k++) {
+           reduced_coeffs[k] = coeffs[k] * h_vec[i];
+        }
+
+        float dt = 1000.0;
+        if(!is_CV_good(reduced_coeffs[0], reduced_coeffs[1], dt)) {
+            printf("cv1 (%f, %f), cv2 (%f, %f), dt: %f\n", cInfo->coeffs[0].real(), cInfo->coeffs[0].imag(),
+                                                cInfo->coeffs[1].real(), cInfo->coeffs[1].imag(), dt); fflush(stdout);
+            good = 0;
+            if(dt > max_min_dt) {
+                max_min_dt = dt;
+                for(int k = 0; k < d_batch_size; k++)
+                    best_coeff[k] = coeffs[k];
+            }
+            break;
+        }
+     }
+
+     iter++;
+     if(good || iter == max_iter) {
+        printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
+        for(int k = 0; k < d_batch_size; k++)
+           coeffs[k] = best_coeff[k];
+        break;
+     }
+  }
+
+  if(d_batch_size == 2) {
+     printf("smart selection local -- coeffs1 (%.2f, %.2f) coeffs2 (%.2f, %.2f) red1 (%.2f, %.2f) red2 (%.2f, %.2f)\n",
+                                  coeffs[0].real(), coeffs[0].imag(), coeffs[1].real(), coeffs[1].imag(),
+                                  reduced_coeffs[0].real(), reduced_coeffs[0].imag(), reduced_coeffs[1].real(), reduced_coeffs[1].imag());
+     fflush(stdout);
+  }
+}
+#if 0
+inline void
+digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *coeffInfo) {
 
 
   int num_carriers = d_data_carriers.size();
@@ -2197,6 +2274,7 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
      fflush(stdout);
   }
 }
+#endif
 
 /* more exhaustive now, since it accounts for co-ordinating transmitters, multiple rx (if any) */
 inline void
@@ -2519,7 +2597,7 @@ digital_ofdm_mapper_bcv::updateHInfo(HKey hkey, HInfo *_hInfo) {
    hInfo->pkt_num = _hInfo->pkt_num;
    hInfo->h_value = _hInfo->h_value;
 
-   if(hInfo->timing_slope == 0)
+   //if(hInfo->timing_slope == 0)
       hInfo->timing_slope = _hInfo->timing_slope;
 }
 

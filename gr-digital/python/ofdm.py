@@ -201,7 +201,7 @@ class ofdm_mod(gr.hier_block2):
 
 	#self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex, "ofdm_cp_adder_c.dat"))
 	self.connect(self._pkt_input, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
-	self.connect((self._pkt_input, 2), gr.file_sink(gr.sizeof_char, "timing.dat"))
+	self.connect((self._pkt_input, 2), gr.null_sink(gr.sizeof_char))
         self.connect((self._pkt_input, 3), gr.file_sink(gr.sizeof_char*options.fft_length, "timing_src.dat"))
 
     def send_pkt(self, payload, type=0, eof=False):
@@ -237,7 +237,7 @@ class ofdm_mod(gr.hier_block2):
                           help="set modulation type (bpsk, qpsk, 8psk, qam{16,64}) [default=%default]")
         expert.add_option("", "--fft-length", type="intx", default=96,
                           help="set the number of FFT bins [default=%default]")
-        expert.add_option("", "--occupied-tones", type="intx", default=88,
+        expert.add_option("", "--occupied-tones", type="intx", default=80,
                           help="set the number of occupied FFT bins [default=%default]")
         expert.add_option("", "--cp-length", type="intx", default=24,
                           help="set the number of bits in the cyclic prefix [default=%default]")
@@ -467,7 +467,7 @@ class ofdm_demod(gr.hier_block2):
                           help="set modulation type (bpsk or qpsk) [default=%default]")
         expert.add_option("", "--fft-length", type="intx", default=96,
                           help="set the number of FFT bins [default=%default]")
-        expert.add_option("", "--occupied-tones", type="intx", default=88,
+        expert.add_option("", "--occupied-tones", type="intx", default=80,
                           help="set the number of occupied FFT bins [default=%default]")
         expert.add_option("", "--cp-length", type="intx", default=24,
                           help="set the number of bits in the cyclic prefix [default=%default]")

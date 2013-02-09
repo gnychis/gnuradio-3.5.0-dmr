@@ -624,6 +624,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void combineSignal(gr_complex *out, gr_complex* symbols, int);
   float normalizeSignal(gr_complex* out, int k, int num_in_senders);
   void generateCodeVector(MULTIHOP_HDR_TYPE &header);
+  void print_coeffs(gr_complex *coeffs);
 
   /* make header and packet */
   void makeHeader(MULTIHOP_HDR_TYPE &header, unsigned char *header_bytes, FlowInfo *flowInfo, unsigned int nextLinkId, float timing_offset=0.0);
@@ -974,7 +975,12 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  void calculate_snr(gr_complex*);
  const std::vector<std::vector<gr_complex> >   d_preamble; 
  int d_preamble_cnt;
+ 
+ FILE *d_fp_corr_symbols;
+ void openCorrectSymbolLog();
+ void correctSignal(FlowInfo *fInfo); 
 
+ FILE *d_fp_comb_log;
 
 };
 

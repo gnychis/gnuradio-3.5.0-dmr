@@ -209,7 +209,7 @@ class ofdm_receiver(gr.hier_block2):
 	# apurv++ ends #
 
 	#self.connect(self.ofdm_frame_acq, gr.file_sink(gr.sizeof_gr_complex*occupied_tones, "ofdm_receiver-frame_acq_c.dat"))
-	self.connect((self.ofdm_frame_acq,1), gr.file_sink(1, "ofdm_receiver-found_corr_b.dat"))
+	#self.connect((self.ofdm_frame_acq,1), gr.file_sink(1, "ofdm_receiver-found_corr_b.dat"))
 
 
 	# apurv++ log the fine frequency offset corrected symbols #

@@ -29,7 +29,7 @@
 #include <uhd/usrp/multi_usrp.hpp>
 
 #define MAX_FFT_LENGTH 96
-#define MAX_DATA_CARRIERS 72
+#define MAX_DATA_CARRIERS 64
 #define COMPRESSION_FACTOR 8
 #define NUM_TRAINING_SYMBOLS 0
 
@@ -38,11 +38,7 @@
 
 /* apurv++ define header type */
 #define MAX_BATCH_SIZE     2 
-#ifdef LSQ_COMPRESSION
-#define PADDING_SIZE       3
-#else
-#define PADDING_SIZE       2
-#endif
+#define PADDING_SIZE       4
 
 #define ACK_PADDING_SIZE 2
 #define SRC_PILOT 0 				// enable if only the source pilots are relayed throughout //
@@ -62,7 +58,7 @@ typedef struct coeff_str {
 #pragma pack(1)
 typedef struct multihop_hdr_type {
 
-  // 1
+  // 1 byte
   unsigned char src_id : 3;
   unsigned char dst_id  : 3;
   unsigned char flow_id : 2;
@@ -81,24 +77,15 @@ typedef struct multihop_hdr_type {
   // 2: 15 bits
   unsigned short pkt_num: 15;
 
-  // 8*3=24
-  //gr_complex coeffs[MAX_BATCH_SIZE];
-  //COEFF coeffs[MAX_BATCH_SIZE*2];
-  // 36 * 2 * 4 =  288
-  //COEFF coeffs[MAX_BATCH_SIZE * 36];
-
-#ifdef LSQ_COMPRESSION
+  // 40 bytes
   COEFF coeffs[MAX_BATCH_SIZE * MAX_DEGREE];
-#else
-  COEFF coeffs[MAX_BATCH_SIZE * (MAX_DATA_CARRIERS/COMPRESSION_FACTOR)];
-#endif
 
-  // 1
+  // 9 bytes
   unsigned char link_id;                             // composite link id
   float factor;
   float timing_offset;
 
-  // 4
+  // 4 bytes
   unsigned int hdr_crc;
 
   unsigned char pad[PADDING_SIZE];                 // to ensure size % (occupied_carriers-dc_carriers) = 0
