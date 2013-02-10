@@ -1659,7 +1659,7 @@ digital_ofdm_frame_sink::save_coefficients()
 	    coeffs[index] = ToPhase_c(hdr_coeff);
 	}
      }
-     print_coeffs(coeffs);
+     //print_coeffs(coeffs);
   }
   else {
      gr_complex lsq_coeffs[MAX_DEGREE * MAX_BATCH_SIZE];
@@ -3068,7 +3068,7 @@ digital_ofdm_frame_sink::logGeneratedTxSymbols(gr_complex *out)
      count += fwrite_unlocked(log_symbols, sizeof(gr_complex), d_data_carriers.size(), d_fp_symbols_test); 
   }
 
-  printf("count: %d written to tx_symbols.dat, total: %d \n", count, ftell(d_fp_symbols_test)); fflush(stdout);
+  //printf("count: %d written to tx_symbols.dat, total: %d \n", count, ftell(d_fp_symbols_test)); fflush(stdout);
   free(log_symbols);
 }
 
@@ -4213,7 +4213,7 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
   int decimation = 128;
   double rate = 1.0/decimation;
 
-  int null_ofdm_symbols = 3200;
+  int null_ofdm_symbols = 4000;
 
   int cp_length = d_fft_length/4;
 
@@ -4431,11 +4431,11 @@ digital_ofdm_frame_sink::reduceCoefficients_LSQ(FlowInfo *flowInfo) {
 	      gr_complex *rx_coeffs = d_pktInfo->coeffs.at(j);
 
 	      coeff[index] += ((gr_complex(1.0, 0.0)/estimates[di]) * rx_coeffs[index]);
-	      printf("(%f, %f) += (1.0, 0.0)/(%f, %f) * (%f, %f)\n", coeff[index].real(), coeff[index].imag(),
-							estimates[di].real(), estimates[di].imag(), 
-							rx_coeffs[index].real(), rx_coeffs[index].imag()); fflush(stdout);
+	      //printf("(%f, %f) += (1.0, 0.0)/(%f, %f) * (%f, %f)\n", coeff[index].real(), coeff[index].imag(),
+		//					estimates[di].real(), estimates[di].imag(), 
+		//					rx_coeffs[index].real(), rx_coeffs[index].imag()); fflush(stdout);
 	  }
-	  printf("---\n"); fflush(stdout);
+	  //printf("---\n"); fflush(stdout);
       }
   }
 
@@ -5390,10 +5390,11 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
      memset(reduced_coeffs, 0, sizeof(gr_complex)*MAX_BATCH_SIZE);
      for(unsigned int i = 0; i < n_inno_pkts; i++) {
 	gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[i];               // reduced coeffs for this inno pkt //
+	float amp = abs((inno_pkts[i]->hestimates[0])[d_data_carriers[0]]);
+	float phase = (rand() % 360 + 1) * M_PI/180;
+	coeffs[i] = (amp * ToPhase_c(phase));	
+
 	for(unsigned int k = 0; k < d_batch_size; k++) {
-	   float amp = abs((inno_pkts[i]->hestimates[0])[d_data_carriers[0]]);
-	   float phase = (rand() % 360 + 1) * M_PI/180;
-	   coeffs[i] = (amp * ToPhase_c(phase));
 	   reduced_coeffs[k] += (coeffs[i] * pkt_coeffs[k*num_carriers]);
 	}
      }
@@ -5570,29 +5571,6 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
   NodeIds rx_ids;
   get_nextHop_rx(rx_ids); 
 
-  /* first, formulate the constant part, which does not change with different receivers */
-  gr_complex new_coeffs[MAX_BATCH_SIZE];
-  int num_carriers = d_data_carriers.size();
-
-  /* randomly choose every coefficient except for the last one and keep reducing to latest value */
-  for(unsigned int i = 0; i < n_inno_pkts-1; i++) {
-     PktInfo *pInfo = inno_pkts[i];
-     float amp = getAvgAmplificationFactor(pInfo->hestimates);
-     float phase = (rand() % 360 + 1) * M_PI/180;
-
-     my_coeffs[i] = (amp * ToPhase_c(phase));
-     gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[i];               // reduced coeffs for this inno pkt //
-     for(unsigned int k = 0; k < d_batch_size; k++) {
-        new_coeffs[k] += (my_coeffs[i] * pkt_coeffs[k*num_carriers]);
-     }
-  } /* step 1 done */
-   
-  /* as for the last one, take the global knowledge into account */
-  int last = n_inno_pkts-1;
-  gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[last];
-  PktInfo *pInfo = inno_pkts[last];
-  float amp = getAvgAmplificationFactor(pInfo->hestimates);
-
   // get the predicted value of h for each of the receivers //
   vector<gr_complex> h_vec;
   for(int i = 0; i < rx_ids.size(); i++) {
@@ -5602,40 +5580,47 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
       printf("h: (%.2f, %.2f)\n", h.real(), h.imag());
   }
 
+  int num_carriers = d_data_carriers.size();
+
   // to cap the max iterations //
   int max_iter = 1000, iter = 0;
-  gr_complex best_coeff;
+  gr_complex best_coeff[MAX_BATCH_SIZE];
   float max_min_dt = 0.0;
 
   while(1) {
-     float phase = (rand() % 360 + 1) * M_PI/180;
-     my_coeffs[last] = (amp * ToPhase_c(phase));
+     gr_complex new_coeffs[MAX_BATCH_SIZE];
+     for(int i = 0; i < n_inno_pkts; i++) {
+        float amp = abs((inno_pkts[i]->hestimates[0])[d_data_carriers[0]]);
+        float phase = (rand() % 360 + 1) * M_PI/180;
+        my_coeffs[i] = (amp * ToPhase_c(phase));
 
-     gr_complex t_new_coeffs[MAX_BATCH_SIZE];			// working copy
-     for(unsigned int k = 0; k < d_batch_size; k++)
-         t_new_coeffs[k] = new_coeffs[k] + (my_coeffs[last] * pkt_coeffs[k*num_carriers]);
+        gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[i];
+        for(unsigned int k = 0; k < d_batch_size; k++)
+           new_coeffs[k] += (my_coeffs[i] * pkt_coeffs[k*num_carriers]);
+     }
 
      // now the receiver based stuff //
      bool good = 1;
      for(int i = 0; i < rx_ids.size(); i++) {
 
-	gr_complex *o_coeffs = others_coeffs[i].coeffs;     // other senders coeffs for this rx
-	if(others_coeffs[i].rx_id != rx_ids[i]) {
-	   printf(" others.rx_id: %c, rx_id: %c\n", others_coeffs[i].rx_id, rx_ids[i]); fflush(stdout);
-	   assert(false);
-	}
-
-	// combine with the other sender //    
-        for(unsigned int k = 0; k < d_batch_size; k++) {
-           t_new_coeffs[k] = (t_new_coeffs[k] * h_vec[i]) + o_coeffs[k];
+        gr_complex *o_coeffs = others_coeffs[i].coeffs;     // other senders coeffs for this rx
+        if(others_coeffs[i].rx_id != rx_ids[i]) {
+           printf(" others.rx_id: %c, rx_id: %c\n", others_coeffs[i].rx_id, rx_ids[i]); fflush(stdout);
+           assert(false);
         }
 
-	float dt = 1000.0;
-        if(!is_CV_good(t_new_coeffs[0], t_new_coeffs[1], dt)) {
+        // combine with the other sender //    
+        for(unsigned int k = 0; k < d_batch_size; k++) {
+           new_coeffs[k] = (new_coeffs[k] * h_vec[i]) + o_coeffs[k];
+        }
+
+        float dt = 1000.0;
+        if(!is_CV_good(new_coeffs[0], new_coeffs[1], dt)) {
             good = 0;
             if(dt > max_min_dt) {
                 max_min_dt = dt;
-                best_coeff = my_coeffs[last];
+                for(int k = 0; k < d_batch_size; k++)
+                    best_coeff[k] = my_coeffs[k];
             }
             break;
         }
@@ -5643,11 +5628,13 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
 
      iter++;
      if(good == 1 || iter == max_iter) {
-	printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
-	
-	if(iter == max_iter)
-	   my_coeffs[last] = best_coeff;
-	break;
+        printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
+
+        if(iter == max_iter) {
+           for(int k = 0; k < d_batch_size; k++)
+               my_coeffs[k] = best_coeff[k];
+        }
+        break;
      }
   } //end while
 }
@@ -6110,7 +6097,7 @@ digital_ofdm_frame_sink::populateEthernetAddress()
 /* util function */
 inline void
 digital_ofdm_frame_sink::open_server_sock(int sock_port, vector<unsigned int>& connected_clients, int num_clients) {
-  printf("open_server_sock start, #clients: %d\n", num_clients); fflush(stdout);
+  printf("sink:: open_server_sock start, #clients: %d\n", num_clients); fflush(stdout);
   int sockfd, _sock;
   struct sockaddr_in dest;
 

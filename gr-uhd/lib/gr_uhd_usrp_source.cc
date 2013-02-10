@@ -83,7 +83,6 @@ public:
            clock_config1.pps_source = uhd::clock_config_t::PPS_MIMO;
            this->set_clock_config(clock_config1, 0);
            printf("SLAVE CLOCK, source: %s\n", this->get_clock_source(0).c_str()); fflush(stdout);
-        }
 #else
            printf("Switching to the external clock!\n"); fflush(stdout);
            this->set_clock_config(uhd::clock_config_t::external(), 0);

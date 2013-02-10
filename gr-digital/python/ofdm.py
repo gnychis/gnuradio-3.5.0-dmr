@@ -86,7 +86,7 @@ class ofdm_mod(gr.hier_block2):
         ksfreq = known_symbols_4512_3[start_index:start_index + self._occupied_tones]
 
         # allow another full preamble (no intermediate 0s for accurate channel estimate/snr measurement)
-        preamble2_offset = 10*self._occupied_tones;
+        preamble2_offset = (options.hop+10)*self._occupied_tones;
         ksfreq2 = known_symbols_4512_3[preamble2_offset:preamble2_offset+self._occupied_tones]
 
         for i in range(len(ksfreq)):
@@ -186,7 +186,7 @@ class ofdm_mod(gr.hier_block2):
            self.connect(gr.file_source(gr.sizeof_gr_complex*options.fft_length, "fwd_tx_data.dat"), self.cp_adder, self.scale, self)
 
 
-	self.connect(self.scale, gr.file_sink(gr.sizeof_gr_complex, "ofdm_fwd.dat"))
+	#self.connect(self.scale, gr.file_sink(gr.sizeof_gr_complex, "ofdm_fwd.dat"))
 
         if options.verbose:
             self._print_verbage()
@@ -200,9 +200,9 @@ class ofdm_mod(gr.hier_block2):
                                                      "ofdm_cp_adder_c.dat"))
 
 	#self.connect(self.cp_adder, gr.file_sink(gr.sizeof_gr_complex, "ofdm_cp_adder_c.dat"))
-	self.connect(self._pkt_input, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
-	self.connect((self._pkt_input, 2), gr.null_sink(gr.sizeof_char))
-        self.connect((self._pkt_input, 3), gr.file_sink(gr.sizeof_char*options.fft_length, "timing_src.dat"))
+	#self.connect(self._pkt_input, gr.file_sink(gr.sizeof_gr_complex*options.fft_length, "symbols_src.dat"))
+	#self.connect((self._pkt_input, 2), gr.null_sink(gr.sizeof_char))
+        #self.connect((self._pkt_input, 3), gr.file_sink(gr.sizeof_char*options.fft_length, "timing_src.dat"))
 
     def send_pkt(self, payload, type=0, eof=False):
         """
@@ -350,7 +350,7 @@ class ofdm_demod(gr.hier_block2):
 	ksfreq = known_symbols_4512_3[start_index:start_index + self._occupied_tones]
 
 	# allow another full preamble (no intermediate 0s for accurate channel estimate/snr measurement)
-	preamble2_offset = 10*self._occupied_tones;
+	preamble2_offset = (options.hop+9)*self._occupied_tones;
 	ksfreq2 = known_symbols_4512_3[preamble2_offset:preamble2_offset+self._occupied_tones]
 
         for i in range(len(ksfreq)):

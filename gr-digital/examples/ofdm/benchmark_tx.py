@@ -103,9 +103,9 @@ def main():
     while n < nbytes:
         if options.from_file is None:
             if(pktno % 2 == 0):
-                data = (pkt_size - 2) * chr(3 & 0xff)
+                data = (pkt_size) * chr(3 & 0xff)
             else:
-                data = (pkt_size - 2) * chr(4 & 0xff)
+                data = (pkt_size) * chr(4 & 0xff)
             #data = (pkt_size - 2) * chr(pktno & 0xff) 
             #data = (pkt_size - 2) * chr(0x34)
         else:
@@ -113,14 +113,15 @@ def main():
             if data == '':
                 break;
 
-        payload = struct.pack('!H', pktno & 0xffff) + data
+        #payload = struct.pack('!H', pktno & 0xffff) + data
+	payload = data
         send_pkt(payload)
         n += len(payload)
         sys.stderr.write('.')
         #if options.discontinuous and pktno % 5 == 4:
         #    time.sleep(1)
         pktno += 1
-	time.sleep(0.4)
+	time.sleep(0.5)
 	#time.sleep(0.1)
 
     send_pkt(eof=True)

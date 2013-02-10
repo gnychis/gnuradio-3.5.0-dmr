@@ -310,7 +310,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 
 	/* header has already been modulated, just send the payload *symbols* as it is */
  	copyOFDMSymbol(out, d_msg[0]->length());		
-	logGeneratedTxSymbols(out);
+	//logGeneratedTxSymbols(out);
 
 	//logNativeTxSymbols(out);
 	//printf("data--------- offset: %d\n", d_msg_offset[0]); fflush(stdout);
@@ -1713,7 +1713,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   int decimation = 128;
   double rate = 1.0/decimation;
  
-  int num_ofdm_symbols_to_wait = 4000; //400; //3000;
+  int num_ofdm_symbols_to_wait = 4500; //400; //3000;
 
   int cp_length = d_fft_length/4;
   int symbol_length = d_fft_length + cp_length;
@@ -2279,6 +2279,78 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
 /* more exhaustive now, since it accounts for co-ordinating transmitters, multiple rx (if any) */
 inline void
 digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo *others_coeffs) {
+  printf("smart_selection_global start\n"); fflush(stdout);
+
+  NodeIds rx_ids;
+  get_nextHop_rx(rx_ids);
+  vector<gr_complex> h_vec;
+  for(int i = 0; i < rx_ids.size(); i++) {
+     gr_complex h = predictH(d_id, rx_ids[i]);
+     h_vec.push_back(h);
+  }
+
+  /* first, formulate the constant part, which does not change with different receivers */
+  gr_complex new_coeffs[MAX_BATCH_SIZE];
+  int num_carriers = d_data_carriers.size();
+
+  // to cap the max iterations //
+  int max_iter = 1000, iter = 0;
+  gr_complex best_coeff[MAX_BATCH_SIZE];
+  float max_min_dt = 0.0;
+
+  /* as for the last one, take the global knowledge into account */
+  while(1) {
+
+     for(int k = 0; k < d_batch_size; k++) {
+        float amp = 1.0;
+        float phase = (rand() % 360 + 1) * M_PI/180;
+        my_coeffs[k] = (amp * ToPhase_c(phase));
+     }
+
+     // now the receiver based stuff //
+     bool good = 1;
+     for(int i = 0; i < rx_ids.size(); i++) {
+        gr_complex *o_coeffs = others_coeffs[i].coeffs;     // other senders coeffs for this rx
+	assert(others_coeffs[i].rx_id == rx_ids[i]);	    // sanity
+
+        // combine with the other sender //    
+        for(unsigned int k = 0; k < d_batch_size; k++) {
+           new_coeffs[k] = (my_coeffs[k] * h_vec[i]) + o_coeffs[k];
+        }
+
+        float dt = 1000.0;
+        if(!is_CV_good(new_coeffs[0], new_coeffs[1], dt)) {
+            good = 0;
+            if(dt > max_min_dt) {
+               max_min_dt = dt;
+
+	       for(int k = 0; k < d_batch_size; k++) {
+                  best_coeff[k] = my_coeffs[k];
+	       }
+            }
+            break;
+        }
+     }
+
+     iter++;
+     if(good == 1 || (iter == max_iter)) {
+        printf("good: %d, iter: %d, min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
+
+	if(iter == max_iter) {
+	   for(int k = 0; k < d_batch_size; k++) {
+               my_coeffs[k] = best_coeff[k];
+	   }
+	}
+        break;
+     }
+  } //end while
+  printf("smart_selection_global end -- \n"); fflush(stdout);
+}
+
+#if 0
+/* more exhaustive now, since it accounts for co-ordinating transmitters, multiple rx (if any) */
+inline void
+digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo *others_coeffs) {
   unsigned int n_inno_pkts = d_batch_size;
   printf("smart_selection_global start\n"); fflush(stdout);
 
@@ -2353,6 +2425,7 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
   } //end while
   printf("smart_selection_global end -- \n"); fflush(stdout);
 }
+#endif
 
 inline void
 digital_ofdm_mapper_bcv::chooseCV_H(gr_complex *coeffs) {
