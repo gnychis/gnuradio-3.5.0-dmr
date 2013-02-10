@@ -2013,6 +2013,14 @@ digital_ofdm_frame_sink::getTimingOffset() {
      HInfo *hInfo = getHInfo(d_id, rx_ids[0]);
      return hInfo->timing_slope;
   }
+  else {
+     float to = 0.0;
+     for(int i = 0; i < rx_ids.size(); i++) {
+         HInfo *hInfo = getHInfo(d_id, rx_ids[i]);
+         to += hInfo->timing_slope;
+     }
+     return to/((float) rx_ids.size());
+   }
   return 0.0;
 }
 
