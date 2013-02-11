@@ -5167,68 +5167,13 @@ digital_ofdm_frame_sink::waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_
 }
 #endif
 
-inline void
-digital_ofdm_frame_sink::chooseCV(FlowInfo *flowInfo, gr_complex *coeffs)
-{
-  assert(d_batch_size == 2);
-  InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
-  unsigned int n_inno_pkts = inno_pkts.size();
-
-  gr_complex new_coeffs[MAX_BATCH_SIZE];
-  int num_carriers = d_data_carriers.size();
-
-  /* randomly choose every coefficient except for the last one and keep reducing to latest value */
-  for(unsigned int i = 0; i < n_inno_pkts-1; i++) {
-     PktInfo *pInfo = inno_pkts[i];
-     float amp = getAvgAmplificationFactor(pInfo->hestimates);
-     float phase = (rand() % 360 + 1) * M_PI/180;
-
-     coeffs[i] = (amp * ToPhase_c(phase));
-     gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[i];               // reduced coeffs for this inno pkt //
-     for(unsigned int k = 0; k < d_batch_size; k++) {
-	new_coeffs[k] += (coeffs[i] * pkt_coeffs[k*num_carriers]);
-     }
-  }
-
-  int last = n_inno_pkts-1;
-  gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[last];
-  PktInfo *pInfo = inno_pkts[last];
-  float amp = getAvgAmplificationFactor(pInfo->hestimates);
-
-  // to cap the max iterations //
-  int max_iter = 1000, iter = 0;
-  gr_complex best_coeff;
-  float max_min_dt = 0.0;
-
-  while(1) {
-     float phase = (rand() % 360 + 1) * M_PI/180;
-     coeffs[last] = (amp * ToPhase_c(phase));
-
-     for(unsigned int k = 0; k < d_batch_size; k++) 
-         new_coeffs[k] += (coeffs[last] * pkt_coeffs[k*num_carriers]);
-
-     float dt = 1000.0;
-     if(is_CV_good(new_coeffs[0], new_coeffs[1], dt)) {
-	iter++;
-	if(dt > max_min_dt) {
-	   max_min_dt = dt;
-	   best_coeff = coeffs[last];
-	}
-
-	if(iter == max_iter) {
-	   coeffs[last] = best_coeff;
-	   break; 	
-	}
-     }
-  }
-}
-
-bool
-digital_ofdm_frame_sink::is_CV_good(gr_complex cv1, gr_complex cv2, float &min_dt) {
+float
+digital_ofdm_frame_sink::calc_CV_dt(gr_complex cv1, gr_complex cv2) {
    int M = d_data_sym_position.size();
    float threshold = 0.8;
 
    float energy = 0.0;
+   float min_dt = 1000.0;
 
    int n_entries = pow(double(d_data_sym_position.size()), double(d_batch_size));
    int index = 0;
@@ -5259,12 +5204,7 @@ digital_ofdm_frame_sink::is_CV_good(gr_complex cv1, gr_complex cv2, float &min_d
       }
    }
 
-   if(min_dt < threshold) {
-      //printf("false -- min_dt: %f\n", min_dt); fflush(stdout);
-      return false;
-   }
-
- 
+#if 0
    if(d_fp_comb_log == NULL) {
       char *filename = "ideal_constellation.dat";
       int fd;
@@ -5275,10 +5215,10 @@ digital_ofdm_frame_sink::is_CV_good(gr_complex cv1, gr_complex cv2, float &min_d
    int count = ftell(d_fp_comb_log);
    count = fwrite_unlocked(comb_mod, sizeof(gr_complex), n_entries, d_fp_comb_log);
    assert(count == n_entries);
+#endif
 
    free(comb_mod);
-   printf("is_CV_good returns min_dt: %.3f\n", min_dt);
-   return true;
+   return min_dt;
 }
 
 /* the lead sender selects the coeffs and sends them over the socket to the 
@@ -5393,6 +5333,8 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
   gr_complex best_coeff[MAX_BATCH_SIZE];
   CoeffInfo best_cInfo;
   float max_min_dt = 0.0;
+  float threshold = 0.8;
+
   while(1) {
 
      gr_complex reduced_coeffs[MAX_BATCH_SIZE];
@@ -5410,33 +5352,31 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
 
      /* ensure its a good selection over all the next-hop rx 
 	include the channel effect for this rx */
-     bool good = 1;
+     float dt = 0.0;
      for(int i = 0; i < rx_ids.size(); i++) {
         cInfo->rx_id = rx_ids[i];
         for(int k = 0; k < d_batch_size; k++) {
            cInfo->coeffs[k] = reduced_coeffs[k] * h_vec[i];
         }       
 
-        float dt = 1000.0;
-        if(!is_CV_good(cInfo->coeffs[0], cInfo->coeffs[1], dt)) {
-            //printf("cv1 (%f, %f), cv2 (%f, %f), dt: %f\n", cInfo->coeffs[0].real(), cInfo->coeffs[0].imag(),
-            //                                    cInfo->coeffs[1].real(), cInfo->coeffs[1].imag(), dt); fflush(stdout);
-            good = 0;
-            if(dt > max_min_dt) {
-                max_min_dt = dt;
-		for(int k = 0; k < d_batch_size; k++) {
-                   best_coeff[k] = coeffs[k];
-		   best_cInfo.coeffs[k] = cInfo->coeffs[k];
-	 	}
-            }
-            break;
-        } 
-        else {
-            printf("good! - dt: %f\n", dt); fflush(stdout);
-            max_min_dt = dt;
+        dt += calc_CV_dt(cInfo->coeffs[0], cInfo->coeffs[1]);
+     }
+     dt /= ((float) rx_ids.size());
+ 
+     bool good = (dt >= threshold)?true:false;
+
+     // record if this is the best yet //
+     if(!good) {
+        if(dt > max_min_dt) {
+           max_min_dt = dt;
+           for(int k = 0; k < d_batch_size; k++) {
+               best_coeff[k] = coeffs[k];
+	       best_cInfo.coeffs[k] = cInfo->coeffs[k];
+	   }
         }
      }
-
+     else max_min_dt = dt;
+ 
      iter++;
      if(good || iter == max_iter) {
        printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
@@ -5595,6 +5535,7 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
   int max_iter = 1000, iter = 0;
   gr_complex best_coeff[MAX_BATCH_SIZE];
   float max_min_dt = 0.0;
+  bool threshold = 0.8;
 
   while(1) {
      gr_complex new_coeffs[MAX_BATCH_SIZE];
@@ -5609,7 +5550,7 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
      }
 
      // now the receiver based stuff //
-     bool good = 1;
+     float dt = 0.0;;
      for(int i = 0; i < rx_ids.size(); i++) {
 
         gr_complex *o_coeffs = others_coeffs[i].coeffs;     // other senders coeffs for this rx
@@ -5622,30 +5563,28 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
         for(unsigned int k = 0; k < d_batch_size; k++) {
            new_coeffs[k] = (new_coeffs[k] * h_vec[i]) + o_coeffs[k];
         }
+        dt += calc_CV_dt(new_coeffs[0], new_coeffs[1]);
+     }
+     dt /= ((float) rx_ids.size());
 
-        float dt = 1000.0;
-        if(!is_CV_good(new_coeffs[0], new_coeffs[1], dt)) {
-            good = 0;
-            if(dt > max_min_dt) {
-                max_min_dt = dt;
-                for(int k = 0; k < d_batch_size; k++)
-                    best_coeff[k] = my_coeffs[k];
-            }
-            break;
+     bool good = (dt >= threshold)?true:false;
+     if(!good) {
+        if(dt > max_min_dt) {
+           max_min_dt = dt;
+           for(int k = 0; k < d_batch_size; k++)
+               best_coeff[k] = my_coeffs[k];
         }
      }
+     else max_min_dt = dt;
 
      iter++;
-     if(good == 1 || iter == max_iter) {
+     if(good || iter == max_iter) {
         printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
-
-        if(iter == max_iter) {
-           for(int k = 0; k < d_batch_size; k++)
-               my_coeffs[k] = best_coeff[k];
-        }
+        for(int k = 0; k < d_batch_size; k++)
+           my_coeffs[k] = best_coeff[k];
         break;
      }
-  } //end while
+  } // end while
 }
 
 inline void

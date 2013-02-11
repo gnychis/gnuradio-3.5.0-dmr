@@ -2146,7 +2146,7 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
   int max_iter = 1000, iter = 0;
   gr_complex best_coeff[MAX_BATCH_SIZE];
   float max_min_dt = 0.0;
-  float threshold = 0.7;
+  float threshold = 0.8;
 
   gr_complex *reduced_coeffs;
   while(1) {
@@ -2173,7 +2173,7 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
      }
      dt /= ((float) rx_ids.size());
 
-     bool good = (dt >= threshold)?1:0;
+     bool good = (dt >= threshold)?true:false;
 
      // record if this is the best yet //
      if(!good) {
@@ -2183,6 +2183,7 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
 	       best_coeff[k] = coeffs[k];
 	}
      }
+     else max_min_dt = dt;
 
      iter++;
      if(good || iter == max_iter) {
@@ -2302,7 +2303,7 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
   int max_iter = 1000, iter = 0;
   gr_complex best_coeff[MAX_BATCH_SIZE];
   float max_min_dt = 0.0;
-  float threshold = 0.7;
+  float threshold = 0.8;
 
   /* as for the last one, take the global knowledge into account */
   while(1) {
@@ -2337,6 +2338,7 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
                best_coeff[k] = my_coeffs[k];
         }
      }
+     else max_min_dt = dt;
      iter++;
 
      if(good || (iter == max_iter)) {
