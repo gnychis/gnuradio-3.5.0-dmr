@@ -920,6 +920,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
  void chooseCV(FlowInfo *flowInfo, gr_complex *coeffs);
  bool is_CV_good(gr_complex cv1, gr_complex cv2, float&);
+ float calc_CV_dt(gr_complex cv1, gr_complex cv2);
 
  /* util functions */
  void open_server_sock(int sock_port, vector<unsigned int>& connected_clients, int num_clients);

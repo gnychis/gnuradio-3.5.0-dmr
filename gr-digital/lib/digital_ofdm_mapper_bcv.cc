@@ -1366,7 +1366,7 @@ inline void
 digital_ofdm_mapper_bcv::removeTimingOffset(gr_complex *out, float t_o) {
   unsigned int index = (d_fft_length - d_occupied_carriers)/2;			// start filling from here
 
-  printf("removeTimingOffset, pkt_num: %d, offset: %f\n", d_pkt_num-1, t_o);
+  //printf("removeTimingOffset, pkt_num: %d, offset: %f\n", d_pkt_num-1, t_o);
   if(t_o != 0) {
      for(unsigned int i = 0; i < d_occupied_carriers; i++) {
         out[index++] *= gr_expj(t_o*i);
@@ -1925,11 +1925,14 @@ digital_ofdm_mapper_bcv::generateCodeVector()
 }
 #endif
 
-bool
-digital_ofdm_mapper_bcv::is_CV_good(gr_complex cv1, gr_complex cv2, float &min_dt) {
+/* returns the minimum distance between any 2 constellation points, given 
+   cv1 and cv2 as forming the new constellation with points of the form; 
+   p = cv1*x1 + cv2*x2
+*/
+float
+digital_ofdm_mapper_bcv::calc_CV_dt(gr_complex cv1, gr_complex cv2) {
    int M = d_data_constellation.size();
-   float threshold = 0.8;
-
+   float min_dt = 1000.0;
    float avg_amp = 0.0;
    float highest_amp = 0.0;
 
@@ -1962,17 +1965,9 @@ digital_ofdm_mapper_bcv::is_CV_good(gr_complex cv1, gr_complex cv2, float &min_d
 	 avg_dt += dt; count++;
       }
    }
-
-   if(min_dt < threshold) {
-      //printf("false -- min_dt: %f\n", min_dt); fflush(stdout);
-      return false;
-   }
-   avg_dt = avg_dt/((float)count);
-
+	
    free(comb_mod);
-   printf("avg_amp: %f, highest_amp: %f\n", avg_amp, highest_amp); fflush(stdout);
-   printf("M: %d, min_dt: %.3f, avg_dt: %f, cv1: (%.2f, %.2f), cv2: (%.2f, %.2f)\n", M, min_dt, avg_dt, cv1.real(), cv1.imag(), cv2.real(), cv2.imag());
-   return true;
+   return min_dt;
 }
 
 /* util function */
@@ -2151,6 +2146,7 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
   int max_iter = 1000, iter = 0;
   gr_complex best_coeff[MAX_BATCH_SIZE];
   float max_min_dt = 0.0;
+  float threshold = 0.7;
 
   gr_complex *reduced_coeffs;
   while(1) {
@@ -2162,7 +2158,7 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
      }
 
      // ensure its a good selection over all the next-hop rx //
-     bool good = 1;
+     float dt = 0.0;     
      for(int i = 0; i < rx_ids.size(); i++) {
         CoeffInfo *cInfo = &(coeffInfo[i]);
         cInfo->rx_id = rx_ids[i];
@@ -2173,18 +2169,19 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
            reduced_coeffs[k] = coeffs[k] * h_vec[i];
         }
 
-        float dt = 1000.0;
-        if(!is_CV_good(reduced_coeffs[0], reduced_coeffs[1], dt)) {
-            printf("cv1 (%f, %f), cv2 (%f, %f), dt: %f\n", cInfo->coeffs[0].real(), cInfo->coeffs[0].imag(),
-                                                cInfo->coeffs[1].real(), cInfo->coeffs[1].imag(), dt); fflush(stdout);
-            good = 0;
-            if(dt > max_min_dt) {
-                max_min_dt = dt;
-                for(int k = 0; k < d_batch_size; k++)
-                    best_coeff[k] = coeffs[k];
-            }
-            break;
-        }
+        dt += calc_CV_dt(reduced_coeffs[0], reduced_coeffs[1]);
+     }
+     dt /= ((float) rx_ids.size());
+
+     bool good = (dt >= threshold)?1:0;
+
+     // record if this is the best yet //
+     if(!good) {
+	if(dt > max_min_dt) { 
+	   max_min_dt = dt;
+	   for(int k = 0; k < d_batch_size; k++)
+	       best_coeff[k] = coeffs[k];
+	}
      }
 
      iter++;
@@ -2194,7 +2191,7 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
            coeffs[k] = best_coeff[k];
         break;
      }
-  }
+  } // while
 
   if(d_batch_size == 2) {
      printf("smart selection local -- coeffs1 (%.2f, %.2f) coeffs2 (%.2f, %.2f) red1 (%.2f, %.2f) red2 (%.2f, %.2f)\n",
@@ -2305,6 +2302,7 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
   int max_iter = 1000, iter = 0;
   gr_complex best_coeff[MAX_BATCH_SIZE];
   float max_min_dt = 0.0;
+  float threshold = 0.7;
 
   /* as for the last one, take the global knowledge into account */
   while(1) {
@@ -2316,7 +2314,7 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
      }
 
      // now the receiver based stuff //
-     bool good = 1;
+     float dt = 0.0;
      for(int i = 0; i < rx_ids.size(); i++) {
         gr_complex *o_coeffs = others_coeffs[i].coeffs;     // other senders coeffs for this rx
 	assert(others_coeffs[i].rx_id == rx_ids[i]);	    // sanity
@@ -2326,22 +2324,22 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
            new_coeffs[k] = (my_coeffs[k] * h_vec[i]) + o_coeffs[k];
         }
 
-        float dt = 1000.0;
-        if(!is_CV_good(new_coeffs[0], new_coeffs[1], dt)) {
-            good = 0;
-            if(dt > max_min_dt) {
-               max_min_dt = dt;
+	dt += calc_CV_dt(new_coeffs[0], new_coeffs[1]);
+     }
+     dt /= ((float) rx_ids.size());
 
-	       for(int k = 0; k < d_batch_size; k++) {
-                  best_coeff[k] = my_coeffs[k];
-	       }
-            }
-            break;
+     // record if this is the best yet //
+     bool good = (dt >= threshold)?true:false;
+     if(!good) {
+        if(dt > max_min_dt) {
+           max_min_dt = dt;
+           for(int k = 0; k < d_batch_size; k++)
+               best_coeff[k] = my_coeffs[k];
         }
      }
-
      iter++;
-     if(good == 1 || (iter == max_iter)) {
+
+     if(good || (iter == max_iter)) {
         printf("good: %d, iter: %d, min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
 
 	if(iter == max_iter) {

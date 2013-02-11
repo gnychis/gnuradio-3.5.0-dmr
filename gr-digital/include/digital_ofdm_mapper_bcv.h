@@ -561,8 +561,6 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void send_mimo_trigger(uhd::time_spec_t);
   uhd::time_spec_t rcv_mimo_trigger();
 
-  bool is_CV_good(gr_complex cv1, gr_complex cv2, float&);
-
   // util functions //
   int open_client_sock(int port, const char *addr, bool blocking);
   void open_server_sock(int, vector<unsigned int>&, int);
@@ -585,6 +583,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 
   void chooseCV_H(gr_complex *coeffs);
   bool is_CV_good_H(gr_complex cv1, gr_complex cv2);
+  float calc_CV_dt(gr_complex, gr_complex);
 
   HInfoMap d_HInfoMap;
   EthInfoMap d_ethInfoMap;

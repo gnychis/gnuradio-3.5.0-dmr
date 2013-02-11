@@ -2323,7 +2323,7 @@ digital_ofdm_frame_sink::makePacket(bool sync_send)
         assert(flowInfo);
 
 	if(sync_send && 0) {
-	   test_sync_send(creditInfo);
+	   //test_sync_send(creditInfo);
 	}
 	else {
 	   encodePktToFwd(creditInfo, sync_send);
@@ -3021,7 +3021,6 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   
   // set the tx timestamp, if its a sync send //
   if(sync_send) {
-     printf("RX timestamp: secs: %llu, frac_of_secs: %f\n", sync_secs, sync_frac_of_secs); fflush(stdout);
      out_msg->set_timestamp(sync_secs, sync_frac_of_secs);
      printf("FWD PACKET---- TX timestamp: secs: %llu, frac_of_secs: %f\n", sync_secs, sync_frac_of_secs); 
      fflush(stdout);
@@ -4101,6 +4100,7 @@ digital_ofdm_frame_sink::test_timestamp(int output_items) {
   //assert(false);
 }
 
+#if 0
 /* to test the triggered sending behavior. Creates a packet with a dumb header, uses the samples recorded earlier to 
    to generate the packet and transmit */
 void
@@ -4209,6 +4209,7 @@ digital_ofdm_frame_sink::test_sync_send(CreditInfo *creditInfo) {
 
   //free(out_symbols);
 }
+#endif
 
 inline void
 digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sync_frac_of_secs) {
@@ -4221,7 +4222,7 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
   int decimation = 128;
   double rate = 1.0/decimation;
 
-  int null_ofdm_symbols = 4000;
+  int null_ofdm_symbols = 3000;
 
   int cp_length = d_fft_length/4;
 
