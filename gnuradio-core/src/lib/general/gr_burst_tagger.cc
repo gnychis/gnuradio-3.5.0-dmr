@@ -46,6 +46,7 @@ gr_burst_tagger::gr_burst_tagger(size_t itemsize)
 
   d_key = pmt::pmt_string_to_symbol("burst");
   d_id  = pmt::pmt_string_to_symbol(str.str());
+  d_tag_index = 0;
 }
 
 gr_burst_tagger::~gr_burst_tagger()
@@ -104,16 +105,43 @@ gr_burst_tagger::modify_timestamp(int output_items, int index) {
 
   set_tag_propagation_policy(TPP_DONT);                 // stop this tag propagating downstream //
 
-  if(rx_tags.size()>0) {
-     size_t t = rx_tags.size()-1;
-     uint64_t offset = rx_tags[t].offset;
+  int num_tags = rx_tags.size();
+  assert(num_tags >= 1);
 
-     //printf("test_timestamp1 (BURST):: found %d tags, offset: %llu, output_items: %d, nread1: %llu, nwritten1: %llu, index: %d\n", rx_tags.size(), rx_tags[t].offset, output_items, nread1, nitems_written(0), index); fflush(stdout);
+  uint64_t offset = rx_tags[d_tag_index].offset;
+
+  const pmt::pmt_t &value = rx_tags[d_tag_index].value;
+  uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+  double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+
+  printf("test_timestamp1 (BURST):: found %d tags, offset: %llu, output_items: %d, nread1: %llu, nwritten1: %llu, index: %d, (%llu, %f)\n",
+		  rx_tags.size(), rx_tags[d_tag_index].offset, output_items, nread1, nitems_written(0), index, sync_secs, sync_frac_of_secs); fflush(stdout);
+
+  // instead, add the time tag now //
+  const pmt::pmt_t _key = pmt::pmt_string_to_symbol("tx_time");
+  const pmt::pmt_t _value = pmt::pmt_make_tuple(
+                  pmt::pmt_from_uint64(sync_secs),
+                  pmt::pmt_from_double(sync_frac_of_secs)
+                  );
+
+  const pmt::pmt_t srcid = pmt::pmt_string_to_symbol(this->name());
+  add_item_tag(0/*chan0*/, nitems_written(0)+index, _key, _value, srcid);
+
+  d_tag_index++;
+  if(num_tags == d_tag_index) 
+    d_tag_index = 0;
+
+#if 0
+  if(rx_tags.size()>0) {
+     size_t t = 0; //rx_tags.size()-1;
+     uint64_t offset = rx_tags[t].offset;
 
      const pmt::pmt_t &value = rx_tags[t].value;
      uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
      double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
 
+     printf("test_timestamp1 (BURST):: found %d tags, offset: %llu, output_items: %d, nread1: %llu, nwritten1: %llu, index: %d, (%llu, %f)\n",
+                rx_tags.size(), rx_tags[t].offset, output_items, nread1, nitems_written(0), index, sync_secs, sync_frac_of_secs); fflush(stdout);
 
      // instead, add the time tag now //
      const pmt::pmt_t _key = pmt::pmt_string_to_symbol("tx_time");
@@ -129,4 +157,5 @@ gr_burst_tagger::modify_timestamp(int output_items, int index) {
      assert(false);
      //std::cerr << "ACQ---- Header received, with no sync timestamp1?\n";
   }
+#endif
 }

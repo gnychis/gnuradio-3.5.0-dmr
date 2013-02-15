@@ -114,6 +114,11 @@ GR_UHD_API boost::shared_ptr<uhd_usrp_sink> uhd_make_usrp_sink(
     const uhd::stream_args_t &stream_args
 );
 
+GR_UHD_API boost::shared_ptr<uhd_usrp_sink> get_usrp_sink_instance();
+
+static boost::shared_ptr<uhd_usrp_sink> _sink_instance;
+static bool _sink_created = false;
+
 class GR_UHD_API uhd_usrp_sink : virtual public gr_sync_block{
 public:
 
@@ -448,6 +453,8 @@ public:
      * \return the multi usrp device object
      */
     virtual uhd::usrp::multi_usrp::sptr get_device(void) = 0;
+
+    uhd::time_spec_t d_out_time;
 };
 
 #endif /* INCLUDED_GR_UHD_USRP_SINK_H */

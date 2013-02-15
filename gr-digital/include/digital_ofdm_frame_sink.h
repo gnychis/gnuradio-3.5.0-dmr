@@ -111,18 +111,10 @@ typedef struct innovative_pkt_str {
   unsigned int n_senders;
   vector<unsigned char> senders;
   vector<gr_complex*> coeffs;
-  vector<gr_complex*> hestimates;		
-  vector<float> phase_eq_vec;                   // PLL
-  vector<float> freq_eq_vec;                    // PLL
+  vector<gr_complex*> hestimates;
+  vector<float> norm_factor;
   gr_complex* symbols;
   unsigned int prevLinkId;
-
-  // *updated* after each header belonging to this inno pkt is decoded, one entry in the vector per header //
-  vector<float*> error_rot_slope;
-  vector<float*> error_rot_ref;
-  vector<float*> error_amp_avg;
-
-  vector<float> pll_slope_vec;
 } PktInfo;
 
 typedef vector<PktInfo*> InnovativePktInfoVector;
@@ -158,6 +150,7 @@ typedef vector<CompositeLink*> CompositeLinkVector;
 typedef struct credit_str {
   unsigned char flowId;
   float credit;
+  float delta;
   CompositeLink previousLink;
   CompositeLink nextLink;
 } CreditInfo;
@@ -623,6 +616,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void encodeSignal(gr_complex *symbols, gr_complex coeff);
   void combineSignal(gr_complex *out, gr_complex* symbols, int);
   float normalizeSignal(gr_complex* out, int k, int num_in_senders);
+  void denormalizeSignal(gr_complex *in);
   void generateCodeVector(MULTIHOP_HDR_TYPE &header);
   void print_coeffs(gr_complex *coeffs);
 

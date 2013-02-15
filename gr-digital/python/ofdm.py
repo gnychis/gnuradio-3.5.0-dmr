@@ -320,7 +320,7 @@ class ofdm_demod(gr.hier_block2):
         self._rcvd_pktq = gr.msg_queue()          # holds packets from the PHY
 
 	# apurv++ queues # 
-	self._out_pktq = gr.msg_queue()
+	self._out_pktq = gr.msg_queue(1)
 	
         self._modulation = options.modulation
         self._fft_length = options.fft_length

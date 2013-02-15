@@ -497,8 +497,9 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 
   uint64_t d_time_pkt_sent;
 
-  void logGeneratedTxSymbols(gr_complex *out);
+  void logGeneratedTxSymbols(gr_complex *out, FILE*);
   FILE *d_fp_log; bool d_log_open;
+  FILE *d_fp_log_BN; FILE *d_fp_log_AN;
 
   void logNativeTxSymbols();
 

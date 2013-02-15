@@ -170,6 +170,15 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 
   if(d_h_coding && d_source == 1)
      prepare_H_coding();
+
+  //opening files //
+  int fd;
+  assert((fd = open ("tx_symbols_before_norm.dat", O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) >= 0);
+  assert((d_fp_log_BN = fdopen (fd, true ? "wb" : "w")) != NULL);  
+
+  fd = 0;
+  assert((fd = open ("tx_symbols_after_norm.dat", O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) >= 0);
+  assert((d_fp_log_AN = fdopen (fd, true ? "wb" : "w")) != NULL);
 }
 
 digital_ofdm_mapper_bcv::~digital_ofdm_mapper_bcv(void)
@@ -316,28 +325,15 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
 	//printf("data--------- offset: %d\n", d_msg_offset[0]); fflush(stdout);
 	d_data_ofdm_index+=1;
 
-	/* if multiple forwarders (fwd_index>0) , then pilot subcarriers need to be shared */
-	switch(d_fwd_index) {
-#ifndef SRC_PILOT
-	    case 0: tx_pilot = true; break;						// single fwder //
-	    case 1: tx_pilot = (d_data_ofdm_index % 2 == 1)?true:false; break;		// lead: odd symbols //
-	    case 2: tx_pilot = (d_data_ofdm_index % 2 == 0)?true:false; break;		// slave: even symbols //
-#endif
-	    default: break;
-	}
-
-#ifdef SRC_PILOT
 	// fwd=1 disables sending of pilot //
  	if(d_fwd_index == 1) {
 	    for(int i = 0; i < d_pilot_carriers.size(); i++) {
         	out[d_pilot_carriers[i]] = gr_complex(0.0, 0.0);
      	    }
 	}
-#endif
      }  
   }
 
-#ifdef USE_PILOT
   if(tx_pilot) {
       double cur_pilot = 1.0;
       for(int i = 0; i < d_pilot_carriers.size(); i++) {
@@ -345,14 +341,6 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
          cur_pilot = -cur_pilot;
       }
   }
-#ifndef SRC_PILOT
-  if(!tx_pilot) {
-     for(int i = 0; i < d_pilot_carriers.size(); i++) {
-	out[d_pilot_carriers[i]] = gr_complex(0.0, 0.0);
-     }
-  }
-#endif
-#endif
   
   if(d_send_null) {
       d_msg[0].reset();
@@ -721,8 +709,9 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
       }
       /* encoding process ends */
 
+      logGeneratedTxSymbols(out, d_fp_log_BN);
       normalizeSignal(out, d_batch_size);						// normalize the outgoing signal //
-      logGeneratedTxSymbols(out); 
+      logGeneratedTxSymbols(out, d_fp_log_AN); 
 
  	// offline, timekeeping, etc //
       assert(d_ofdm_symbol_index < d_num_ofdm_symbols);
@@ -924,25 +913,26 @@ digital_ofdm_mapper_bcv::fill_all_carriers_map() {
 }
 
 void 
-digital_ofdm_mapper_bcv::logGeneratedTxSymbols(gr_complex *out) 
+digital_ofdm_mapper_bcv::logGeneratedTxSymbols(gr_complex *out, FILE *fp1) 
 {
   printf("digital_ofdm_mapper_bcv::logGeneratedTxSymbols\n"); fflush(stdout);
-  if(!d_log_open) {
-      char *filename = "tx_symbols.dat";
+#if 0
+  if(fp1 == NULL) {
+      printf("opening file\n"); fflush(stdout);
       int fd;
       if ((fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC|OUR_O_LARGEFILE|OUR_O_BINARY|O_APPEND, 0664)) < 0) {
          perror(filename);
             assert(false);
       }
       else {
-         if((d_fp_log = fdopen (fd, true ? "wb" : "w")) == NULL) {
+         if((fp1 = fdopen (fd, true ? "wb" : "w")) == NULL) {
               fprintf(stderr, "log file cannot be opened\n");
               close(fd);
               assert(false);
          }
       }
-      d_log_open = true;
   }
+#endif
 
   gr_complex *log_symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_data_carriers.size());
   memset(log_symbols, 0, sizeof(gr_complex) * d_data_carriers.size());
@@ -956,8 +946,8 @@ digital_ofdm_mapper_bcv::logGeneratedTxSymbols(gr_complex *out)
   }
   assert(index == d_data_carriers.size());
 
-  int count = fwrite_unlocked(log_symbols, sizeof(gr_complex), d_data_carriers.size(), d_fp_log);
-  printf("count: %d written to tx_symbols.dat, total: %d \n", count, ftell(d_fp_log)); fflush(stdout);
+  int count = fwrite_unlocked(log_symbols, sizeof(gr_complex), d_data_carriers.size(), fp1);
+  printf("count: %d written to tx_symbols.dat, total: %d \n", count, ftell(fp1)); fflush(stdout);
   
   free(log_symbols);
 }
@@ -1721,13 +1711,13 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   int decimation = 128;
   double rate = 1.0/decimation;
  
-  int num_ofdm_symbols_to_wait = 4500; //400; //3000;
+  int num_ofdm_symbols_to_wait = 7000; //400; //3000;
 
   int cp_length = d_fft_length/4;
   int symbol_length = d_fft_length + cp_length;
   uint32_t num_samples = num_ofdm_symbols_to_wait * symbol_length;
   double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
-  double duration = num_samples * time_per_sample;
+  double duration = num_samples * time_per_sample;// * 3;
 
   uint64_t sync_secs = (uint64_t) duration;
   double sync_frac_of_secs = duration - (uint64_t) duration;
@@ -1933,8 +1923,7 @@ float
 digital_ofdm_mapper_bcv::calc_CV_dt(gr_complex cv1, gr_complex cv2) {
    int M = d_data_constellation.size();
    float min_dt = 1000.0;
-   float avg_amp = 0.0;
-   float highest_amp = 0.0;
+   float energy = 0.0;
 
    int n_entries = pow(double(d_data_constellation.size()), double(d_batch_size));
    int index = 0;
@@ -1944,15 +1933,17 @@ digital_ofdm_mapper_bcv::calc_CV_dt(gr_complex cv1, gr_complex cv2) {
       for(int m2 = 0; m2 < M; m2++) {
          gr_complex p2 = cv2 * d_data_constellation[m2];
          comb_mod[index++] = p1 + p2;
-
-         float amp = abs(p1+p2);
-         avg_amp += amp;
-         if(amp > highest_amp)
-           highest_amp = amp;
+         energy = norm(p1+p2);
       }
    }
    assert(index == n_entries);
-   avg_amp /= ((float) n_entries);
+   energy /= ((float) n_entries);
+
+#if 1
+   float factor = 1.0/sqrt(energy);
+   for(int i = 0; i < n_entries; i++)
+      comb_mod[i] = comb_mod[i]*factor;
+#endif
 
    float avg_dt = 0.0;
    int count = 0;
@@ -2303,7 +2294,7 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
   int max_iter = 1000, iter = 0;
   gr_complex best_coeff[MAX_BATCH_SIZE];
   float max_min_dt = 0.0;
-  float threshold = 0.8;
+  float threshold = 5.8;
 
   /* as for the last one, take the global knowledge into account */
   while(1) {

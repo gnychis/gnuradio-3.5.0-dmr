@@ -410,6 +410,7 @@ public:
 		    uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
 		    double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
 		    printf("uhd_usrp_sink(tx) :: TIME_KEY, offset: %llu, sync_secs: %llu, frac_sec: %f, curr_full_sec: %lld, curr_frac_sec: %f, m_full_sec: %lld, m_frac_sec: %f\n", my_tag_count, sync_secs, sync_frac_of_secs, (long long) c_time.get_full_secs(), c_time.get_frac_secs(), (long long) m_time.get_full_secs(), m_time.get_frac_secs()); fflush(stdout);
+		    d_out_time = m_time;			// can this be tracked in frame_sink?
 		    /* apurv++ end */
 	    }
 	}
@@ -501,7 +502,25 @@ boost::shared_ptr<uhd_usrp_sink> uhd_make_usrp_sink(
     const uhd::device_addr_t &device_addr,
     const uhd::stream_args_t &stream_args
 ){
+#if 0
     return boost::shared_ptr<uhd_usrp_sink>(
         new uhd_usrp_sink_impl(device_addr, stream_args)
     );
+#else
+    if(!_sink_created) {
+        printf("creating new USRP sink instance\n"); fflush(stdout);
+        _sink_created = true;
+        _sink_instance = boost::shared_ptr<uhd_usrp_sink>(new uhd_usrp_sink_impl(device_addr, stream_args));
+    }
+    else {
+        printf("returning created USRP sink instance!\n"); fflush(stdout);
+    }
+    return _sink_instance;
+#endif
+}
+
+
+boost::shared_ptr<uhd_usrp_sink> get_usrp_sink_instance(){
+    assert(_sink_created);
+    return _sink_instance;
 }

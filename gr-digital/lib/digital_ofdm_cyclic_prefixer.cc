@@ -107,16 +107,28 @@ digital_ofdm_cyclic_prefixer::test_timestamp(int output_items, short trigger) {
   const uint64_t nread1 = nitems_read(tag_port);
   get_tags_in_range(rx_tags, tag_port, nread1, nread1+output_items, pmt::pmt_string_to_symbol("tx_time"));
 
+  for(int t = 0; t < rx_tags.size(); t++) {
+     uint64_t offset = rx_tags[t].offset;
+     const pmt::pmt_t &value = rx_tags[t].value;
+     uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
+     double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+     printf("test_timestamp1 (CP):: found %d tags, offset: %llu, output_items: %d, nread1: %llu, (%llu, %f)\n",                
+                rx_tags.size(), rx_tags[t].offset, output_items, nread1, (uint64_t) sync_secs, sync_frac_of_secs); fflush(stdout);	
+  }
+
+#if 0
   if(rx_tags.size()>0) {
      size_t t = rx_tags.size()-1;
      uint64_t offset = rx_tags[t].offset;
 
-     printf("test_timestamp1 (CP):: found %d tags, offset: %llu, output_items: %d, nread1: %llu\n", rx_tags.size(), rx_tags[t].offset, output_items, nread1); fflush(stdout);
-
      const pmt::pmt_t &value = rx_tags[t].value;
      uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
      double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
+     printf("test_timestamp1 (CP):: found %d tags, offset: %llu, output_items: %d, nread1: %llu, (%llu, %f)\n", 
+		rx_tags.size(), rx_tags[t].offset, output_items, nread1, (uint64_t) sync_secs, sync_frac_of_secs); fflush(stdout);
+
   } else {
      //std::cerr << "ACQ---- Header received, with no sync timestamp1?\n";
   }
+#endif
 }

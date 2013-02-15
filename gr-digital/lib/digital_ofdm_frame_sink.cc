@@ -43,6 +43,7 @@
 
 #include <digital_crc32.h>
 #include <gr_uhd_usrp_source.h>
+#include <gr_uhd_usrp_sink.h>
 
 using namespace arma;
 using namespace std;
@@ -64,7 +65,7 @@ static const pmt::pmt_t SYNC_TIME = pmt::pmt_string_to_symbol("sync_time");
 int last_noutput_items;
 
 //uhd_usrp_source_sptr 
-static boost::shared_ptr<uhd_usrp_source> d_usrp_rx; //uhd_make_usrp_source(arg1, arg2);
+static boost::shared_ptr<uhd_usrp_sink> d_usrp_sink; //uhd_make_usrp_source(arg1, arg2);
 
 inline void
 digital_ofdm_frame_sink::enter_search()
@@ -168,9 +169,6 @@ digital_ofdm_frame_sink::extract_header(gr_complex h)
 
   d_nsenders = d_header.nsenders;	
   d_lead_sender = d_header.lead_sender;	
-
-  //d_nsenders = 1;				// TESTING - REMOVEEEEEEEEEEEEEEE
-  //d_lead_sender = 1;				// TESTING - REMOVEEEEEEEEEEEEEEE
 
   d_pkt_num = d_header.pkt_num;
   d_prevLinkId = d_header.link_id;
@@ -514,9 +512,10 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
   d_usrp = uhd::usrp::multi_usrp::make(arg);
   d_flow = -1;
 
-  d_usrp_rx = get_usrp_source_instance();
-  assert(d_usrp_rx);
-  printf("sample rate: %f\n", d_usrp_rx->get_samp_rate()); 
+  //d_usrp_sink = get_usrp_sink_instance();
+  //assert(d_usrp_sink);
+  //printf("sample rate: %f\n", d_usrp_sink->get_samp_rate()); 
+
   reset_demapper();
 
   fill_all_carriers_map();   
@@ -772,7 +771,8 @@ digital_ofdm_frame_sink::work (int noutput_items,
 
     if (d_hdr_byte_offset == HEADERBYTELEN) {
         if (header_ok()) {						 // full header received
-          printf("HEADER OK prev_hop: %d pkt_num: %d batch_num: %d dst_id: %d\n", d_header.prev_hop_id, d_header.pkt_num, d_header.batch_number, d_header.dst_id); fflush(stdout);
+          printf("HEADER OK prev_hop: %d pkt_num: %d batch_num: %d dst_id: %d norm_factor: %f\n", d_header.prev_hop_id, d_header.pkt_num, d_header.batch_number, d_header.dst_id, d_header.factor); 
+          fflush(stdout);
           extract_header(d_in_estimates[0]);						// fills local fields with header info
 
           assert(d_nsenders > 0);
@@ -906,9 +906,8 @@ digital_ofdm_frame_sink::work (int noutput_items,
     assert(d_curr_ofdm_symbol_index < d_num_ofdm_symbols);
     assert(d_pending_senders == 0);
 
-    /* de-normalize the signal */	
-    for(unsigned int i = 0; i < n_data_carriers; i++)
-	in[d_data_carriers[i]] *= gr_complex(d_header.factor); 
+    /* de-normalize the signal */
+    //denormalizeSignal(in);
 
     storePayload(&in[0], in_sampler);
     d_curr_ofdm_symbol_index++;
@@ -938,6 +937,8 @@ digital_ofdm_frame_sink::work (int noutput_items,
 	   } else {
 	      printf("Carrier correction failed since there are mutiple senders involved!\n"); fflush(stdout);
 	   }
+
+	    //correctSignal(flowInfo);
 
 	    printf("check credit: fwd\n"); fflush(stdout);
 	    // increment credit counter for the incoming pkt (flow based) //
@@ -1601,6 +1602,7 @@ digital_ofdm_frame_sink::resetPktInfo(PktInfo* pktInfo) {
 
   /* clear all */ 
   pktInfo->senders.clear();
+  pktInfo->norm_factor.clear();
   int size = pktInfo->coeffs.size();
   for(int i = 0; i < size; i++) {
      free(pktInfo->coeffs[i]);
@@ -1685,6 +1687,7 @@ digital_ofdm_frame_sink::save_coefficients()
   //print_coeffs(coeffs);
 
   d_pktInfo->senders.push_back(sender_id);
+  d_pktInfo->norm_factor.push_back(d_header.factor);
   d_pktInfo->coeffs.push_back(coeffs);
   d_pktInfo->hestimates.push_back(hestimates);					// push all the estimates //
 
@@ -1987,6 +1990,16 @@ digital_ofdm_frame_sink::combineSignal(gr_complex *out, gr_complex* symbols, int
 
 }
 
+/* denormalize the pilot and data separately */
+inline void
+digital_ofdm_frame_sink::denormalizeSignal(gr_complex *in) {
+
+  // data //
+  for(int i = 0; i < d_data_carriers.size(); i++)
+      in[d_data_carriers[i]] *= gr_complex(d_header.factor);
+}
+
+
 /* alternate version: based on the average magnitude seen in 1 OFDM symbol, either amp or de-amp the signal */
 inline float
 digital_ofdm_frame_sink::normalizeSignal(gr_complex* out, int k, int num_in_senders)
@@ -2167,7 +2180,7 @@ digital_ofdm_frame_sink::populateCreditInfo()
 	CreditInfo* cInfo = (CreditInfo*) malloc(sizeof(CreditInfo));
 	memset(cInfo, 0, sizeof(CreditInfo));
         cInfo->flowId = atoi(token[0]);
-        cInfo->credit = atof(token[1]);
+        cInfo->delta = atof(token[1]);
 
         int previousLinkId = atoi(token[2]);
         CompositeLink *cLink = getCompositeLink(previousLinkId);
@@ -2269,9 +2282,10 @@ digital_ofdm_frame_sink::updateCredit()
 	 if(link.linkId == d_pktInfo->prevLinkId) {
 	     updated = true;
 	     int n_senders = d_pktInfo->senders.size();
-	     creditInfo->credit += (1.0) * (n_senders/((link.srcIds).size())); 
+	     creditInfo->credit += (creditInfo->delta) * (n_senders/((link.srcIds).size())); 
 	 }
       }
+      printf("updated credit: %f\n", creditInfo->credit); fflush(stdout);
    }
    assert(updated);
 }
@@ -2281,57 +2295,49 @@ void
 digital_ofdm_frame_sink::makePacket(bool sync_send)
 {
    printf("makePacket syncSend: %d\n", sync_send); fflush(stdout);
-   /* check if any ACKs need to be sent out first */
-   int count = d_ack_queue.size();
-   if(count > 0) {// && num_acks_sent == 0) {				
-	printf("sink::makePacket - ACK to send count: %d\n", count); fflush(stdout); 
-	gr_message_sptr out_msg = d_ack_queue.front();
-	d_out_queue->insert_tail(out_msg);
-	d_ack_queue.pop_front();
-	out_msg.reset();
-	num_acks_sent++;
-	return;	
-   } 
-
   
    /* check if any data needs to be sent out */
    /* credit check*/
-   count = d_creditInfoVector.size();
+   int count = d_creditInfoVector.size();
    CreditInfo* creditInfo = NULL;
    bool found = false;
    if(count > 0) {
-	for(int i = 0; i < count; i++) {
-	   creditInfo = d_creditInfoVector[i];
-	   if(creditInfo->previousLink.linkId == d_prevLinkId) {
-		found = true; break;
-	   }
-	   /*
-	   if(creditInfo->credit >= 1.0) {
-	 	found = true;
-		break;
-	   } */
-	}
+      for(int i = 0; i < count; i++) {
+	  creditInfo = d_creditInfoVector[i];
+#if 1
+	  if(creditInfo->credit >= 1.0) {
+             found = true;
+             break;
+          }
+#else
+	  if(creditInfo->previousLink.linkId == d_prevLinkId) {
+	     found = true; 
+	     break;
+	  }
+#endif
+      }
    } 
 
    /* credit >= 1.0 found, packet needs to be created! */
-   if(found){// && num_data_fwd == 0) {
-	assert(creditInfo);
-	printf("sink::makePacket - DATA to send, flow: %d\n", creditInfo->flowId); fflush(stdout);
+   if(found) {
+      assert(creditInfo);
+      printf("sink::makePacket - DATA to send, flow: %d, credit: %f\n", creditInfo->flowId, creditInfo->credit); fflush(stdout);
 
-        /* create the pkt now! */
-        FlowInfo *flowInfo = getFlowInfo(false, creditInfo->flowId);
-        assert(flowInfo);
+      /* create the pkt now! */
+      FlowInfo *flowInfo = getFlowInfo(false, creditInfo->flowId);
+      assert(flowInfo);
 
-	if(sync_send && 0) {
-	   //test_sync_send(creditInfo);
-	}
-	else {
-	   encodePktToFwd(creditInfo, sync_send);
-	}
-	creditInfo->credit -= 1.0;				
-	//printf("sink::makePacket - DATA end\n"); fflush(stdout);
-	num_data_fwd++;
-	return;
+#if 1
+      while(creditInfo->credit >= 1.0) {
+         encodePktToFwd(creditInfo, sync_send);
+	 creditInfo->credit -= 1.0;
+	 num_data_fwd++; 
+      }
+#else	
+      encodePktToFwd(creditInfo, sync_send);
+      creditInfo->credit -= 1.0;
+      num_data_fwd++;
+#endif
    }
    //printf("sink::makePacket - nothing to send\n"); fflush(stdout);
 }
@@ -2915,7 +2921,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   uint64_t sync_secs; double sync_frac_of_secs;
   if(sync_send) {
      calc_outgoing_timestamp(sync_secs, sync_frac_of_secs);
-     d_out_pkt_time = uhd::time_spec_t(sync_secs, sync_frac_of_secs);
+     //d_out_pkt_time = uhd::time_spec_t(sync_secs, sync_frac_of_secs);
   }
 
   if(d_h_coding) {
@@ -2941,6 +2947,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      }
      free(symbols); 
   }
+#if 0
   else {
      /* pick new random <coeffs> for each innovative pkt to == new coded pkt */
      printf("selecting random coeffs::: --- \n"); fflush(stdout);
@@ -2969,7 +2976,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
      }
      printf("--------------------------------------------------------------------- \n"); fflush(stdout);
   }
-
+#endif
 
   logGeneratedTxSymbols(out_symbols);
   float factor = normalizeSignal(out_symbols, n_innovative_pkts, ((d_fwd_index==0)?1:2));
@@ -3022,7 +3029,20 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   // set the tx timestamp, if its a sync send //
   if(sync_send) {
      out_msg->set_timestamp(sync_secs, sync_frac_of_secs);
-     printf("FWD PACKET---- TX timestamp: secs: %llu, frac_of_secs: %f\n", sync_secs, sync_frac_of_secs); 
+     uhd::time_spec_t c_time = d_usrp->get_time_now();
+
+     const pmt::pmt_t &rx_value = d_sync_tag.value;
+     uint64_t rx_secs = pmt::pmt_to_uint64(pmt_tuple_ref(rx_value, 0));
+     double rx_frac_secs = pmt::pmt_to_double(pmt_tuple_ref(rx_value,1));
+     
+     uhd::time_spec_t proc_time = c_time - uhd::time_spec_t(rx_secs, rx_frac_secs);
+     uhd::time_spec_t rx_tx_time = uhd::time_spec_t(sync_secs, sync_frac_of_secs) - 
+						uhd::time_spec_t(rx_secs, rx_frac_secs);
+      	
+     printf("FWD PACKET---- curr (%llu, %f) out(%llu, %f) proc(%llu, %f) rx-tx(%llu, %f)\n", 
+		(uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), sync_secs, sync_frac_of_secs,
+		(uint64_t) proc_time.get_full_secs(), proc_time.get_frac_secs(), 
+		(uint64_t) rx_tx_time.get_full_secs(), rx_tx_time.get_frac_secs()); 
      fflush(stdout);
   }
 
@@ -3031,7 +3051,11 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   }
 
   d_out_queue->insert_tail(out_msg);
+  sleep(0.2);
+  printf("count: %d\n", d_out_queue->count());
   out_msg.reset();
+ 
+  printf("SINK got the packet!\n"); fflush(stdout);
 
   free(coeffs);
   free(out_symbols);
@@ -3098,9 +3122,11 @@ digital_ofdm_frame_sink::getNormalizationFactor(gr_complex *symbols, int nsender
   //avg_amp = avg_amp/((float) n_data_carriers);
   avg_amp = avg_amp/((float) denom);
   avg_mag /= ((float) denom);
-  printf("getNormalizationFactor, avg_amp: %f\n", avg_amp); fflush(stdout);
+
+  float factor = sqrt(avg_mag) * sqrt(nsenders);
+  printf("getNormalizationFactor, %f = (%f*%f)\n", factor, sqrt(avg_mag), sqrt(nsenders)); fflush(stdout);
   //return avg_amp/0.7;
-  return sqrt(avg_mag);
+  return factor;
 }
 
 /* just to test */
@@ -4222,32 +4248,60 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
   int decimation = 128;
   double rate = 1.0/decimation;
 
-  int null_ofdm_symbols = 3000;
+  int null_ofdm_symbols = 3500;
 
   int cp_length = d_fft_length/4;
 
   /* if lead forwarder, then go after the 'guard' duration, else wait for lead sender's header+preamble */
   uint32_t num_samples = (null_ofdm_symbols * (d_fft_length+cp_length));
-  if(d_fwd_index == 2) {
-      num_samples += (d_preamble.size()+d_num_hdr_ofdm_symbols+NUM_TRAINING_SYMBOLS) * (d_fft_length+cp_length);
-  }
+  uint32_t gap_samples = 0; 
 
+  if(d_fwd_index == 2) {
+      gap_samples = (d_preamble.size()+d_num_hdr_ofdm_symbols) * (d_fft_length+cp_length);
+  }
+  num_samples += gap_samples;
+
+  /* calculate the duration reqd to send this packet */
   double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
   double duration = num_samples * time_per_sample;
+  uhd::time_spec_t duration_time = uhd::time_spec_t((uint64_t) duration, duration - (uint64_t) duration);
   printf("RX timestamp (%llu, %f), duration: %f\n", sync_secs, sync_frac_of_secs, duration); fflush(stdout);
 
   uhd::time_spec_t c_time = d_usrp->get_time_now();
   uhd::time_spec_t proc_time = c_time - uhd::time_spec_t(sync_secs, sync_frac_of_secs);
 
-  printf("FWD PACKET -- c_time(%llu, %f), proc_time (%llu, %f)\n", (uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), (uint64_t) proc_time.get_full_secs(), proc_time.get_frac_secs()); fflush(stdout);
-
   /* add the duration to the current timestamp */
   sync_secs += (int) duration;
-  sync_frac_of_secs = duration - (int) duration + sync_frac_of_secs;
+  sync_frac_of_secs += (duration - (int) duration);
   if(sync_frac_of_secs>1) {
      sync_secs += (uint64_t)sync_frac_of_secs;
      sync_frac_of_secs -= (uint64_t)sync_frac_of_secs;
   }
+  d_out_pkt_time = uhd::time_spec_t(sync_secs, sync_frac_of_secs);
+
+  /* ensure the interval from the last packet sent is atleast the duration */
+  /* would happen if multiple packets were being sent in one-go coz credits told you so */
+  uhd::time_spec_t interval_time = d_out_pkt_time - d_last_pkt_time;
+  if(interval_time < duration_time) {
+     uhd::time_spec_t delta_time = (duration_time - interval_time);
+     d_out_pkt_time += delta_time;
+
+     /* extremely hacky: if fwd_index == 2, then I don't want the (preamble+header) gap again, 
+	it was already accounted for when the first packet of this burst was sent out */
+     d_out_pkt_time -= (gap_samples*time_per_sample);
+  }
+
+  printf("FWD PACKET -- curr(%llu, %f), interval (%llu, %f), duration (%llu, %f), out(%llu, %f), last(%llu, %f)\n", 
+			(uint64_t) c_time.get_full_secs(), c_time.get_frac_secs(), 
+			(uint64_t) interval_time.get_full_secs(), interval_time.get_frac_secs(),
+			(uint64_t) duration_time.get_full_secs(), duration_time.get_frac_secs(),
+			(uint64_t) d_out_pkt_time.get_full_secs(), d_out_pkt_time.get_frac_secs(),
+			(uint64_t) d_last_pkt_time.get_full_secs(), d_last_pkt_time.get_frac_secs());  
+  fflush(stdout);
+
+  sync_secs = d_out_pkt_time.get_full_secs();
+  sync_frac_of_secs = d_out_pkt_time.get_frac_secs();
+  d_last_pkt_time = d_out_pkt_time;
 }
 
 #ifdef LSQ_COMPRESSION
@@ -4439,7 +4493,7 @@ digital_ofdm_frame_sink::reduceCoefficients_LSQ(FlowInfo *flowInfo) {
 	      gr_complex *estimates = d_pktInfo->hestimates[j];                    // estimates for 'kth' sender
 	      gr_complex *rx_coeffs = d_pktInfo->coeffs.at(j);
 
-	      coeff[index] += ((gr_complex(1.0, 0.0)/estimates[di]) * rx_coeffs[index]);
+	      coeff[index] += (((gr_complex(1.0, 0.0)/estimates[di]) * rx_coeffs[index])/(d_pktInfo->norm_factor[j]));
 	      //printf("(%f, %f) += (1.0, 0.0)/(%f, %f) * (%f, %f)\n", coeff[index].real(), coeff[index].imag(),
 		//					estimates[di].real(), estimates[di].imag(), 
 		//					rx_coeffs[index].real(), rx_coeffs[index].imag()); fflush(stdout);
@@ -4489,7 +4543,7 @@ digital_ofdm_frame_sink::buildMap_pilot_SRC(FlowInfo *flowInfo, gr_complex* sym_
           gr_complex *estimates = d_pktInfo->hestimates[k];                    // estimates for 'kth' sender
           gr_complex *in_coeffs = interpolated_coeffs[k];                      // interpolated coeffs for 'kth' sender
 
-          gr_complex coeff = (gr_complex(1.0, 0.0)/(estimates[subcarrier])) * in_coeffs[coeff_index];
+          gr_complex coeff = ((gr_complex(1.0, 0.0)/(estimates[subcarrier])) * in_coeffs[coeff_index])/(d_pktInfo->norm_factor[k]);
           if(k == 0) coeffs[j] = coeff;
           else coeffs[j] += coeff;
       }
@@ -4879,34 +4933,6 @@ digital_ofdm_frame_sink::get_phase_offset(float *ph_offset) {
   }
 }
 
-inline float
-digital_ofdm_frame_sink::getAvgAmplificationFactor_NV(vector<gr_complex*> hestimates)
-{
-  assert(NUM_TRAINING_SYMBOLS > 0);
-  unsigned int n_data_carriers = d_data_carriers.size();
-  float avg_atten[MAX_SENDERS];
-  memset(avg_atten, 0, sizeof(float) * MAX_SENDERS);
-
-  int n_senders = hestimates.size();
-  for(unsigned int i = 0; i < n_senders; i++) {
-      gr_complex *hest = hestimates[i];
-      for(unsigned int j = 0; j < n_data_carriers; j++) {
-         avg_atten[i] += abs(gr_complex(1.0, 0.0)/hest[d_data_carriers[j]]);
-      }
-      avg_atten[i] /= (float) n_data_carriers;
-  }
-  
-  float noise_var = 0.0;
-  for(unsigned int i = 0; i < d_occupied_carriers; i++) {
-	//std::cout << " amp_NV: training:: " << d_training_symbols[i] << " " << d_training_symbols[i+d_occupied_carriers] << endl;
-        noise_var += abs(pow((d_training_symbols[i] - d_training_symbols[i+d_occupied_carriers]), 2.0)/gr_complex(2.0, 0.0));
-  }
-  noise_var = noise_var/d_occupied_carriers; 
-
-  printf("amp_NV, h: %f, noise_var: %f\n", avg_atten[0], noise_var); fflush(stdout);
-  return sqrt(1.0/(pow(avg_atten[0], 2.0) + pow(noise_var, 2.0)));
-}
-
 #if 0
 /* based on EVM which in turn is calculated from the training symbols sent in the same constellation 
    as the data is sent
@@ -5170,7 +5196,6 @@ digital_ofdm_frame_sink::waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_
 float
 digital_ofdm_frame_sink::calc_CV_dt(gr_complex cv1, gr_complex cv2) {
    int M = d_data_sym_position.size();
-   float threshold = 0.8;
 
    float energy = 0.0;
    float min_dt = 1000.0;
@@ -5330,7 +5355,8 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
 
   // to cap the max iterations //
   int max_iter = 2000, iter = 0;
-  gr_complex best_coeff[MAX_BATCH_SIZE];
+  gr_complex best_coeff[10];				// arbitrarily high
+  assert(n_inno_pkts <= 10);
   CoeffInfo best_cInfo;
   float max_min_dt = 0.0;
   float threshold = 0.8;
@@ -5341,7 +5367,16 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
      memset(reduced_coeffs, 0, sizeof(gr_complex)*MAX_BATCH_SIZE);
      for(unsigned int i = 0; i < n_inno_pkts; i++) {
 	gr_complex *pkt_coeffs = flowInfo->reduced_coeffs[i];               // reduced coeffs for this inno pkt //
-	float amp = abs((inno_pkts[i]->hestimates[0])[d_data_carriers[0]]);
+
+	int nsenders = inno_pkts[i]->n_senders;
+        float amp = abs((inno_pkts[i]->hestimates[0])[d_data_carriers[0]]);
+        if(nsenders > 1) {
+           for(int j = 1; j < nsenders; j++) {
+               amp += abs((inno_pkts[i]->hestimates[j])[d_data_carriers[0]]);
+           }
+        }
+        amp /= ((float) nsenders);
+
 	float phase = (rand() % 360 + 1) * M_PI/180;
 	coeffs[i] = (amp * ToPhase_c(phase));	
 
@@ -5357,7 +5392,7 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
         cInfo->rx_id = rx_ids[i];
         for(int k = 0; k < d_batch_size; k++) {
            cInfo->coeffs[k] = reduced_coeffs[k] * h_vec[i];
-        }       
+        }
 
         dt += calc_CV_dt(cInfo->coeffs[0], cInfo->coeffs[1]);
      }
@@ -5369,10 +5404,11 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
      if(!good) {
         if(dt > max_min_dt) {
            max_min_dt = dt;
-           for(int k = 0; k < d_batch_size; k++) {
-               best_coeff[k] = coeffs[k];
+           for(int k = 0; k < d_batch_size; k++) 
 	       best_cInfo.coeffs[k] = cInfo->coeffs[k];
-	   }
+
+	   for(int k = 0; k < n_inno_pkts; k++) 
+	       best_coeff[k] = coeffs[k];	
         }
      }
      else max_min_dt = dt;
@@ -5382,13 +5418,19 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
        printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
 
        if(iter == max_iter) {
-	  for(int k = 0; k < d_batch_size; k++) {
-	     coeffs[k] = best_coeff[k];
+	  for(int k = 0; k < d_batch_size; k++) 
 	     cInfo->coeffs[k] = best_cInfo.coeffs[k];
-	  }
+
+	  for(int k = 0; k < n_inno_pkts; k++) 
+	     coeffs[k] = best_coeff[k];
        }
        break;
      }
+  }
+
+  printf("smart_selection_local cv: \n"); fflush(stdout);
+  for(int k = 0; k < n_inno_pkts; k++) {
+     printf("(%f, %f) \n", coeffs[k].real(), coeffs[k].imag()); fflush(stdout);
   }
 }
 
@@ -5532,8 +5574,9 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
   int num_carriers = d_data_carriers.size();
 
   // to cap the max iterations //
-  int max_iter = 1000, iter = 0;
-  gr_complex best_coeff[MAX_BATCH_SIZE];
+  int max_iter = 2000, iter = 0;
+  gr_complex best_coeff[10];			    // arbitrary (will not have more than 10 inno pkts)
+  assert(n_inno_pkts <= 10);
   float max_min_dt = 0.0;
   bool threshold = 0.8;
 
@@ -5571,7 +5614,7 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
      if(!good) {
         if(dt > max_min_dt) {
            max_min_dt = dt;
-           for(int k = 0; k < d_batch_size; k++)
+           for(int k = 0; k < n_inno_pkts; k++)
                best_coeff[k] = my_coeffs[k];
         }
      }
@@ -5580,11 +5623,16 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
      iter++;
      if(good || iter == max_iter) {
         printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
-        for(int k = 0; k < d_batch_size; k++)
+        for(int k = 0; k < n_inno_pkts; k++)
            my_coeffs[k] = best_coeff[k];
         break;
      }
   } // end while
+
+  printf("smart_selection_global cv: \n"); fflush(stdout);
+  for(int k = 0; k < n_inno_pkts; k++) {
+     printf("(%f, %f) \n", my_coeffs[k].real(), my_coeffs[k].imag()); fflush(stdout);
+  }
 }
 
 inline void
@@ -5625,21 +5673,6 @@ digital_ofdm_frame_sink::getHInfo(NodeId tx_id, NodeId rx_id) {
 inline gr_complex 
 digital_ofdm_frame_sink::predictH(NodeId tx_id, NodeId rx_id) {
 
-#if 0
-  // calculate the # of samples since last packet sent //
-  uhd::time_spec_t interval = d_out_pkt_time - d_last_pkt_time;
-  time_t full_secs = interval.get_full_secs();
-  double frac_secs = interval.get_frac_secs();
-  double total_time = full_secs + frac_secs;
-
-  int decimation = 128;
-  double rate = 1.0/decimation;
-  double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
-  uint64_t interval_samples = total_time/time_per_sample;
-  std::cout<<"time/sample: "<<time_per_sample<<" samples: "<<interval_samples<<" total time: "<<total_time<<endl;
-  d_last_pkt_time = d_out_pkt_time;                                             // no use now, set it again
-#endif
-
   // now try and predict H based on interval_samples //
   HInfo *hInfo = getHInfo(tx_id, rx_id);
   gr_complex h_val = hInfo->h_value;				// latest update from downstream //
@@ -5661,7 +5694,6 @@ digital_ofdm_frame_sink::predictH(NodeId tx_id, NodeId rx_id) {
   double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
   uint64_t interval_samples = total_time/time_per_sample;
   std::cout<<"time/sample: "<<time_per_sample<<" samples: "<<interval_samples<<" total time: "<<total_time<<endl;
-  d_last_pkt_time = d_out_pkt_time;                                             // no use now, set it again
 
   printf("predictH -- pkt_num: %d, slope: %f\n", d_pkt_num, slope); fflush(stdout);
 
