@@ -5785,6 +5785,13 @@ digital_ofdm_frame_sink::prepare_H_coding() {
       assert(it != d_ethInfoMap.end());
       EthInfo *ethInfo = (EthInfo*) it->second;
       d_coeff_rx_sock = open_client_sock(ethInfo->port+50, ethInfo->addr, true);
+
+      /* set a timeout on this - if it expires, then I'll go by myself */
+      struct timeval tv;
+      tv.tv_sec = 0;
+      tv.tv_usec = 8e5;
+      assert(setsockopt(d_coeff_rx_sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,sizeof(struct timeval))==0);
+
    }
 
    initHInfoMap();
