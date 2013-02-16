@@ -1711,7 +1711,7 @@ digital_ofdm_mapper_bcv::make_time_tag1() {
   int decimation = 128;
   double rate = 1.0/decimation;
  
-  int num_ofdm_symbols_to_wait = 7000; //400; //3000;
+  int num_ofdm_symbols_to_wait = 4500; //400; //3000;
 
   int cp_length = d_fft_length/4;
   int symbol_length = d_fft_length + cp_length;
@@ -1933,7 +1933,7 @@ digital_ofdm_mapper_bcv::calc_CV_dt(gr_complex cv1, gr_complex cv2) {
       for(int m2 = 0; m2 < M; m2++) {
          gr_complex p2 = cv2 * d_data_constellation[m2];
          comb_mod[index++] = p1 + p2;
-         energy = norm(p1+p2);
+         energy += norm(p1+p2);
       }
    }
    assert(index == n_entries);
@@ -2137,7 +2137,8 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
   int max_iter = 1000, iter = 0;
   gr_complex best_coeff[MAX_BATCH_SIZE];
   float max_min_dt = 0.0;
-  float threshold = 0.8;
+  float threshold = 5.8;
+
 
   gr_complex *reduced_coeffs;
   while(1) {

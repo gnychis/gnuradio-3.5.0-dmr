@@ -734,8 +734,8 @@ digital_ofdm_frame_sink::work (int noutput_items,
 #if LOG_H
            if(use_estimates) {
 	      memcpy(d_in_estimates, in_estimates, sizeof(gr_complex) * d_occupied_carriers);
-              int count = ftell(d_fp_hestimates);
-              count = fwrite_unlocked(in_estimates, sizeof(gr_complex), d_occupied_carriers, d_fp_hestimates);
+              //int count = ftell(d_fp_hestimates);
+              //count = fwrite_unlocked(in_estimates, sizeof(gr_complex), d_occupied_carriers, d_fp_hestimates);
            }
 #endif
 	}
@@ -1637,7 +1637,7 @@ digital_ofdm_frame_sink::save_coefficients()
 #endif
 
 
-#ifndef DEBUG
+#ifdef DEBUG
   float atten = 0.0;
   for(int i = 0; i < d_occupied_carriers; i++) {
      atten += abs(hestimates[i]);
@@ -2978,7 +2978,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
   }
 #endif
 
-  logGeneratedTxSymbols(out_symbols);
+  //logGeneratedTxSymbols(out_symbols);
   float factor = normalizeSignal(out_symbols, n_innovative_pkts, ((d_fwd_index==0)?1:2));
 
   /* make header */
@@ -4248,7 +4248,7 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
   int decimation = 128;
   double rate = 1.0/decimation;
 
-  int null_ofdm_symbols = 3500;
+  int null_ofdm_symbols = 2000;
 
   int cp_length = d_fft_length/4;
 
