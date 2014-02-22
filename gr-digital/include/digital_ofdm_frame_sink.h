@@ -603,6 +603,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   bool d_fwd, d_dst;
   bool shouldProcess();  
   bool isMyPacket();
+  int okToTx();
 
   /* internal store, stores the innovative packets seen for this flow */
   FlowInfoVector d_flowInfoVector;
@@ -676,7 +677,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   /* credits */
   unsigned int num_data_fwd;
-  CompositeLinkVector d_compositeLinkVector;
+  CompositeLinkVector d_compositeLinkVector[MAX_FLOWS];
   CreditInfoVector d_creditInfoVector;								// per flow
   CompositeLink* getCompositeLink(int id);
   CreditInfo* findCreditInfo(unsigned char flowId);
@@ -977,6 +978,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
  FILE *d_fp_comb_log;
 
+ int d_ok_to_tx;
 };
 
 

@@ -333,7 +333,7 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation,
 			 unsigned int source_flag=0,
 			 unsigned int batch_size=1,
 		 	 unsigned int encode_flag=1, int fwd_index=0, unsigned int dst_id=2, unsigned int degree=4,
-			 unsigned int mimo=0, int h_coding=0);
+			 unsigned int mimo=0, int h_coding=0, int flow=0);
 
 /*!
  * \brief take a stream of bytes in and map to a vector of complex
@@ -353,7 +353,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 			   unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			   unsigned int source_flag,
 			   unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree,
-			   unsigned int mimo, int h_coding);
+			   unsigned int mimo, int h_coding, int flow);
  protected:
   digital_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
 			 const std::vector<gr_complex> &data_constellation,
@@ -362,7 +362,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 		         unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source_flag,
 			 unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree,
-			 unsigned int mimo, int h_coding);
+			 unsigned int mimo, int h_coding, int flow);
 
  private:
   /* data */
@@ -541,6 +541,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   int d_fwd_index;
   int d_data_ofdm_index, d_hdr_ofdm_index; 
   unsigned int d_dst_id;
+  int d_flow;
 /* apurv++ ends */
 
 #ifdef LSQ_COMPRESSION
@@ -597,7 +598,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   int d_h_coding;
   //HObsQMap d_hObsQMap;						// to calculate the slope of H values for every receiver
 
-  CompositeLinkVector d_compositeLinkVector;
+  CompositeLinkVector d_compositeLinkVector[MAX_FLOWS];
   CompositeLink* getCompositeLink(int id);
   void populateCompositeLinkInfo();
   vector<int> d_outCLinks, d_inCLinks;

@@ -83,7 +83,9 @@ class receive_path(gr.hier_block2):
         """
         self.probe.set_threshold(threshold_in_db)
     
-        
+    def okToTx(self):
+        return self.ofdm_rx.okToTx()
+    
     def add_options(normal, expert):
         """
         Adds receiver-specific options to the Options Parser

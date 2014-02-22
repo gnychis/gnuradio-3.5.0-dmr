@@ -82,11 +82,11 @@ class ofdm_mod(gr.hier_block2):
 
         # apurv: use the preamble as a function of hop number #
         #ksfreq = known_symbols_4512_3[0:self._occupied_tones]
-        start_index = (options.hop) * self._occupied_tones
+        start_index = (options.hop_tx) * self._occupied_tones
         ksfreq = known_symbols_4512_3[start_index:start_index + self._occupied_tones]
 
         # allow another full preamble (no intermediate 0s for accurate channel estimate/snr measurement)
-        preamble2_offset = (options.hop+10)*self._occupied_tones;
+        preamble2_offset = (options.hop_tx+10)*self._occupied_tones;
         ksfreq2 = known_symbols_4512_3[preamble2_offset:preamble2_offset+self._occupied_tones]
 
         for i in range(len(ksfreq)):
@@ -152,7 +152,7 @@ class ofdm_mod(gr.hier_block2):
                                              options.occupied_tones, options.fft_length,
                                              options.id, options.src,
                                              options.batch_size, options.encode_flag, 
-					     options.fwd, options.dst_id, options.degree, options.mimo, options.h_smart)
+					     options.fwd, options.dst_id, options.degree, options.mimo, options.h_smart, options.flow)
 	
 
         self.ifft = gr.fft_vcc(self._fft_length, False, win, True)
@@ -211,7 +211,7 @@ class ofdm_mod(gr.hier_block2):
         @param payload: data to send
         @type payload: string
         """
-	print "send_pkt"
+	#print "send_pkt"
         if eof:
             msg = gr.message(1) # tell self._pkt_input we're not sending any more packets
         elif (type == 0):
@@ -265,12 +265,14 @@ class ofdm_mod(gr.hier_block2):
                           help="the destination id [default=%default]")
         expert.add_option("", "--degree", type="intx", default=4,
                           help="LSQ degree (if applicable) [default=%default]")
-	expert.add_option("", "--hop", type="intx", default=0,
+	expert.add_option("", "--hop-tx", type="intx", default=0,
                           help="hop number (for preamble) [default=%default]")
         expert.add_option("","--mimo", type="intx", default=0,
                          help="enable MIMO TX [default=%default]")
 	expert.add_option("","--h-smart", type="intx", default=1,
                          help="enables smart coefficients using H exchange [default=%default]")
+	expert.add_option("","--flow", type="intx", default=0,
+                         help="flow number (only for source of flows) [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation
@@ -335,7 +337,12 @@ class ofdm_demod(gr.hier_block2):
         self._batch_size = options.batch_size
         self._decode_flag = options.decode_flag
 	self._threshold = options.threshold
-	self._size = options.size
+
+	if(options.src == 1):
+	   self._size = options.size+4
+	else:
+	   self._size = options.size
+
         if(self._fec_n < self._fec_k):
             print "ERROR: K > N in FEC!\n"
             exit(0);
@@ -346,11 +353,11 @@ class ofdm_demod(gr.hier_block2):
 
 	# apurv: use the preamble as a function of hop number #
         #ksfreq = known_symbols_4512_3[0:self._occupied_tones]
-	start_index = (options.hop-1) * self._occupied_tones
+	start_index = (options.hop_rx) * self._occupied_tones
 	ksfreq = known_symbols_4512_3[start_index:start_index + self._occupied_tones]
 
 	# allow another full preamble (no intermediate 0s for accurate channel estimate/snr measurement)
-	preamble2_offset = (options.hop+9)*self._occupied_tones;
+	preamble2_offset = (options.hop_rx+10)*self._occupied_tones;
 	ksfreq2 = known_symbols_4512_3[preamble2_offset:preamble2_offset+self._occupied_tones]
 
         for i in range(len(ksfreq)):
@@ -459,6 +466,9 @@ class ofdm_demod(gr.hier_block2):
         self._watcher = _queue_watcher_thread(self._rcvd_pktq, callback, self._fec_n, self._fec_k, self._bits_per_symbol, self._size)
 	self._watcher_fwd = _queue_watcher_thread(self._out_pktq, fwd_callback)			# apurv++
 
+    def okToTx(self):
+        return self.ofdm_demod.okToTx()
+
     def add_options(normal, expert):
         """
         Adds OFDM-specific options to the Options Parser
@@ -506,7 +516,7 @@ class ofdm_demod(gr.hier_block2):
                           help="forwarder ranking (1:lead forwarder, 2: 2nd slave, 3:3rd slave, etc [default=%default]")
         expert.add_option("", "--degree", type="intx", default=4,
                           help="LSQ degree (if applicable) [default=%default]")
-        expert.add_option("", "--hop", type="intx", default=1,
+        expert.add_option("", "--hop-rx", type="intx", default=0,
                           help="hop number (for preamble) [default=%default]")
         expert.add_option("","--h-smart", type="intx", default=1,
                          help="enables smart coefficients using H exchange [default=%default]")

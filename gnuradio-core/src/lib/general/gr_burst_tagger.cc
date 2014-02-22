@@ -114,8 +114,8 @@ gr_burst_tagger::modify_timestamp(int output_items, int index) {
   uint64_t sync_secs = pmt::pmt_to_uint64(pmt_tuple_ref(value, 0));
   double sync_frac_of_secs = pmt::pmt_to_double(pmt_tuple_ref(value,1));
 
-  printf("test_timestamp1 (BURST):: found %d tags, offset: %llu, output_items: %d, nread1: %llu, nwritten1: %llu, index: %d, (%llu, %f)\n",
-		  rx_tags.size(), rx_tags[d_tag_index].offset, output_items, nread1, nitems_written(0), index, sync_secs, sync_frac_of_secs); fflush(stdout);
+  //printf("test_timestamp1 (BURST):: found %d tags, offset: %llu, output_items: %d, nread1: %llu, nwritten1: %llu, index: %d, (%llu, %f)\n",
+		  //rx_tags.size(), rx_tags[d_tag_index].offset, output_items, nread1, nitems_written(0), index, sync_secs, sync_frac_of_secs); fflush(stdout);
 
   // instead, add the time tag now //
   const pmt::pmt_t _key = pmt::pmt_string_to_symbol("tx_time");

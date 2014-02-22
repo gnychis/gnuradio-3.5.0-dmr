@@ -48,6 +48,7 @@
 #define TRIGGER_TYPE    3
 
 #define MAX_RX 3
+#define MAX_FLOWS 2
 //#define H_PRECODING 1
 
 typedef struct coeff_str {

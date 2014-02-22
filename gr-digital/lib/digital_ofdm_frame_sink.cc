@@ -113,9 +113,14 @@ digital_ofdm_frame_sink::enter_have_sync()
 
 }
 
+int
+digital_ofdm_frame_sink::okToTx() {
+  return d_ok_to_tx;
+}
+
 inline void
 digital_ofdm_frame_sink::reset_demapper() {
-  printf("reset demapper\n"); fflush(stdout);
+  //printf("reset demapper\n"); fflush(stdout);
   // clear state of demapper
   d_byte_offset = 0;
   d_partial_byte = 0;
@@ -184,7 +189,7 @@ digital_ofdm_frame_sink::extract_header(gr_complex h)
   d_src_id = ((int) d_header.src_id) + '0';
   d_prev_hop_id = ((int) d_header.prev_hop_id) + '0';
 
-  printf("prev_hop: %c, src: %c, dst: %c\n", d_prev_hop_id, d_src_id, d_dst_id); fflush(stdout);
+  //printf("prev_hop: %c, src: %c, dst: %c\n", d_prev_hop_id, d_src_id, d_dst_id); fflush(stdout);
 
   if(d_h_coding) {
     HInfo hInfo;
@@ -307,7 +312,7 @@ void digital_ofdm_frame_sink::equalize_interpolate_dfe(const gr_complex *in, gr_
   else if(d_hdr_ofdm_index == d_num_hdr_ofdm_symbols-1) {
       d_end_angle[sender_index] = angle;
       d_slope_angle[sender_index] = (d_end_angle[sender_index] - d_start_angle[sender_index])/((float) d_hdr_ofdm_index);	
-      printf("(after header) sender index: %d, d_phase: %f, d_freq: %f\n", sender_index, d_phase[sender_index], d_freq[sender_index]); fflush(stdout);
+      //printf("(after header) sender index: %d, d_phase: %f, d_freq: %f\n", sender_index, d_phase[sender_index], d_freq[sender_index]); fflush(stdout);
   }
 }
 
@@ -422,7 +427,8 @@ digital_ofdm_frame_sink::digital_ofdm_frame_sink(const std::vector<gr_complex> &
     d_degree(degree),
     d_h_coding(h_coding),
     d_preamble(preamble),
-    d_preamble_cnt(0)
+    d_preamble_cnt(0),
+    d_ok_to_tx(0)
 {
    assign_subcarriers();
    d_dfe.resize(d_pilot_carriers.size());
@@ -666,7 +672,7 @@ digital_ofdm_frame_sink::set_data_sym_value_out(const std::vector<gr_complex> &s
   d_data_sym_position  = sym_position;
   d_data_sym_value_out = sym_value_out;
   d_data_nbits = (unsigned int)ceil(log10(float(d_data_sym_value_out.size())) / log10((float)2.0));               // I've got no idea!!!!!
-  printf("size: %d, d_data_nbits: %d\n", d_data_sym_value_out.size(), d_data_nbits); fflush(stdout);
+  //printf("size: %d, d_data_nbits: %d\n", d_data_sym_value_out.size(), d_data_nbits); fflush(stdout);
 
   return true;
 }
@@ -781,7 +787,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 	  FlowInfo *flowInfo = getFlowInfo(false, d_flow);
 
 	  /* ensure if I'm in the current session, then the pkt num matches the d_save_pkt_num */
-	  printf("d_save_flag: %d, d_pkt_num: %d, d_save_pkt_num: %d\n", d_save_flag, d_pkt_num, d_save_pkt_num); fflush(stdout);
+	  //printf("d_save_flag: %d, d_pkt_num: %d, d_save_pkt_num: %d\n", d_save_flag, d_pkt_num, d_save_pkt_num); fflush(stdout);
 	  if(d_save_flag) {
  	      if(d_pkt_num != d_save_pkt_num) {
 		 reset_demapper();
@@ -850,7 +856,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		/* rx symbols */
 		d_pktInfo->symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_num_ofdm_symbols * d_occupied_carriers);
 		memset(d_pktInfo->symbols, 0, sizeof(gr_complex) * d_num_ofdm_symbols * d_occupied_carriers);
-		printf("allocated pktInfo rxSymbols\n"); fflush(stdout);
+		//printf("allocated pktInfo rxSymbols\n"); fflush(stdout);
 	     } else {
 		assert(d_pending_senders > 1);				// more senders remain - switch to preamble look-up
 		d_pending_senders--;
@@ -925,6 +931,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
         logFrequencyDomainRxSymbols(false);
 
 	if(d_dst) {
+	   d_ok_to_tx = 1;
 	   demodulate_ILP_2(flowInfo); 
 	}
 	else if(d_fwd) 
@@ -1019,7 +1026,7 @@ digital_ofdm_frame_sink::dewhiten(unsigned char *bytes, const int len)
 void
 digital_ofdm_frame_sink::prepareForNewBatch()
 {
-  printf("prepareForNewBatch, batch: %d\n", d_header.batch_number); fflush(stdout);
+  //printf("prepareForNewBatch, batch: %d\n", d_header.batch_number); fflush(stdout);
   d_active_batch = d_header.batch_number;
 
   FlowInfo *flow_info = getFlowInfo(true, d_flow);
@@ -1063,7 +1070,7 @@ digital_ofdm_frame_sink::prepareForNewBatch()
   memset(d_batch_euclid_dist, 0, sizeof(float) * d_batch_size * d_data_carriers.size() * n_entries * MAX_OFDM_SYMBOLS);
   memset(d_flag_euclid_dist, 0, sizeof(bool) * d_data_carriers.size() * MAX_OFDM_SYMBOLS);
 
-  printf("prepareForNewBatch ends, size: %d, %d\n", flow_info->innovative_pkts.size(), d_flowInfoVector.size()); fflush(stdout);
+  //printf("prepareForNewBatch ends, size: %d, %d\n", flow_info->innovative_pkts.size(), d_flowInfoVector.size()); fflush(stdout);
   d_avg_evm_error = 0.0;
   d_total_batches_received++;
   memset(d_crc, 0, sizeof(int) * MAX_BATCH_SIZE);
@@ -1536,14 +1543,14 @@ digital_ofdm_frame_sink::shouldProcess() {
   }*/
 
   d_dst = false; d_fwd = false;
-  int num_links = d_compositeLinkVector.size();
+  int num_links = d_compositeLinkVector[d_flow].size();
   assert(num_links > 0);
   CompositeLink *cLink = getCompositeLink(d_prevLinkId);
   assert(cLink);
   //vector<unsigned int> ids = cLink->dstIds;
   NodeIds ids = cLink->dstIds;
   for(int i = 0; i < ids.size(); i++) {
-     printf("curr: %c, d_id: %c, dst_id: %c\n", ids.at(i), d_id, d_dst_id); fflush(stdout);
+     //printf("curr: %c, d_id: %c, dst_id: %c\n", ids.at(i), d_id, d_dst_id); fflush(stdout);
      if(ids.at(i) == d_id) {
 	//if(d_id == d_header.dst_id)   {
 	if(d_id == d_dst_id) {
@@ -1691,7 +1698,7 @@ digital_ofdm_frame_sink::save_coefficients()
   d_pktInfo->coeffs.push_back(coeffs);
   d_pktInfo->hestimates.push_back(hestimates);					// push all the estimates //
 
-  printf("save_coeffs end\n"); fflush(stdout);
+  //printf("save_coeffs end\n"); fflush(stdout);
   //debugPktInfo(d_pktInfo, sender_id);
 }
 
@@ -2146,8 +2153,8 @@ digital_ofdm_frame_sink::isSameNodeList(vector<unsigned char> ids1, vector<unsig
 CompositeLink*
 digital_ofdm_frame_sink::getCompositeLink(int id)
 {
-   CompositeLinkVector::iterator it = d_compositeLinkVector.begin();
-   while(it != d_compositeLinkVector.end()) {
+   CompositeLinkVector::iterator it = d_compositeLinkVector[d_flow].begin();
+   while(it != d_compositeLinkVector[d_flow].end()) {
 	CompositeLink *cLink = *it;
 	if(cLink->linkId == id)
 	    return cLink;
@@ -2201,7 +2208,7 @@ digital_ofdm_frame_sink::populateCreditInfo()
 inline void
 digital_ofdm_frame_sink::populateCompositeLinkInfo()
 {
-   // link-id   #of-src     src1   src2   src3    #of-dst   dst1   dst2    dst3    //
+   // link-id   #of-src     src1   src2   src3    #of-dst   dst1   dst2    dst3  flowId  //
    printf("populateCompositeLinkInfo\n"); fflush(stdout);
 
    FILE *fl = fopen ( "compositeLink_info.txt" , "r+" );
@@ -2250,7 +2257,8 @@ digital_ofdm_frame_sink::populateCompositeLinkInfo()
 	     d_inCLinks.push_back(cLink->linkId);
         }
         
-        d_compositeLinkVector.push_back(cLink);
+	int flowId = atoi(token_vec[3+num_src+num_dst]);
+        d_compositeLinkVector[flowId].push_back(cLink);
 
 
         printf("\n");
@@ -2305,7 +2313,7 @@ digital_ofdm_frame_sink::makePacket(bool sync_send)
       for(int i = 0; i < count; i++) {
 	  creditInfo = d_creditInfoVector[i];
 #if 1
-	  if(creditInfo->credit >= 1.0) {
+	  if(creditInfo->credit >= 1.0 && creditInfo->flowId == d_flow) {
              found = true;
              break;
           }
@@ -3434,7 +3442,7 @@ digital_ofdm_frame_sink::getSymOutBits_ILP_QAM16(unsigned char *bits, int index)
 void
 digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
 {
-  printf("demodulate_ILP_2, pkt_no: %d, senders: %d\n", d_pkt_num, d_pktInfo->n_senders); fflush(stdout);
+  //printf("demodulate_ILP_2, pkt_no: %d, senders: %d\n", d_pkt_num, d_pktInfo->n_senders); fflush(stdout);
   // initialize 'bytes decoded' for every batch //
   vector<unsigned char*> bytes_out_vec;
   for(unsigned int k = 0; k < d_batch_size; k++) {
@@ -3539,7 +3547,7 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
 		      d_crc[k] = ((crc_valid == true) ? 1:0);
 		      if(crc_valid) d_num_pkts_correct++;
 		  }
-		  printf("crc valid: %d, d_crc: %d\n", crc_valid, d_crc[k]); fflush(stdout);
+		  //printf("crc valid: %d, d_crc: %d\n", crc_valid, d_crc[k]); fflush(stdout);
 		  if(d_crc[k] == 0) {
 		     batch_correct = false;						// mark the batch as incorrect! //
 		  }
@@ -3608,7 +3616,7 @@ digital_ofdm_frame_sink::demodulate_ILP_2(FlowInfo *flowInfo)
   }
 #endif
   
-  printf("demodulate_ILP_2 end, pkt_no: %d\n\n", d_pkt_num); fflush(stdout);
+  //printf("demodulate_ILP_2 end, pkt_no: %d\n\n", d_pkt_num); fflush(stdout);
 }
 
 inline void
@@ -4083,7 +4091,7 @@ digital_ofdm_frame_sink::crc_check(std::string msg, std::string& decoded_str)
   free(msg_data);
   bool res =  (hex_exp_crc.compare(hex_crc) == 0);
 
-  printf("crc_check end: %d\n", res); fflush(stdout);
+  //printf("crc_check end: %d\n", res); fflush(stdout);
   return res;
   //return (hex_exp_crc.compare(hex_crc) == 0);
 }
@@ -4559,7 +4567,7 @@ digital_ofdm_frame_sink::buildMap_pilot_SRC(FlowInfo *flowInfo, gr_complex* sym_
   }
   else if(d_batch_size == 2) {
          int j = 0;
-	 if(o == 0 && subcarrier_index == 0) 
+	 if(o == 0 && subcarrier_index == 0 && 0) 
 	       cout << "delta_coeff: " << (arg(coeffs[0]) - arg(coeffs[1])) * 180/M_PI << " -- " << arg(coeffs[0]) * 180/M_PI << " --- " << arg(coeffs[1]) * 180/M_PI<< endl;
 	 for(unsigned int m1 = 0; m1 < d_data_sym_position.size(); m1++) {
 	     for(unsigned int m2 = 0; m2 < d_data_sym_position.size(); m2++) {
@@ -4842,7 +4850,7 @@ digital_ofdm_frame_sink::logFrequencyDomainRxSymbols(bool equalize) {
 #endif
 
   }
-  printf("logFreq, count: %d, timing_offset: %f\n", ftell(d_fp_rx_symbols), d_timing_offset); fflush(stdout);
+  //printf("logFreq, count: %d, timing_offset: %f\n", ftell(d_fp_rx_symbols), d_timing_offset); fflush(stdout);
 
   //free(ph_offset);
 }

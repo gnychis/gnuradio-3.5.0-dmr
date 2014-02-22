@@ -1,3 +1,13 @@
+armadillo_
+sudo apt-get install libblas-dev
+sudo apt-get install liblapack-dev
+sudo apt-get install libboost-dev
+sudo apt-get install libatlas-base-dev
+
+cmake .
+make
+sudo make install
+
 Install
 -------
  2054  ./configure --disable-gr-noaa --disable-gr-video-sdl --disable-gr-trellis --disable-gr-vocoder --disable-gr-pager --disable-volk --disable-gr-atsc --disable-gr-audio --disable-docs
