@@ -229,6 +229,13 @@ class ofdm_mod(gr.hier_block2):
 	else:
    	    self._pkt_input.msgq().insert_tail(payload)			# for forwarder! (payload is already modulated)
 
+    def permit_tx(self): 
+	permitMsg = gr.message(1)
+	self._pkt_input.permq().insert_tail(permitMsg)
+
+    def isEmpty_msgq(self):
+	return self._pkt_input.isEmpty_msgq()
+
     def add_options(normal, expert):
         """
         Adds OFDM-specific options to the Options Parser
@@ -468,6 +475,9 @@ class ofdm_demod(gr.hier_block2):
 
     def okToTx(self):
         return self.ofdm_demod.okToTx()
+ 
+    def disableOkToTx(self):
+	self.ofdm_demod.disableOkToTx()
 
     def add_options(normal, expert):
         """

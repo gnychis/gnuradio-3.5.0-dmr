@@ -85,7 +85,10 @@ class receive_path(gr.hier_block2):
     
     def okToTx(self):
         return self.ofdm_rx.okToTx()
-    
+
+    def disableOkToTx(self):
+	self.ofdm_rx.disableOkToTx()    
+
     def add_options(normal, expert):
         """
         Adds receiver-specific options to the Options Parser

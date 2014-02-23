@@ -379,7 +379,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   std::vector<gr_complex> d_data_constellation;
   unsigned long  d_data_nbits;
 
-  gr_msg_queue_sptr	d_msgq;
+  gr_msg_queue_sptr	d_msgq, d_permq;
   bool			d_eof;
   
   unsigned int 		d_occupied_carriers;
@@ -405,6 +405,8 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   ~digital_ofdm_mapper_bcv(void);
 
   gr_msg_queue_sptr	msgq() const { return d_msgq; }
+  gr_msg_queue_sptr	permq() const { return d_permq; }
+  int			isEmpty_msgq() const { return d_msgq->empty_p(); }
 
   int work(int noutput_items,
 	   gr_vector_const_void_star &input_items,

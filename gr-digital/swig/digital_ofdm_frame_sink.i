@@ -56,4 +56,5 @@ class digital_ofdm_frame_sink : public gr_sync_block
   /*void makePacket();*/
   void send_ack(unsigned char flow_id, unsigned char batch_id);
   int okToTx();
+  void disableOkToTx();
 };

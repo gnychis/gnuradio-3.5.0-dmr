@@ -105,7 +105,16 @@ def main():
 
     def okToTx():
 	return tb.rxpath.okToTx()
-   
+
+    def disableOkToTx():
+	tb.rxpath.disableOkToTx();  
+
+    def permitTx():
+        tb.txpath.permit_tx()
+
+    def isEmpty_msgq():
+        return tb.txpath.isEmpty_msgq()
+
     parser = OptionParser(option_class=eng_option, conflict_handler="resolve")
     expert_grp = parser.add_option_group("Expert")
     parser.add_option("-s", "--size", type="eng_float", default=400,
@@ -145,21 +154,20 @@ def main():
     pktno = 0
     pkt_size = int(options.size)
 
-    while(okToTx() == False):
-	time.sleep(0.01)
-
+     	
+    """
     while n < nbytes:
-        if options.from_file is None:
+	if(okToTx() == True):
             if(pktno % 2 == 0):
                 data = (pkt_size) * chr(3 & 0xff)
             else:
                 data = (pkt_size) * chr(4 & 0xff)
             #data = (pkt_size - 2) * chr(pktno & 0xff) 
             #data = (pkt_size - 2) * chr(0x34)
+	    disableOkToTx();
         else:
-            data = source_file.read(pkt_size - 2)
-            if data == '':
-                break;
+	    time.sleep(0.01)
+	    continue
 
         #payload = struct.pack('!H', pktno & 0xffff) + data
 	payload = data
@@ -172,6 +180,34 @@ def main():
         pktno += 1
 	time.sleep(0.65)
 	#time.sleep(0.1)
+    """
+
+    # transmits fresh innovative packets, the mapper decides how many packets/batch to send
+    # mapper only sends out packets (innovative or not) when this loop permits it to send.
+
+    while n < nbytes:
+
+        if((okToTx() == False)):
+           time.sleep(0.05)
+           continue
+        else:
+           if(isEmpty_msgq() == True):
+              print "Send Fresh Message -- "
+              num_sent = 0
+              while(num_sent < 2):
+                 if(pktno % 2 == 0):
+                   data = (pkt_size) * chr(3 & 0xff)
+                 else:
+                   data = (pkt_size) * chr(4 & 0xff)
+
+                 payload = data
+                 send_pkt(payload)
+                 n += len(payload)
+                 sys.stderr.write('.')
+                 pktno += 1
+                 num_sent += 1
+
+           permitTx()
 
     send_pkt(eof=True)
     tb.wait()                       # wait for it to finish

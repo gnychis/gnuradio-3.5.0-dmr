@@ -115,7 +115,17 @@ digital_ofdm_frame_sink::enter_have_sync()
 
 int
 digital_ofdm_frame_sink::okToTx() {
-  return d_ok_to_tx;
+  if(d_ok_to_tx == 1) {
+     d_ok_to_tx = 0;
+     return 1;
+  }
+  return 0;
+  //return d_ok_to_tx;
+}
+
+void
+digital_ofdm_frame_sink::disableOkToTx() {
+  d_ok_to_tx = 0;
 }
 
 inline void
@@ -812,6 +822,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
                     printf("STALE BATCH %d --\n", d_header.batch_number); fflush(stdout);
 		    enter_search();
 		    reset_demapper();
+		    d_ok_to_tx = 1;
 		    break;
 	        } 
 	  	else if(d_header.batch_number <= d_last_batch_acked)
@@ -819,6 +830,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		    printf("BATCH %d already ACKed --\n", d_header.batch_number); fflush(stdout);
 		    enter_search();
 		    reset_demapper();
+		    d_ok_to_tx = 1;
 		    break;
 		}
 		else if(d_header.batch_number > d_active_batch)

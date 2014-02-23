@@ -63,4 +63,6 @@ class digital_ofdm_mapper_bcv : public gr_sync_block
            gr_vector_void_star &output_items);
 
   int isACKSocketOpen();
+  gr_msg_queue_sptr permq();
+  int isEmpty_msgq();
 };

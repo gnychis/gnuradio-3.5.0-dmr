@@ -604,6 +604,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   bool shouldProcess();  
   bool isMyPacket();
   int okToTx();
+  void disableOkToTx();
 
   /* internal store, stores the innovative packets seen for this flow */
   FlowInfoVector d_flowInfoVector;

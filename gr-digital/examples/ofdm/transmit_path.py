@@ -72,7 +72,13 @@ class transmit_path(gr.hier_block2):
         Calls the transmitter method to send a packet
         """
         return self.ofdm_tx.send_pkt(payload, type, eof)
-       
+
+    def permit_tx(self):
+	self.ofdm_tx.permit_tx()
+
+    def isEmpty_msgq(self):
+	return self.ofdm_tx.isEmpty_msgq()       
+
     def add_options(normal, expert):
         """
         Adds transmitter-specific options to the Options Parser

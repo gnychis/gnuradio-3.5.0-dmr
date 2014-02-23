@@ -81,7 +81,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 		   gr_make_io_signature4 (1, 4, sizeof(gr_complex)*fft_length, sizeof(short), sizeof(char), sizeof(char)*fft_length)),
     d_hdr_constellation(hdr_constellation),
     d_data_constellation(data_constellation),
-    d_msgq(gr_make_msg_queue(msgq_limit)), d_eof(false),
+    d_msgq(gr_make_msg_queue(msgq_limit)), d_eof(false), d_permq(gr_make_msg_queue(msgq_limit)),
     d_occupied_carriers(occupied_carriers),
     d_fft_length(fft_length),
     d_pending_flag(0),
@@ -613,6 +613,15 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 	initializeBatchParams();
 	d_pending_flag = 1;				// start of packet flag //
   }
+
+#if 1
+  // see if there is permission to transmit (benchmark.py gives it) //
+  if(d_pending_flag == 1) {
+     gr_message_sptr d_permMsg = d_permq->delete_head();
+     d_permMsg.reset();
+     printf("permission received..\n"); fflush(stdout);
+  }
+#endif
 
   d_modulated = false;
 
