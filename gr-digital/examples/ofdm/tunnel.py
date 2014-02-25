@@ -71,11 +71,11 @@ class my_top_block(gr.top_block):
                                     options.spec, options.antenna,
                                     options.verbose)
 
-        self.txpath = transmit_path(options)
-        self.rxpath = receive_path(callback, fwd_callback, options)
+	self.rxpath = receive_path(callback, fwd_callback, options)
+	self.connect(self.source, self.rxpath)
 
+        self.txpath = transmit_path(options)
         self.connect(self.txpath, self.sink)
-        self.connect(self.source, self.rxpath)
 
 
     def get_pkt_to_fwd(self):

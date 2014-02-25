@@ -333,7 +333,7 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation,
 			 unsigned int source_flag=0,
 			 unsigned int batch_size=1,
 		 	 unsigned int encode_flag=1, int fwd_index=0, unsigned int dst_id=2, unsigned int degree=4,
-			 unsigned int mimo=0, int h_coding=0, int flow=0);
+			 unsigned int mimo=0, int h_coding=0, int flow=0, int perm=0);
 
 /*!
  * \brief take a stream of bytes in and map to a vector of complex
@@ -353,7 +353,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 			   unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			   unsigned int source_flag,
 			   unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree,
-			   unsigned int mimo, int h_coding, int flow);
+			   unsigned int mimo, int h_coding, int flow, int perm);
  protected:
   digital_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation, 
 			 const std::vector<gr_complex> &data_constellation,
@@ -362,7 +362,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 		         unsigned occupied_carriers, unsigned int fft_length, unsigned int id,
 			 unsigned int source_flag,
 			 unsigned int batch_size, unsigned int encode_flag, int fwd_index, unsigned int dst_id, unsigned int degree,
-			 unsigned int mimo, int h_coding, int flow);
+			 unsigned int mimo, int h_coding, int flow, int perm);
 
  private:
   /* data */
@@ -571,7 +571,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
 
   void get_nextHop_rx(NodeIds &rx_ids);
   void updateHInfo(HKey, HInfo*);
-  void initHInfoMap();
+  void initHInfoMap(int);
   void prepare_H_coding();
   gr_complex predictH(NodeId tx_id, NodeId rx_id);
   void populateEthernetAddress();
@@ -592,7 +592,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   HInfoMap d_HInfoMap;
   EthInfoMap d_ethInfoMap;
   int d_coeff_tx_sock, d_coeff_rx_sock;
-  vector<unsigned int> d_h_rx_socks;
+  vector<unsigned int> d_h_rx_socks[MAX_FLOWS];
   uhd::time_spec_t d_out_time;					// out_time for the packet is pre-decided in predict_H
 
   PktTxInfoList d_pktTxInfoList;
@@ -603,7 +603,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   CompositeLinkVector d_compositeLinkVector[MAX_FLOWS];
   CompositeLink* getCompositeLink(int id);
   void populateCompositeLinkInfo();
-  vector<int> d_outCLinks, d_inCLinks;
+  vector<int> d_outCLinks[MAX_FLOWS], d_inCLinks[MAX_FLOWS];
 
   float getNormalizationFactor();
   float getTimingOffset();
@@ -616,6 +616,7 @@ class DIGITAL_API digital_ofdm_mapper_bcv : public gr_sync_block
   void generatePreamble(gr_complex *out);
   int d_preambles_sent;
   const std::vector<std::vector<gr_complex> >   d_preamble;
+  int d_num_flows, d_perm;
 };
 
 #endif

@@ -60,9 +60,9 @@ digital_make_ofdm_mapper_bcv (const std::vector<gr_complex> &hdr_constellation,
 			 unsigned int batch_size,
 			 unsigned int encode_flag,
 			 int fwd_index, unsigned int dst_id, unsigned int degree,
-			 unsigned int mimo, int h_coding, int flow)
+			 unsigned int mimo, int h_coding, int flow, int perm)
 {
-  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (hdr_constellation, data_constellation, preamble, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree, mimo, h_coding, flow));
+  return gnuradio::get_initial_sptr(new digital_ofdm_mapper_bcv (hdr_constellation, data_constellation, preamble, msgq_limit, occupied_carriers, fft_length, id, source, batch_size, encode_flag, fwd_index, dst_id, degree, mimo, h_coding, flow, perm));
 }
 
 // Consumes 1 packet and produces as many OFDM symbols of fft_length to hold the full packet
@@ -75,7 +75,7 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
 					unsigned int batch_size,
 					unsigned int encode_flag,
 					int fwd_index, unsigned int dst_id, unsigned int degree, 
-					unsigned int mimo, int h_coding, int flow)
+					unsigned int mimo, int h_coding, int flow, int perm)
   : gr_sync_block ("ofdm_mapper_bcv",
 		   gr_make_io_signature (0, 0, 0),
 		   gr_make_io_signature4 (1, 4, sizeof(gr_complex)*fft_length, sizeof(short), sizeof(char), sizeof(char)*fft_length)),
@@ -106,7 +106,8 @@ digital_ofdm_mapper_bcv::digital_ofdm_mapper_bcv (const std::vector<gr_complex> 
     d_preambles_sent(0),
     d_preamble(preamble),
     d_timing_offset(0.0),
-    d_flow(flow)
+    d_flow(flow),
+    d_num_flows(0), d_perm(perm)
 {
   if (!(d_occupied_carriers <= d_fft_length))
     throw std::invalid_argument("digital_ofdm_mapper_bcv: occupied carriers must be <= fft_length");
@@ -616,7 +617,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
 
 #if 1
   // see if there is permission to transmit (benchmark.py gives it) //
-  if(d_pending_flag == 1) {
+  if(d_pending_flag == 1 && d_perm==1) {
      gr_message_sptr d_permMsg = d_permq->delete_head();
      d_permMsg.reset();
      printf("permission received..\n"); fflush(stdout);
@@ -870,6 +871,7 @@ digital_ofdm_mapper_bcv::assign_subcarriers() {
         d_data_carriers.push_back(i+off);
   }
 
+#if 0
   /* debug carriers */
   printf("pilot carriers: \n");
   for(int i = 0; i < d_pilot_carriers.size(); i++) {
@@ -882,6 +884,7 @@ digital_ofdm_mapper_bcv::assign_subcarriers() {
      printf("%d ", d_data_carriers[i]); fflush(stdout);
   }
   printf("\n");
+#endif
 }
 
 void
@@ -1427,7 +1430,7 @@ digital_ofdm_mapper_bcv::makeHeader()
      d_header.timing_offset = getTimingOffset();
 #endif
 
-   printf("makeHeader for batch: %d, pkt: %d, len: %d, timing_off: %f\n", d_batch_to_send, d_pkt_num, d_packetlen, d_header.timing_offset); fflush(stdout);
+   printf("makeHeader for flow: %d, batch: %d, pkt: %d, len: %d, timing_off: %f\n", d_header.flow_id, d_batch_to_send, d_pkt_num, d_packetlen, d_header.timing_offset); fflush(stdout);
    d_header.factor = getNormalizationFactor() * sqrt(d_header.nsenders);
 
    d_last_pkt_time = d_out_pkt_time;
@@ -2041,7 +2044,7 @@ digital_ofdm_mapper_bcv::open_client_sock(int port, const char *addr, bool block
   /* Connecting to server */
   while(connect(sockfd, (struct sockaddr*)&dest, sizeof(struct sockaddr_in)) == -1)
 	continue;
-  printf("sockfd: %d, errno: %d\n", sockfd, errno); fflush(stdout);
+  printf("(mapper) open_client_sock:: sockfd: %d, errno: %d\n", sockfd, errno); fflush(stdout);
   return sockfd;
 }
 
@@ -2049,9 +2052,9 @@ inline NodeId
 digital_ofdm_mapper_bcv::get_coFwd()
 {
    assert(d_mimo >= 1);
-   assert(d_outCLinks.size() == 1);                     // assume only 1 cofwd for now //
+   assert(d_outCLinks[d_flow].size() == 1);                     // assume only 1 cofwd for now //
 
-   int coLinkId = d_outCLinks[0];
+   int coLinkId = (d_outCLinks[d_flow])[0];
    CompositeLink *cLink = getCompositeLink(coLinkId);
    int n_coFwds = cLink->srcIds.size();
    assert(n_coFwds == 2);
@@ -2066,9 +2069,9 @@ digital_ofdm_mapper_bcv::get_coFwd()
 /* spits all the next-hop rx-ids */
 inline void
 digital_ofdm_mapper_bcv::get_nextHop_rx(NodeIds &rx_ids) {
-   printf("get_nextHop_rx start -- #links: %d\n", d_outCLinks.size()); fflush(stdout);
-   assert(d_outCLinks.size() == 1);
-   CompositeLink *link = getCompositeLink(d_outCLinks[0]);
+   printf("get_nextHop_rx start -- #links: %d\n", d_outCLinks[d_flow].size()); fflush(stdout);
+   assert(d_outCLinks[d_flow].size() == 1);
+   CompositeLink *link = getCompositeLink((d_outCLinks[d_flow])[0]);
    NodeIds dstIds = link->dstIds;
    NodeIds::iterator it = dstIds.begin();
    while(it != dstIds.end()) {
@@ -2444,8 +2447,8 @@ digital_ofdm_mapper_bcv::chooseCV_H(gr_complex *coeffs) {
   assert(d_batch_size == 2);
 
   // first check if any outstanding HInfo available //
-  vector<unsigned int>:: iterator it = d_h_rx_socks.begin();
-  while(it != d_h_rx_socks.end()) {
+  vector<unsigned int>:: iterator it = d_h_rx_socks[d_flow].begin();
+  while(it != d_h_rx_socks[d_flow].end()) {
      check_HInfo_rx_sock(*it);
      it++;
   }
@@ -2550,28 +2553,33 @@ digital_ofdm_mapper_bcv::prepare_H_coding() {
    populateEthernetAddress();
    EthInfoMap::iterator it;
 
-   int num_out_links = d_outCLinks.size();
-   if(num_out_links > 0) {
-      assert(num_out_links == 1);
-      /* create 1 rx client socket per downstream nodes to receive from */
-      for(int i = 0; i < num_out_links; i++) {
-         CompositeLink *link = getCompositeLink(d_outCLinks[i]);
+   printf("(mapper) prepare_H_coding, num_flows: %d\n", d_num_flows); fflush(stdout);
+   // to accomodate bidirectional flows. We just need to open sockets in one direction (as before), 
+   // the same sockets can then be used in either direction //
+   for(int f=0; f<d_num_flows; f++) {
+      int num_out_links = d_outCLinks[f].size();
+      if(num_out_links > 0) {
+         assert(num_out_links == 1);
+         /* create 1 rx client socket per downstream nodes to receive from */
+         for(int i = 0; i < num_out_links; i++) {
+            CompositeLink *link = getCompositeLink((d_outCLinks[f])[i]);
 
-         NodeIds dst_ids = link->dstIds;
-         for(int j = 0; j < dst_ids.size(); j++) {
-            it = d_ethInfoMap.find(dst_ids[j]);
-            assert(it != d_ethInfoMap.end());
-            EthInfo *ethInfo = (EthInfo*) it->second;
-            int rx_sock = open_client_sock(ethInfo->port, ethInfo->addr, false);
-	
-	    assert(rx_sock != -1);
-            //d_h_rx_socks.insert(pair<int, int>(dst_ids[j], rx_sock));         // dstId will send HInfo
-            d_h_rx_socks.push_back(rx_sock);
-         }
+            NodeIds dst_ids = link->dstIds;
+            for(int j = 0; j < dst_ids.size(); j++) {
+               it = d_ethInfoMap.find(dst_ids[j]);
+	       assert(it != d_ethInfoMap.end());
+	       EthInfo *ethInfo = (EthInfo*) it->second;
+	       int rx_sock = open_client_sock(ethInfo->port+f, ethInfo->addr, false);
+
+	       assert(rx_sock != -1);
+	       //d_h_rx_socks.insert(pair<int, int>(dst_ids[j], rx_sock));         // dstId will send HInfo
+	       d_h_rx_socks[f].push_back(rx_sock);
+	    }
+	 }
       }
+      printf("(mapper) flow: %d, opened H sockets for exchanging H information, #d_h_rx_socks: %d!\n", f, d_h_rx_socks[f].size()); fflush(stdout);
    }
 
-   printf("opened H sockets for exchanging H information, #d_h_rx_socks: %d!\n", d_h_rx_socks.size()); fflush(stdout);
 
    /* create 1 tx socket to send the coeffs over, if lead sender */
    if(d_mimo == 1) {
@@ -2596,7 +2604,8 @@ digital_ofdm_mapper_bcv::prepare_H_coding() {
       printf("COEFF socket - mimo slave connected to mimo master!\n"); fflush(stdout);
    }
 
-   initHInfoMap();
+   for(int i=0; i<d_num_flows; i++)
+      initHInfoMap(i);
    //initHObsQMap();
 }
 
@@ -2687,12 +2696,12 @@ digital_ofdm_mapper_bcv::updateHInfo(HKey hkey, HInfo *_hInfo) {
 
 // initializes the HInfoMap to have keys for all the relevant entries //
 inline void
-digital_ofdm_mapper_bcv::initHInfoMap() {
-   int num_out_links = d_outCLinks.size(); assert(num_out_links == 1);
-   assert(d_inCLinks.size() == 0);
+digital_ofdm_mapper_bcv::initHInfoMap(int flowId) {
+   int num_out_links = d_outCLinks[flowId].size(); assert(num_out_links <= 1);
+   //assert(d_inCLinks[flowId].size() == 0);
 
    if(num_out_links == 1) {
-      CompositeLink *link = getCompositeLink(d_outCLinks[0]);
+      CompositeLink *link = getCompositeLink((d_outCLinks[flowId])[0]);
       NodeIds dstIds = link->dstIds;
       NodeIds::iterator it = dstIds.begin();
       while(it != dstIds.end()) {
@@ -2814,7 +2823,7 @@ inline void
 digital_ofdm_mapper_bcv::populateEthernetAddress()
 {
    // node-id ethernet-addrees port-on-which-it-is-listening //
-   printf("populateEthernetAddress\n"); fflush(stdout);
+   //printf("populateEthernetAddress\n"); fflush(stdout);
    FILE *fl = fopen ( "eth_add.txt" , "r+" );
    if (fl==NULL) {
         fprintf (stderr, "File error\n");
@@ -2841,7 +2850,7 @@ digital_ofdm_mapper_bcv::populateEthernetAddress()
 
         d_ethInfoMap.insert(pair<NodeId, EthInfo*> (node_id, ethInfo));
 
-        std::cout<<"Inserting in the map: node " << node_id << " addr: " << ethInfo->addr << endl;
+        //std::cout<<"Inserting in the map: node " << node_id << " addr: " << ethInfo->addr << endl;
    }
 
     fclose (fl);
@@ -2864,8 +2873,8 @@ digital_ofdm_mapper_bcv::getCompositeLink(int id)
 inline void
 digital_ofdm_mapper_bcv::populateCompositeLinkInfo()
 {
-   // link-id   #of-src     src1   src2   src3    #of-dst   dst1   dst2    dst3  flow-id  //
-   printf("populateCompositeLinkInfo\n"); fflush(stdout);
+   // flowId link-id   #of-src     src1   src2   src3    #of-dst   dst1   dst2    dst3  flow-id  //
+   //printf("populateCompositeLinkInfo\n"); fflush(stdout);
 
    FILE *fl = fopen ( "compositeLink_info.txt" , "r+" );
    if (fl==NULL) {
@@ -2884,39 +2893,42 @@ digital_ofdm_mapper_bcv::populateCompositeLinkInfo()
            strtok_res = strtok (NULL, delim);
         }
 
-        printf("size: %d\n", token_vec.size()); fflush(stdout);
+        //printf("size: %d\n", token_vec.size()); fflush(stdout);
+
+        int flowId = atoi(token_vec[0]);
+        if(flowId == d_num_flows) {
+           d_num_flows++;
+        }
 
         CompositeLink *cLink = (CompositeLink*) malloc(sizeof(CompositeLink));
         memset(cLink, 0, sizeof(CompositeLink));
-        cLink->linkId = atoi(token_vec[0]);
-        printf("linkId: %d\n", cLink->linkId); fflush(stdout);
+        cLink->linkId = atoi(token_vec[1]);
+        //printf("linkId: %d\n", cLink->linkId); fflush(stdout);
 
-        int num_src = atoi(token_vec[1]);
-        printf("num_src: %d\n", num_src); fflush(stdout);
+        int num_src = atoi(token_vec[2]);
+        //printf("num_src: %d\n", num_src); fflush(stdout);
         for(int i = 0; i < num_src; i++) {
-           NodeId srcId = atoi(token_vec[i+2]) + '0';
-           printf("srcId: %c, size: %d\n", srcId, cLink->srcIds.size()); fflush(stdout);
+           NodeId srcId = atoi(token_vec[i+3]) + '0';
+           //printf("srcId: %c, size: %d\n", srcId, cLink->srcIds.size()); fflush(stdout);
            cLink->srcIds.push_back(srcId);
            if(srcId == d_id)
-             d_outCLinks.push_back(cLink->linkId);
+             d_outCLinks[flowId].push_back(cLink->linkId);
         }
 
-        int num_dst = atoi(token_vec[num_src+2]);
-        printf("num_dst: %d\n", num_dst); fflush(stdout);
+        int num_dst = atoi(token_vec[num_src+3]);
+        //printf("num_dst: %d\n", num_dst); fflush(stdout);
         for(int i = 0; i < num_dst; i++) {
-           NodeId dstId = atoi(token_vec[num_src+3+i]) + '0';
-           printf("dstId: %c\n", dstId); fflush(stdout);
+           NodeId dstId = atoi(token_vec[num_src+4+i]) + '0';
+           //printf("dstId: %c\n", dstId); fflush(stdout);
            cLink->dstIds.push_back(dstId);
            if(dstId == d_id)
-             d_inCLinks.push_back(cLink->linkId);
+             d_inCLinks[flowId].push_back(cLink->linkId);
         }
 
-	
-	int flowId = atoi(token_vec[3+num_src+num_dst]);
 	assert(flowId < MAX_FLOWS);
         d_compositeLinkVector[flowId].push_back(cLink);
 
-        printf("\n");
+        //printf("\n");
    }
 
     fclose (fl);

@@ -64,11 +64,23 @@ class my_top_block(gr.top_block):
 
         # do this after for any adjustments to the options that may
         # occur in the sinks (specifically the UHD sink)
-        self.txpath = transmit_path(options)
-	self.rxpath = receive_path(callback, fwd_callback, options)
+        print "flow:: ", options.flow
 
-        self.connect(self.txpath, self.sink)
-	self.connect(self.source, self.rxpath)
+        # only for bidirectional flows: source in the reverse direction needs to 
+        # start the ofdm_sink first to allow the socket connections working fine.. 
+        if (options.flow == 1):
+            self.rxpath = receive_path(callback, fwd_callback, options)
+            self.connect(self.source, self.rxpath)
+
+            self.txpath = transmit_path(options)
+            self.connect(self.txpath, self.sink)
+        else:
+            self.txpath = transmit_path(options)
+            self.connect(self.txpath, self.sink)
+
+            self.rxpath = receive_path(callback, fwd_callback, options)
+            self.connect(self.source, self.rxpath)
+
         
 # /////////////////////////////////////////////////////////////////////////////
 #                                   main
@@ -76,8 +88,26 @@ class my_top_block(gr.top_block):
 
 def main():
 
-    def fwd_callback():
-        print "fwd_callback (wrapper) invoked!"
+    def fwd_callback(self, packet):
+        """
+        Invoked by thread associated with the out queue. The resulting
+        packet needs to be sent out using the transmitter flowgraph. 
+        The packet could be either a DATA pkt or an ACK pkt. In both cases, 
+        only the pkt-hdr needs to be modulated
+
+        @param packet: the pkt to be forwarded through the transmitter chain    
+        """
+        #print "fwd_callback invoked in tunnel.py"
+        if packet.type() == 1:
+           print "<tunnel.py> tx DATA!"
+           #time.sleep(0.02)                                               #IFS
+           #time.sleep(40)
+           self.tb.txpath.send_pkt(packet, 1, False)
+        elif packet.type() == 2:
+           print "<tunnel.py> tx ACK!"
+           self.tb.txpath.send_pkt(packet, 1, False)
+        else:
+           print "<tunnel.py> unknown pkt type:", packet.type()
 
     def rx_callback(ok, payload, valid_timestamp, timestamp_sec, timestamp_frac_sec):
         global n_rcvd, n_right, batch_size, n_batch_correct, n_correct, n_total_batches
@@ -136,7 +166,6 @@ def main():
     uhd_receiver.add_options(parser)
 
     (options, args) = parser.parse_args ()
-    print "options: ", options   
 
     # build the graph
     #tb = my_top_block(options)
@@ -185,11 +214,16 @@ def main():
     # transmits fresh innovative packets, the mapper decides how many packets/batch to send
     # mapper only sends out packets (innovative or not) when this loop permits it to send.
 
-    while n < nbytes:
+    if(options.src == 1):
+      while n < nbytes:
 
-        if((okToTx() == False)):
-           time.sleep(0.05)
+	if((options.flow==0) and (n>0) and (okToTx() == False)):
+        #if((okToTx() == False)):
+           time.sleep(0.02)
            continue
+	elif((options.flow==1) and (okToTx() == False)):
+	   time.sleep(0.02)
+	   continue
         else:
            if(isEmpty_msgq() == True):
               print "Send Fresh Message -- "
@@ -209,7 +243,7 @@ def main():
 
            permitTx()
 
-    send_pkt(eof=True)
+      send_pkt(eof=True)
     tb.wait()                       # wait for it to finish
 
 if __name__ == '__main__':

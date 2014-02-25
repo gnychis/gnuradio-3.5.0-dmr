@@ -152,7 +152,7 @@ class ofdm_mod(gr.hier_block2):
                                              options.occupied_tones, options.fft_length,
                                              options.id, options.src,
                                              options.batch_size, options.encode_flag, 
-					     options.fwd, options.dst_id, options.degree, options.mimo, options.h_smart, options.flow)
+					     options.fwd, options.dst_id, options.degree, options.mimo, options.h_smart, options.flow, options.perm)
 	
 
         self.ifft = gr.fft_vcc(self._fft_length, False, win, True)
@@ -280,6 +280,8 @@ class ofdm_mod(gr.hier_block2):
                          help="enables smart coefficients using H exchange [default=%default]")
 	expert.add_option("","--flow", type="intx", default=0,
                          help="flow number (only for source of flows) [default=%default]")
+	expert.add_option("","--perm", type="intx", default=0,
+                         help="enables permissions to send pkt (only for multiple flows) [default=%default]")
 	# apurv++ end #
 
     # Make a static method to call before instantiation
@@ -344,9 +346,11 @@ class ofdm_demod(gr.hier_block2):
         self._batch_size = options.batch_size
         self._decode_flag = options.decode_flag
 	self._threshold = options.threshold
+	self._source = 0
 
-	if(options.src == 1):
+	if(hasattr(options, 'src') and options.src == 1):
 	   self._size = options.size+4
+	   self._source = 1
 	else:
 	   self._size = options.size
 
@@ -440,7 +444,7 @@ class ofdm_demod(gr.hier_block2):
                                              self._batch_size, self._decode_flag, 
                                              options.fwd, 
                                              options.replay,
-                                             self._size, self._fec_n, self._fec_k, options.degree, options.h_smart)
+                                             self._size, self._fec_n, self._fec_k, options.degree, options.h_smart, self._source)
 
         self.connect(self, self.ofdm_recv)
 

@@ -92,7 +92,7 @@ digital_make_ofdm_frame_sink (const std::vector<gr_complex> &hdr_sym_position,
 			 float phase_gain=0.25, float freq_gain=0.25*0.25/4.0, unsigned int id=1, 
 			 unsigned int batch_size=1, unsigned int decode_flag=1, 
 			 int fwd_index=0, int replay_flag=0,
-			 int exp_size=400, int fec_n=0, int fec_k=0, int degree=4, int h_coding=0);
+			 int exp_size=400, int fec_n=0, int fec_k=0, int degree=4, int h_coding=0, int _source=0);
 
 typedef complex<double> comp_d;
 
@@ -136,16 +136,6 @@ typedef struct flow_info_str {
 
 typedef vector<FlowInfo*> FlowInfoVector;
 
-#if 0
-/* composite links */
-typedef struct composite_link_str {
-  unsigned char linkId;
-  vector<unsigned int> srcIds;
-  vector<unsigned int> dstIds;
-} CompositeLink;
-typedef vector<CompositeLink*> CompositeLinkVector;
-#endif
-
 /* credits */
 typedef struct credit_str {
   unsigned char flowId;
@@ -155,35 +145,6 @@ typedef struct credit_str {
   CompositeLink nextLink;
 } CreditInfo;
 typedef vector<CreditInfo*> CreditInfoVector;
-
-#if 0
-//#ifdef H_PRECODING
-/* for exchanging h-values over the ethernet */
-// for recording the h-values between each pair of nodes. Every node maintains this info from 
-// itself->upstream node, and sends this to all upstream nodes (only single hop upstream)
-typedef struct h_info {
-  unsigned int batch_num;
-  float slope;
-  gr_complex h_value;
-} HInfo;
-
-typedef pair<unsigned int, unsigned int> HKey;		// <from, to>
-typedef map<HKey, HInfo*> HInfoMap;			// records between every pair of nodes
-
-typedef struct eth_info {
-  char addr[15];
-  int port;
-} EthInfo;
-
-typedef map<unsigned char, EthInfo*> EthInfoMap;		// to store ethernet add
-
-/* used by the co-ordinating transmitters to exchange coeff information */
-typedef struct coeff_info {
-  gr_complex coeffs[MAX_BATCH_SIZE];	// max batch size - these coeffs are reduced coeffs (2 for each rx) 
-  unsigned int rx_id;
-} CoeffInfo;
-
-#endif
 
 unsigned char random_mask_tuple[] = {
   255,  63,   0,  16,   0,  12,   0,   5, 192,   3,  16,   1, 204,   0,  85, 192,
@@ -467,7 +428,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 			   float phase_gain, float freq_gain, unsigned int id, 
 			   unsigned int batch_size, unsigned int decode_flag,
 			   int fwd_index, int replay_flag,
-			   int exp_size, int fec_n, int fec_k, int degree, int h_coding);
+			   int exp_size, int fec_n, int fec_k, int degree, int h_coding, int _source);
 
  private:
   enum state_t {STATE_SYNC_SEARCH, STATE_HAVE_SYNC, STATE_HAVE_NULL, STATE_HAVE_TRAINING, STATE_HAVE_HEADER};
@@ -490,8 +451,6 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   int                d_packet_whitener_offset;  // offset into whitener string to use
   int		     d_packetlen_cnt;		// how many so far
 
-  gr_complex * d_derotated_output;  // Pointer to output stream to send deroated symbols out
-
   // modulation parameters //
   std::vector<gr_complex>    d_hdr_sym_position;
   std::vector<unsigned char> d_hdr_sym_value_out;
@@ -502,7 +461,6 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   unsigned int d_data_nbits;
 
   std::vector<gr_complex>    d_dfe;
-
 
   unsigned char d_resid;
   unsigned int d_nresid;
@@ -531,7 +489,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 		     float phase_gain, float freq_gain, unsigned int id, 
 		     unsigned int batch_size, unsigned int decode_flag, 
 		     int fwd_index, int replay_flag,
-		     int exp_size, int fec_n, int fec_k, int degree, int h_coding);
+		     int exp_size, int fec_n, int fec_k, int degree, int h_coding, int _source);
 
   void enter_search();
   void enter_have_sync();
@@ -568,24 +526,20 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   /* apurv start */
   MULTIHOP_HDR_TYPE d_header;
   bool d_save_flag;
-  unsigned int d_save_pkt_num;
+  unsigned int d_save_pkt_num[MAX_FLOWS];
   unsigned int d_curr_ofdm_symbol_index;
   unsigned int d_num_ofdm_symbols;
   unsigned int d_num_hdr_ofdm_symbols;
 
-  gr_complex *d_curr_rx_symbols;
   unsigned int d_batch_size;
   unsigned int d_decode_flag;
-  int d_active_batch;
-  int d_last_batch_acked;
+  int d_active_batch[MAX_FLOWS], d_last_batch_acked[MAX_FLOWS], d_batch_number[MAX_FLOWS], d_pkt_num[MAX_FLOWS];
   
   unsigned int d_hdr_byte_offset;
   unsigned char d_header_bytes[HEADERBYTELEN]; 
  
-  unsigned int d_batch_number;
   unsigned int d_nsenders;
   unsigned char d_lead_sender;
-  unsigned int d_pkt_num;
 
   NodeId d_id;
   NodeId d_dst_id;
@@ -608,7 +562,7 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
   /* internal store, stores the innovative packets seen for this flow */
   FlowInfoVector d_flowInfoVector;
-  PktInfo *d_pktInfo;			     // current pkt being serviced 
+  PktInfo *d_pktInfo[MAX_FLOWS];	     // current pkt being serviced 
   gr_msg_queue_sptr  d_out_queue;            // contains modulated packets to be forwarded/ACKs
   FlowInfo* getFlowInfo(bool create, unsigned char flowId);
   void resetPktInfo(PktInfo *pktInfo);
@@ -640,12 +594,12 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   bool isInnovative();
   /** multiple senders **/
   unsigned int d_pending_senders;
-  void save_coefficients();
+  void save_coefficients(int flow);
   bool isInnovativeAfterReduction();
  
   /* etc */
   void equalizeSymbols(gr_complex *in, gr_complex *in_estimates);
-  void extract_header(gr_complex);
+  void extract_header();
   void prepareForNewBatch();
   void debugPktInfo(PktInfo *pktInfo, unsigned char senderId);
   bool isSameNodeList(vector<unsigned char> ids1, vector<unsigned char> ids2);
@@ -685,7 +639,8 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void populateCompositeLinkInfo();
   void populateCreditInfo();
   void updateCredit();
-  vector<int> d_outCLinks, d_inCLinks;
+  vector<int> d_outCLinks[MAX_FLOWS], d_inCLinks[MAX_FLOWS];
+  int d_num_flows, d_source;
 
   /* ACKs */
   unsigned int num_acks_sent;
@@ -761,23 +716,13 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   int d_replay_flag;
   /* end offline */
 
-
-  /* for extrapolating header PLL to be used in the payload (no pilot!) */
-  float *d_start_rot_error_phase;
-  float *d_avg_rot_error_amp;
-  float *d_slope_rot_error_phase;
-  vector<float*> d_error_vec;						// on each subcarrier, hold error rotations for each OFDM symbol //
-
   /* to send the ACK on the backend ethernet */
   void send_ack(unsigned char flow_id, unsigned char batch_id);
   int d_ack_sock;
 
   /* alternative way of doing ILP, more incremental in nature */
   //float **d_euclid_dist;						// [subcarrier][2^batch_size]; records the euclid dist seen on each subcarrier, for each possibility in the table! //
-  float d_euclid_dist[MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS][16];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
-
-  float d_batch_euclid_dist[MAX_BATCH_SIZE][MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS][16];
-  bool d_flag_euclid_dist[MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS];				// if set, then atleast one symbol was confident
+  float d_euclid_dist[MAX_FLOWS][MAX_OFDM_SYMBOLS][MAX_DATA_CARRIERS][16];					// for each ofdm symbol - on each subcarrier - 2^batch_size # of entries!!! 
 
   unsigned int demapper_ILP_2(unsigned int ofdm_symbol_index, vector<unsigned char*> out_vec,
                       vector<gr_complex*> batched_sym_position, FlowInfo *flowInfo,
@@ -853,7 +798,6 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
   void packCoefficientsInHeader_LSQ(MULTIHOP_HDR_TYPE&, gr_complex*, int, FlowInfo*);
   void unpackCoefficients_LSQ(gr_complex*, gr_complex*, unsigned int, unsigned int);
   unsigned int d_degree;
-  gr_complex d_lsq_coeffs[MAX_BATCH_SIZE * MAX_DEGREE];
 
   // log - debugging //
   bool d_coeff_unpacked_open;
@@ -923,20 +867,21 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
  int open_client_sock(int port, const char *addr, bool blocking);
 
  void get_nextHop_rx(NodeIds &rx_ids);
- void updateHInfo(HKey, HInfo, bool);
- void initHInfoMap();
+ void updateAndTxHInfo(gr_complex);
+ void updateHInfo(HKey, HInfo, int, bool);
+ void initHInfoMap(int);
  void prepare_H_coding();
- gr_complex predictH(NodeId tx_id, NodeId rx_id);
+ gr_complex predictH(NodeId tx_id, NodeId rx_id, int flowId);
  void populateEthernetAddress();
  void txHInfo();
- void check_HInfo_rx_sock(int);
+ void check_HInfo_rx_sock(int, int);
  void send_coeff_info_eth(CoeffInfo*);
  NodeId get_coFwd();
  void get_coeffs_from_lead(CoeffInfo *coeffs);
  void smart_selection_local(gr_complex*, CoeffInfo*, FlowInfo*); 
  void smart_selection_global(gr_complex*, CoeffInfo*, FlowInfo*);
  HInfo* getHInfo(NodeId tx_id, NodeId rx_id);
- uhd::time_spec_t getPktTimestamp(int);
+ uhd::time_spec_t getPktTimestamp(int, int flowId);
 
  void chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs);
  bool is_CV_good_H(gr_complex cv1, gr_complex cv2);
@@ -946,9 +891,9 @@ class DIGITAL_API digital_ofdm_frame_sink : public gr_sync_block
 
  // sockets used //
  int d_coeff_tx_sock, d_coeff_rx_sock;				// for tx coefficients between the co-ordinating transmitters //
- vector<unsigned int> d_h_tx_socks, d_h_rx_socks; 		// for tx HInfo between upstream/dowstream nodes //
+ vector<unsigned int> d_h_tx_socks[MAX_FLOWS], d_h_rx_socks[MAX_FLOWS]; 		// for tx HInfo between upstream/dowstream nodes //
 
- PktTxInfoList d_pktTxInfoList;
+ PktTxInfoList d_pktTxInfoList[MAX_FLOWS];
  int d_h_coding;
 
  // to record the pkt timestamps 

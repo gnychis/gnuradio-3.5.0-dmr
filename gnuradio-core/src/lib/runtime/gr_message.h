@@ -140,7 +140,7 @@ typedef struct h_info {
   gr_complex h_value;
 } HInfo;
 
-typedef std::pair<NodeId, NodeId> HKey;          // <from, to>
+typedef std::pair<NodeId, NodeId> HKey;          	     // <from, to>
 typedef std::map<HKey, HInfo*> HInfoMap;                     // records between every pair of nodes
 
 typedef struct eth_info {
