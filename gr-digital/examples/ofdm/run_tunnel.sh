@@ -1,43 +1,34 @@
 #!/bin/bash
 
-
-#id
-if [ ! -z $1 ]
-   then
-      id=$1
-   else
-      id=1
-fi
-
-#modulation
-if [ ! -z $2 ]                         
-   then
-      mod=$2     
-   else
-      mod=qpsk
-fi
-
-#h-smart
-if [ ! -z $3 ]                         
-   then
-      h_smart=$3
-   else
-      h_smart=1
-fi
-
+d_id=2
+src=0
+h_smart=0
 freq=2480M
-pkt_size=104
+size=124
+mod=qpsk
 
-# tx-parameters
-amp=0.3
-tx_gain=20
+# tx-params
+tx_gain=15
+tx_ampl=0.35
+fwd=0
 
-# rx-parameters
-thresh=1e-4
-rx_gain=10
+# rx-params
+thresh1=2e-4    # barcelona, olympic
+thresh2=0
+thresh3=0
+thresh4=0
+rx_gain=20
 
-# the command
-cmd="sudo ./tunnel.py -f $freq --tx-gain=$tx_gain --tx-amplitude=$amp --threshold=$thresh --rx-gain=$rx_gain --id=$id -s $pkt_size -m $mod --h-smart=$h_smart"
+cmd="sudo ./tunnel.py -f $freq --tx-gain=$tx_gain --tx-amplitude=$tx_ampl -s $size --id=$d_id -m $mod --rx-gain=$rx_gain --h-smart=$h_smart --threshold1=$thresh1 --threshold2=$thresh2 --threshold3=$thresh3 --threshold4=$thresh4 --fwd=$fwd"
 
-echo $cmd			# print the command
-$cmd				# execute the command
+echo $cmd                       # print the command
+
+echo "-----------------"
+echo " tx-gain: " $tx_gain
+echo " tx-amp:  " $tx_ampl
+echo " rx-gain: " $rx_gain
+echo " fwd:     " $fwd
+echo "-----------------"
+
+
+$cmd                            # execute the command

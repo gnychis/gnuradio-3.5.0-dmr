@@ -30,11 +30,20 @@
 #include <gr_threshold_ff.h>
 #include <gr_io_signature.h>
 
+
 gr_threshold_ff_sptr
 gr_make_threshold_ff (float lo, float hi, float initial_state, int fft_length)
 {
   return gnuradio::get_initial_sptr(new gr_threshold_ff (lo, hi, initial_state, fft_length));
 }
+
+
+gr_threshold_ff_sptr
+gr_make_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type)
+{
+  return gnuradio::get_initial_sptr(new gr_threshold_ff (lo, hi, initial_state, fft_length, type));
+}
+
 
 gr_threshold_ff::gr_threshold_ff (float lo, float hi, float initial_state, int fft_length)
   : gr_sync_block ("threshold_ff",
@@ -46,6 +55,44 @@ gr_threshold_ff::gr_threshold_ff (float lo, float hi, float initial_state, int f
   d_index = 0; 
   d_prev_hi = 0.0;
   assert(d_fft_length > 0);
+ 
+}
+
+
+gr_threshold_ff::gr_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type)
+  : gr_sync_block ("threshold_ff",
+                   gr_make_io_signature (1, 1, sizeof (float)),
+                   gr_make_io_signature (1, 1, sizeof (float))),
+    d_lo_vec(lo), d_hi_vec(hi), d_last_state (initial_state), d_fft_length(fft_length), d_threshold_type(type)
+{
+
+  d_index = 0;
+  d_prev_hi = 0.0;
+  assert(d_fft_length > 0);
+
+
+  d_hi = d_hi_vec[0];
+  d_lo = d_lo_vec[0];
+
+  d_samples_passed = 0;
+  d_threshold_index = 0;
+  d_prev_peak_index = 0;
+  d_gap = 0;
+
+  switch(d_threshold_type) {
+    case TWO_FLOW_SINGLE_TRANSMISSION:
+	assert(d_hi_vec.size() == 2);
+        break;
+    case ONE_FLOW_JOINT_TRANSMISSION:
+        assert(d_hi_vec.size() == 2);
+        break;
+    case TWO_FLOW_JOINT_TRANSMISSION:
+       	assert(d_hi_vec.size() == 4);
+	break;
+    default:
+	assert(d_hi_vec.size() == 1);
+	break;
+  }
 }
 
 int
@@ -79,11 +126,13 @@ gr_threshold_ff::work (int noutput_items,
   for(int i=start; i<noutput_items; i++) {
 
     out[i] = 0.0;
+    d_samples_passed++;
 
     if(in[i] > d_hi) {
       //printf("i: %d, d_last_state: %f, prev_index: %d\n", i, d_last_state, prev_index);
 	/* peak detected */
-      if(d_last_state == 0.0) {
+      //if(d_last_state == 0.0) {
+      if(d_last_state == 0.0 && (d_samples_passed >= d_gap)) {
 	 /* completely new peak */
 	 d_last_state = 1.0;
 	 prev_index = i;
@@ -101,7 +150,9 @@ gr_threshold_ff::work (int noutput_items,
 	    }
 	 }
 	 else {
+	 //else if((prev_index-d_prev_peak_index) >= d_gap) {
 	    //assert((i-prev_index) > d_fft_length);
+	
 	    out[prev_index] = 1.0;					// the prev_index peak was genuine //
 	    prev_index = i;					// now examine the new 'prev_index' //
 	    d_prev_hi = in[i];
@@ -112,9 +163,36 @@ gr_threshold_ff::work (int noutput_items,
        if(d_last_state == 1.0 && ((i-prev_index) > d_fft_length)) {
 	    /* reset: not seen any peak close enough to previous */
 	    d_last_state = 0.0;
+
 	    out[prev_index] = 1.0;
        }
     }
+
+    /* apurv++ hack:, multiple peaks */
+    if(out[prev_index] == 1.0 && (prev_index != d_prev_peak_index)) {
+       d_prev_peak_index = prev_index;
+       d_samples_passed = 0;
+       switch(d_threshold_type) {
+	  case TWO_FLOW_SINGLE_TRANSMISSION:
+		d_gap = 3.6e5;		
+		break;
+	  case ONE_FLOW_JOINT_TRANSMISSION:
+		d_gap = 1200;
+		break;
+	  case TWO_FLOW_JOINT_TRANSMISSION:
+		if(d_threshold_index == 0 || d_threshold_index == 2) 
+		   d_gap = 1200;
+		else
+		   d_gap = 3.6e5;
+		break;
+	  default: 
+		break;
+       }
+       d_threshold_index = (d_threshold_index+1) % d_hi_vec.size();
+       d_hi = d_hi_vec[d_threshold_index];
+       d_lo = d_lo_vec[d_threshold_index];	
+    }
+    /* apurv++ hack end */
   }
   /* apurv++ end */
 

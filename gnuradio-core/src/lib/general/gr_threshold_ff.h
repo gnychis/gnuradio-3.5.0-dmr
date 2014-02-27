@@ -25,10 +25,15 @@
 
 #include <gr_sync_block.h>
 
+#define TWO_FLOW_SINGLE_TRANSMISSION 1
+#define ONE_FLOW_JOINT_TRANSMISSION  2
+#define TWO_FLOW_JOINT_TRANSMISSION  3
+
 class gr_threshold_ff;
 typedef boost::shared_ptr<gr_threshold_ff> gr_threshold_ff_sptr;
 
 gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_state=0, int fft_length=0);
+gr_threshold_ff_sptr gr_make_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state=0, int fft_length=0, int type=0);
 
 /*!
  * \brief Please fix my documentation
@@ -37,10 +42,15 @@ gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_sta
 class gr_threshold_ff : public gr_sync_block
 {
   friend gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_state, int fft_length);
+  friend gr_threshold_ff_sptr gr_make_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type);
 
   float	d_lo,d_hi;		// the constant
+  std::vector<float> d_lo_vec, d_hi_vec;
+  int d_threshold_type, d_prev_peak_index, d_gap, d_threshold_index;
+  long d_samples_passed;
   float d_last_state;
   gr_threshold_ff (float lo, float hi, float initial_state, int fft_length);
+  gr_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type);
 
  public:
   float lo () const { return d_lo; }

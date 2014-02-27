@@ -345,8 +345,19 @@ class ofdm_demod(gr.hier_block2):
         self._fec_k = options.fec_k
         self._batch_size = options.batch_size
         self._decode_flag = options.decode_flag
-	self._threshold = options.threshold
+	#self._threshold = options.threshold1
 	self._source = 0
+
+	threshold_list = list()
+	threshold_list.append(options.threshold1)
+
+	if(options.threshold2 > 0):
+	   threshold_list.append(options.threshold2)
+	if(options.threshold3 > 0):
+           threshold_list.append(options.threshold3)
+	if(options.threshold4 > 0):
+           threshold_list.append(options.threshold4)
+
 
 	if(hasattr(options, 'src') and options.src == 1):
 	   self._size = options.size+4
@@ -381,7 +392,8 @@ class ofdm_demod(gr.hier_block2):
         symbol_length = self._fft_length + self._cp_length
         self.ofdm_recv = ofdm_receiver(self._fft_length, self._cp_length,
                                        self._occupied_tones, self._snr, preambles,
-				       self._threshold, options, options.log)
+				       #self._threshold, options, options.log)
+				       threshold_list, options, options.log)
 
         mods = {"bpsk": 2, "qpsk": 4, "8psk": 8, "qam8": 8, "qam16": 16, "qam64": 64, "qam256": 256}
 
@@ -511,7 +523,13 @@ class ofdm_demod(gr.hier_block2):
                           help="decodes the symbols (if true) [default=%default]")
 	expert.add_option("", "--id", type="intx", default=1,
                           help="sets the node id [default=%default]")
-        expert.add_option("", "--threshold", type="float", default=1.0,
+        expert.add_option("", "--threshold1", type="float", default=1.0,
+                          help="cross correlation threshold [default=%default]")
+	expert.add_option("", "--threshold2", type="float", default=0,
+                          help="cross correlation threshold [default=%default]")
+	expert.add_option("", "--threshold3", type="float", default=0,
+                          help="cross correlation threshold [default=%default]")
+	expert.add_option("", "--threshold4", type="float", default=0,
                           help="cross correlation threshold [default=%default]")
         expert.add_option("", "--replay", type="intx", default=-1,
                           help="replays the f-domain trace collected as dst (replayed trace need NOT be corrected/derotated then) [default=%default]")

@@ -106,7 +106,11 @@ class ofdm_sync_pn(gr.hier_block2):
 
 	   self.f2b = gr.float_to_char()
 	   self.threshold_factor = threshold #0.0012 #0.012   #0.0015
-	   self.slice = gr.threshold_ff(self.threshold_factor, self.threshold_factor, 0, fft_length)
+	   if 0:
+	      self.slice = gr.threshold_ff(self.threshold_factor, self.threshold_factor, 0, fft_length)
+	   else:
+	      #thresholds = [self.threshold_factor, 9e-5]
+	      self.slice = gr.threshold_ff(threshold, threshold, 0, fft_length, 0)
 
 	   self.connect(self.input, self.crosscorr_filter, self.corrmag, self.slice, self.f2b)
 

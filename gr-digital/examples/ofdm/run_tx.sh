@@ -1,49 +1,28 @@
 #!/bin/bash
 
-num_args=$#;
-
-#id
-if [ ! -z $1 ]
-   then
-      id=$1
-   else
-      id=1
-fi
-
-#dst
-if [ ! -z $2 ]                         
-   then
-      dst=$2
-   else
-      dst=2
-fi
-
-#modulation
-if [ ! -z $3 ]                         
-   then
-      mod=$3     
-   else
-      mod=qpsk
-fi
-
-#h-smart
-if [ ! -z $4 ]                         
-   then
-      h_smart=$4     
-   else
-      h_smart=1
-fi
-
+src=1
+d_id=1
+dst_id=3
+flow=0
+h_smart=0
 freq=2480M
-pkt_size=100
+size=124
+mod=qpsk
 
-# tx-parameters
-amp=0.4
-tx_gain=20
+# tx-params
+tx_gain=15
+tx_ampl=0.35
+mimo=0
 
-# the command
-cmd="sudo ./benchmark_tx.py -f $freq --tx-amplitude=$amp --tx-gain=$tx_gain --src=1 --id=$id --dst=$dst -s $pkt_size -m $mod --h-smart=$h_smart"
+cmd="sudo ./benchmark_tx.py -f $freq --src=$src --tx-gain=$tx_gain --tx-amplitude=$tx_ampl -s $size --id=$d_id -m $mod --dst=$dst_id --flow=$flow --h-smart=$h_smart --mimo=$mimo"
+
+echo "-----------------"
+echo " flow:    " $flow
+echo " dst:     " $dst_id
+echo " src:     " $src
+echo " tx-gain: " $tx_gain
+echo " tx-amp:  " $tx_ampl
+echo "-----------------"
 
 echo $cmd			# print the command
 $cmd				# execute the command
-
