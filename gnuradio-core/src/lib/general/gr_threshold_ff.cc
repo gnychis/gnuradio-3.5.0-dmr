@@ -39,9 +39,9 @@ gr_make_threshold_ff (float lo, float hi, float initial_state, int fft_length)
 
 
 gr_threshold_ff_sptr
-gr_make_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type)
+gr_make_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type, int gap)
 {
-  return gnuradio::get_initial_sptr(new gr_threshold_ff (lo, hi, initial_state, fft_length, type));
+  return gnuradio::get_initial_sptr(new gr_threshold_ff (lo, hi, initial_state, fft_length, type, gap));
 }
 
 
@@ -59,11 +59,11 @@ gr_threshold_ff::gr_threshold_ff (float lo, float hi, float initial_state, int f
 }
 
 
-gr_threshold_ff::gr_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type)
+gr_threshold_ff::gr_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type, int gap)
   : gr_sync_block ("threshold_ff",
                    gr_make_io_signature (1, 1, sizeof (float)),
                    gr_make_io_signature (1, 1, sizeof (float))),
-    d_lo_vec(lo), d_hi_vec(hi), d_last_state (initial_state), d_fft_length(fft_length), d_threshold_type(type)
+    d_lo_vec(lo), d_hi_vec(hi), d_last_state (initial_state), d_fft_length(fft_length), d_threshold_type(type), d_peak_gap(gap)
 {
 
   d_index = 0;
@@ -76,7 +76,7 @@ gr_threshold_ff::gr_threshold_ff (const std::vector<float> &lo, const std::vecto
 
   d_samples_passed = 0;
   d_threshold_index = 0;
-  d_prev_peak_index = 0;
+  d_prev_peak_index = -1;
   d_gap = 0;
 
   switch(d_threshold_type) {
@@ -117,6 +117,7 @@ gr_threshold_ff::work (int noutput_items,
 
   /* apurv++ start */
   int prev_index = 0;
+  int peak_index = 0;
 
   /* bypass the 1st item if d_last_state == 1 (as processed in last iteration) */
   int start = 0;
@@ -152,7 +153,8 @@ gr_threshold_ff::work (int noutput_items,
 	 else {
 	 //else if((prev_index-d_prev_peak_index) >= d_gap) {
 	    //assert((i-prev_index) > d_fft_length);
-	
+	    peak_index = prev_index;
+	    //d_agg_peak_index += peak_index;
 	    out[prev_index] = 1.0;					// the prev_index peak was genuine //
 	    prev_index = i;					// now examine the new 'prev_index' //
 	    d_prev_hi = in[i];
@@ -163,34 +165,45 @@ gr_threshold_ff::work (int noutput_items,
        if(d_last_state == 1.0 && ((i-prev_index) > d_fft_length)) {
 	    /* reset: not seen any peak close enough to previous */
 	    d_last_state = 0.0;
-
+	    peak_index = prev_index;
+	    //d_agg_peak_index += peak_index;
 	    out[prev_index] = 1.0;
        }
     }
 
     /* apurv++ hack:, multiple peaks */
-    if(out[prev_index] == 1.0 && (prev_index != d_prev_peak_index)) {
-       d_prev_peak_index = prev_index;
-       d_samples_passed = 0;
+    //if(out[peak_index] == 1.0 && (d_agg_peak_index != d_prev_peak_index)) {
+    if(out[peak_index] == 1.0 && (d_samples_passed >= d_gap)) {
+       //d_prev_peak_index = d_agg_peak_index;
        switch(d_threshold_type) {
 	  case TWO_FLOW_SINGLE_TRANSMISSION:
-		d_gap = 3.6e5;		
+		d_gap = d_peak_gap; //3.6e5;
 		break;
 	  case ONE_FLOW_JOINT_TRANSMISSION:
-		d_gap = 1200;
+		if(d_threshold_index == 0) {
+		   d_gap = 1200;
+		}
+		else {
+		   d_gap = d_peak_gap;
+		}
 		break;
 	  case TWO_FLOW_JOINT_TRANSMISSION:
-		if(d_threshold_index == 0 || d_threshold_index == 2) 
+		if(d_threshold_index == 0 || d_threshold_index == 2) {
 		   d_gap = 1200;
-		else
-		   d_gap = 3.6e5;
+		}
+		else {
+		   d_gap = d_peak_gap;
+		}
 		break;
-	  default: 
+	  default:
+		d_gap = d_peak_gap; 
 		break;
        }
+       printf("using threshold:::::::::::: %f, gap: %d, d_samples_passed: %ld\n", d_hi, d_gap, d_samples_passed); fflush(stdout);
        d_threshold_index = (d_threshold_index+1) % d_hi_vec.size();
        d_hi = d_hi_vec[d_threshold_index];
-       d_lo = d_lo_vec[d_threshold_index];	
+       d_lo = d_lo_vec[d_threshold_index];
+       d_samples_passed = 0;
     }
     /* apurv++ hack end */
   }

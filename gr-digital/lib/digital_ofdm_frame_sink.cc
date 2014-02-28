@@ -188,10 +188,12 @@ digital_ofdm_frame_sink::extract_header()
   d_pkt_num[d_flow] = d_header.pkt_num;
   d_prevLinkId = d_header.link_id;
   d_timing_offset = d_header.timing_offset;
+#if 0
   printf("\tflow:%d, pkt_num: %d \t\t\t\t batch_num: %d \t\t\t\t len: %d src: %d prev-link: %d timing_off: %f\n", d_flow, d_header.pkt_num, d_header.batch_number, d_packetlen, d_header.src_id, d_prevLinkId, d_timing_offset); fflush(stdout);
+#endif
 
   if (VERBOSE || 1)
-    fprintf(stderr, " hdr details: (src: %d), (rx: %d), (flow: %d), (batch_num: %d), (d_nsenders: %d), (d_packetlen: %d), (d_pkt_type: %d), (prev_hop: %d)\n",
+    fprintf(stderr, "hdr details: (src: %d), (rx: %d), (flow: %d), (batch_num: %d), (d_nsenders: %d), (d_packetlen: %d), (d_pkt_type: %d), (prev_hop: %d)\n",
                     d_header.src_id, d_header.dst_id, d_flow, d_batch_number[d_flow], d_nsenders, d_packetlen, d_header.pkt_type, d_header.prev_hop_id);
 
   // do appropriate conversions
@@ -257,9 +259,11 @@ void digital_ofdm_frame_sink::equalize_interpolate_dfe(const gr_complex *in, gr_
     phase_error += (in[di] * conj(pilot_sym));
   } 
 
+#if 0
   if(d_hdr_ofdm_index == 0) {
 	printf("sender index: %d, d_freq: %f, d_phase: %f\n", sender_index, d_freq[sender_index], d_phase[sender_index]); fflush(stdout);
   }
+#endif
 
   // update phase equalizer
   float angle = arg(phase_error);
@@ -793,7 +797,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 
     if (d_hdr_byte_offset == HEADERBYTELEN) {
         if (header_ok()) {						 // full header received
-          printf("HEADER OK flow: %d prev_hop: %d pkt_num: %d batch_num: %d dst_id: %d norm_factor: %f\n", d_header.flow_id, d_header.prev_hop_id, d_header.pkt_num, d_header.batch_number, d_header.dst_id, d_header.factor); 
+          printf("\n***** HEADER OK flow: %d prev_hop: %d pkt_num: %d batch_num: %d dst_id: %d norm_factor: %f *****\n", d_header.flow_id, d_header.prev_hop_id, d_header.pkt_num, d_header.batch_number, d_header.dst_id, d_header.factor); 
           fflush(stdout);
           extract_header();						// fills local fields with header info
 	  assert(d_nsenders > 0);
@@ -877,8 +881,10 @@ digital_ofdm_frame_sink::work (int noutput_items,
 		d_curr_ofdm_symbol_index = 0;
 		d_num_ofdm_symbols = ceil(((float) (d_packetlen * 8))/(d_data_carriers.size() * d_data_nbits));
 		assert(d_num_ofdm_symbols < MAX_OFDM_SYMBOLS); 				// FIXME - arbitrary '70'.. 
+#if 0
 		printf("d_num_ofdm_symbols: %d, actual sc size: %d, d_data_nbits: %d\n", d_num_ofdm_symbols, d_data_carriers.size(), d_data_nbits);
 		fflush(stdout);
+#endif
 
 		/* rx symbols */
 		d_pktInfo[d_flow]->symbols = (gr_complex*) malloc(sizeof(gr_complex) * d_num_ofdm_symbols * d_occupied_carriers);
@@ -975,7 +981,7 @@ digital_ofdm_frame_sink::work (int noutput_items,
 #endif
 	    //correctSignal(flowInfo);
 
-	    printf("check credit: fwd\n"); fflush(stdout);
+	    //printf("check credit: fwd\n"); fflush(stdout);
 	    // increment credit counter for the incoming pkt (flow based) //
 	    updateCredit();
 	    makePacket(true); 
@@ -1579,11 +1585,11 @@ digital_ofdm_frame_sink::shouldProcess() {
      if(ids.at(i) == d_id) {
 	//if(d_id == d_header.dst_id)   {
 	if(d_id == d_dst_id) {
-	     printf("destination!!\n"); fflush(stdout);
+	     //printf("destination!!\n"); fflush(stdout);
 	     d_dst = true;
 	}
 	else {
-	     printf("forwarder!!\n"); fflush(stdout);
+	     //printf("forwarder!!\n"); fflush(stdout);
 	     d_fwd = true;
 	}
 	return true;
@@ -1700,7 +1706,7 @@ digital_ofdm_frame_sink::save_coefficients(int flowId)
      assert(d_degree+1 <= MAX_DEGREE);
 
      // convert the COEFF into gr_complex //
-     printf("LSQ coefficients: \n"); fflush(stdout);
+     //printf("LSQ coefficients: \n"); fflush(stdout);
      for(unsigned int k = 0; k < d_batch_size; k++) {
          for(unsigned int i = 0; i < d_degree+1; i++) {
 	     int index = k*(d_degree+1) + i;
@@ -1983,7 +1989,7 @@ void
 digital_ofdm_frame_sink::encodeSignal(gr_complex *symbols, gr_complex coeff)
 {
   int n_data_carriers = d_data_carriers.size();
-  printf("encodeSignal start\n"); fflush(stdout);
+  //printf("encodeSignal start\n"); fflush(stdout);
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
      for(unsigned int j = 0; j < n_data_carriers; j++) {
 	 //unsigned int index = (i*d_occupied_carriers) + j;
@@ -2134,7 +2140,7 @@ digital_ofdm_frame_sink::makeHeader(MULTIHOP_HDR_TYPE &header, unsigned char *he
    memcpy(header_bytes+HEADERDATALEN, &calc_crc, sizeof(int));                // copy header crc
 
    memcpy(header_bytes+HEADERDATALEN+sizeof(int), header.pad, PADDING_SIZE);
-   printf("len: %d, crc: %u\n", d_packetlen, calc_crc);
+   //printf("len: %d, crc: %u\n", d_packetlen, calc_crc);
 
    whiten(header_bytes, HEADERBYTELEN);
    //debugHeader(header_bytes);
@@ -2305,7 +2311,7 @@ digital_ofdm_frame_sink::populateCompositeLinkInfo()
 void
 digital_ofdm_frame_sink::updateCredit()
 {
-   printf("updateCredit for prev-Link: %d\n", d_pktInfo[d_flow]->prevLinkId); fflush(stdout);
+   //printf("updateCredit for prev-Link: %d\n", d_pktInfo[d_flow]->prevLinkId); fflush(stdout);
    int size = d_creditInfoVector.size();
    assert(size > 0);
    CreditInfo* creditInfo = NULL;
@@ -2320,12 +2326,12 @@ digital_ofdm_frame_sink::updateCredit()
 	 CompositeLink link = creditInfo->previousLink;
 	 assert(d_pktInfo[d_flow] && d_pktInfo[d_flow]->senders.size() > 0);
 	
-	 printf("iterating link: %d\n", link.linkId); fflush(stdout);
+	 //printf("iterating link: %d\n", link.linkId); fflush(stdout);
 	 if(link.linkId == d_pktInfo[d_flow]->prevLinkId) {
 	     updated = true;
 	     int n_senders = d_pktInfo[d_flow]->senders.size();
 	     creditInfo->credit += (creditInfo->delta) * (n_senders/((link.srcIds).size()));
-	     printf("updated credit: %f\n", creditInfo->credit); fflush(stdout); 
+	     //printf("updated credit: %f\n", creditInfo->credit); fflush(stdout); 
 	 }
       }
    }
@@ -2336,7 +2342,7 @@ digital_ofdm_frame_sink::updateCredit()
 void
 digital_ofdm_frame_sink::makePacket(bool sync_send)
 {
-   printf("makePacket syncSend: %d, flow: %d\n", sync_send, d_flow); fflush(stdout);
+   //printf("makePacket syncSend: %d, flow: %d\n", sync_send, d_flow); fflush(stdout);
   
    /* check if any data needs to be sent out */
    /* credit check*/
@@ -2363,7 +2369,7 @@ digital_ofdm_frame_sink::makePacket(bool sync_send)
    /* credit >= 1.0 found, packet needs to be created! */
    if(found) {
       assert(creditInfo);
-      printf("sink::makePacket - DATA to send, flow: %d, credit: %f\n", creditInfo->flowId, creditInfo->credit); fflush(stdout);
+      //printf("sink::makePacket - DATA to send, flow: %d, credit: %f\n", creditInfo->flowId, creditInfo->credit); fflush(stdout);
 
       /* create the pkt now! */
       FlowInfo *flowInfo = getFlowInfo(false, creditInfo->flowId);
@@ -2392,7 +2398,7 @@ digital_ofdm_frame_sink::reduceCoefficients(FlowInfo *flowInfo) {
   int flowId = flowInfo->flowId;
   /* get the interpolated coefficients  */
   int num_senders = d_pktInfo[flowId]->n_senders;
-  printf("reduceCoefficients begin :: senders: %d\n", num_senders); fflush(stdout); 
+  //printf("reduceCoefficients begin :: senders: %d\n", num_senders); fflush(stdout); 
 
   vector<gr_complex*> interpolated_coeffs;
   for(int k = 0; k < num_senders; k++) {
@@ -2442,14 +2448,14 @@ digital_ofdm_frame_sink::reduceCoefficients(FlowInfo *flowInfo) {
       free(out_coeffs);
   }
   interpolated_coeffs.clear();
-  printf("reduceCoeffients end\n"); fflush(stdout);
+  //printf("reduceCoeffients end\n"); fflush(stdout);
 }
 
 inline void
 digital_ofdm_frame_sink::packCoefficientsInHeader(MULTIHOP_HDR_TYPE& header, gr_complex* coeffs, 
 						  int num_inno_pkts, FlowInfo *flowInfo)
 {
-  printf("packCoefficientsInHeader\n"); fflush(stdout);
+  //printf("packCoefficientsInHeader\n"); fflush(stdout);
   /* do for each subcarrier, since 'h' values are on subcarrier basis
      - half the subcarriers are really needed, the other half are interpolated */
   int num_coeffs_batch = d_data_carriers.size()/COMPRESSION_FACTOR;
@@ -2464,7 +2470,7 @@ digital_ofdm_frame_sink::packCoefficientsInHeader(MULTIHOP_HDR_TYPE& header, gr_
   int dc_tones = d_occupied_carriers - (d_data_carriers.size()+d_pilot_carriers.size());
   unsigned int half_occupied_tones = (d_occupied_carriers - dc_tones)/2;
 
-  printf("dc_tones: %d, half: %d\n", dc_tones, half_occupied_tones); fflush(stdout);
+  //printf("dc_tones: %d, half: %d\n", dc_tones, half_occupied_tones); fflush(stdout);
   int count = 0;
   int num_data_carriers = d_data_carriers.size();
 
@@ -2510,7 +2516,7 @@ digital_ofdm_frame_sink::packCoefficientsInHeader(MULTIHOP_HDR_TYPE& header, gr_
   memcpy(header.coeffs, new_coeffs, sizeof(COEFF) * count);
   free(new_coeffs); 
  
-  printf("packCoefficientsInHeader end\n"); fflush(stdout); 
+  //printf("packCoefficientsInHeader end\n"); fflush(stdout); 
 }
 #endif
 
@@ -2940,7 +2946,7 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
 {
   unsigned char flowId = creditInfo->flowId;
   assert(flowId == d_flow); fflush(stdout);
-#ifndef DEBUG
+#ifdef DEBUG
   printf("encodePktToFwd, flowId: %d\n", flowId); fflush(stdout);
 #endif
 
@@ -3067,10 +3073,10 @@ digital_ofdm_frame_sink::encodePktToFwd(CreditInfo *creditInfo, bool sync_send)
 
   d_out_queue->insert_tail(out_msg);
   sleep(0.2);
-  printf("count: %d\n", d_out_queue->count());
+  //printf("count: %d\n", d_out_queue->count());
   out_msg.reset();
  
-  printf("SINK got the packet!\n"); fflush(stdout);
+  //printf("SINK got the packet!\n"); fflush(stdout);
 
   free(coeffs);
   free(out_symbols);
@@ -3139,8 +3145,10 @@ digital_ofdm_frame_sink::getNormalizationFactor(gr_complex *symbols, int nsender
   avg_mag /= ((float) denom);
 
   float factor = sqrt(avg_mag) * sqrt(nsenders);
+#ifdef DEBUG
   printf("getNormalizationFactor, %f = (%f*%f), denom: %d, d_num_ofdm_symbols: %d\n", 
 		factor, sqrt(avg_mag), sqrt(nsenders), denom, d_num_ofdm_symbols); fflush(stdout);
+#endif
   //return avg_amp/0.7;
   return factor;
 }
@@ -4283,7 +4291,7 @@ digital_ofdm_frame_sink::calc_outgoing_timestamp(uint64_t &sync_secs, double &sy
   double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
   double duration = num_samples * time_per_sample;
   uhd::time_spec_t duration_time = uhd::time_spec_t((uint64_t) duration, duration - (uint64_t) duration);
-  printf("RX timestamp (%llu, %f), duration: %f\n", sync_secs, sync_frac_of_secs, duration); fflush(stdout);
+  //printf("RX timestamp (%llu, %f), duration: %f\n", sync_secs, sync_frac_of_secs, duration); fflush(stdout);
 
   uhd::time_spec_t c_time = d_usrp->get_time_now();
   uhd::time_spec_t proc_time = c_time - uhd::time_spec_t(sync_secs, sync_frac_of_secs);
@@ -4429,7 +4437,7 @@ digital_ofdm_frame_sink::dumpCoeffs_LSQ(gr_complex *coeff, int n, cx_fmat A) {
 inline void
 digital_ofdm_frame_sink::unpackCoefficients_LSQ(gr_complex *in_coeffs, gr_complex *out_coeffs, unsigned int obs, unsigned int degree) {
 
-   printf("unpackCoefficients_LSQ degree: %d, obs: %d\n", degree, obs); fflush(stdout);
+   //printf("unpackCoefficients_LSQ degree: %d, obs: %d\n", degree, obs); fflush(stdout);
    memset(out_coeffs, 0, sizeof(gr_complex) * obs);
    for(unsigned int i = 0; i < obs; i++) {
       for(unsigned int j = 0; j < degree+1; j++) {
@@ -4465,7 +4473,7 @@ digital_ofdm_frame_sink::unpackCoefficients_LSQ(gr_complex *in_coeffs, gr_comple
 
 inline void
 digital_ofdm_frame_sink::packCoefficientsInHeader_LSQ(MULTIHOP_HDR_TYPE& header, gr_complex* coeffs, int num_inno_pkts, FlowInfo *flowInfo) {
-  printf("packCoefficientsInHeader_LSQ\n"); fflush(stdout);
+  //printf("packCoefficientsInHeader_LSQ\n"); fflush(stdout);
   //reduceCoefficients_LSQ(flowInfo);                                                 // fill up flowInfo->reduced_coeff //
 
   /* now reduce the coefficients w.r.t. the new selected coeffs */
@@ -4486,7 +4494,7 @@ digital_ofdm_frame_sink::packCoefficientsInHeader_LSQ(MULTIHOP_HDR_TYPE& header,
   }
 
   memcpy(header.coeffs, lsq_coeffs, sizeof(COEFF) * (d_degree+1) * d_batch_size);
-  printf("packCoefficientsInHeader end\n"); fflush(stdout);
+  //printf("packCoefficientsInHeader end\n"); fflush(stdout);
 }
 
 /* reduction means to combine the 'h' and 'coeff' of different senders. Eg with 2 senders
@@ -4497,7 +4505,7 @@ digital_ofdm_frame_sink::reduceCoefficients_LSQ(FlowInfo *flowInfo) {
 
   int flowId = flowInfo->flowId;
   int num_senders = d_pktInfo[flowId]->n_senders;
-  printf("reduceCoefficients_LSQ begin :: senders: %d\n", num_senders); fflush(stdout);
+  //printf("reduceCoefficients_LSQ begin :: senders: %d\n", num_senders); fflush(stdout);
 
   /* now perform the reduction */
   unsigned int num_carriers = d_data_carriers.size();
@@ -4535,7 +4543,7 @@ digital_ofdm_frame_sink::reduceCoefficients_LSQ(FlowInfo *flowInfo) {
   }
 #endif
 
-  printf("reduceCoeffients end\n"); fflush(stdout);
+  //printf("reduceCoeffients end\n"); fflush(stdout);
 }
 #endif
 
@@ -4924,7 +4932,7 @@ digital_ofdm_frame_sink::get_eq_slope() {
   }
 
   float slope_val = (phase_last - phase_0)/((float) n);
-  printf("get_eq_slope -- is+ve: %d, slope: %f, phase_0: %f, phase_last: %f, unwrap: %d\n", pos_slope, slope_val, phase_0, phase_last, unwrap);
+  //printf("get_eq_slope -- is+ve: %d, slope: %f, phase_0: %f, phase_last: %f, unwrap: %d\n", pos_slope, slope_val, phase_0, phase_last, unwrap);
   return slope_val;
 }
 
@@ -5291,7 +5299,7 @@ digital_ofdm_frame_sink::get_coFwd()
 /* spits all the next-hop rx-ids */
 inline void
 digital_ofdm_frame_sink::get_nextHop_rx(NodeIds &rx_ids) {
-   printf("get_nextHop_rx start\n"); fflush(stdout);
+   //printf("get_nextHop_rx start\n"); fflush(stdout);
    assert(d_outCLinks[d_flow].size() == 1);
    CompositeLink *link = getCompositeLink((d_outCLinks[d_flow])[0]);
    NodeIds dstIds = link->dstIds;
@@ -5301,7 +5309,7 @@ digital_ofdm_frame_sink::get_nextHop_rx(NodeIds &rx_ids) {
       it++;
    }
 
-   printf("get_nextHop_rx -- # rx_ids: %d\n", rx_ids.size()); fflush(stdout);
+   //printf("get_nextHop_rx -- # rx_ids: %d\n", rx_ids.size()); fflush(stdout);
 }
 
 inline void
@@ -5313,12 +5321,12 @@ digital_ofdm_frame_sink::send_coeff_info_eth(CoeffInfo *coeffs)
 
    // convert the *coeffs into CoeffInfo //
    int buf_size = sizeof(CoeffInfo) * num_rx;
-   printf("send_coeff_info_eth to node %c\n", get_coFwd()); fflush(stdout);
+   //printf("send_coeff_info_eth to node %c\n", get_coFwd()); fflush(stdout);
    char *_buf = (char*) malloc(buf_size);
    memcpy(_buf, coeffs, buf_size);
 
    int bytes_sent = send(d_coeff_tx_sock, (char *)&_buf[0], buf_size, 0);
-   printf("Coeffs sent, bytes_sent: %d, errno: %d\n", bytes_sent, errno); fflush(stdout);
+   //printf("Coeffs sent, bytes_sent: %d, errno: %d\n", bytes_sent, errno); fflush(stdout);
    free(_buf);
 }
 
@@ -5330,7 +5338,7 @@ digital_ofdm_frame_sink::get_coeffs_from_lead(CoeffInfo *coeffs)
    get_nextHop_rx(rx_ids); 
    int num_rx = rx_ids.size(); assert(num_rx > 0);
 
-   printf("get_coeffs_from_lead, num_rx: %d\n", num_rx); fflush(stdout);
+   //printf("get_coeffs_from_lead, num_rx: %d\n", num_rx); fflush(stdout);
 
    int buf_size = sizeof(CoeffInfo) * num_rx;
    char *_buf = (char*) malloc(buf_size);
@@ -5351,7 +5359,7 @@ digital_ofdm_frame_sink::get_coeffs_from_lead(CoeffInfo *coeffs)
    }
 
    assert(offset != 0);
-   printf("get_coeffs_from_lead end -- offset: %d\n", offset); fflush(stdout);
+   //printf("get_coeffs_from_lead end -- offset: %d\n", offset); fflush(stdout);
    free(_buf);
 }
 
@@ -5365,13 +5373,13 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
       NodeId rx_id = rx_ids[i];
       gr_complex h = predictH(d_id, rx_id, flowInfo->flowId);         //h-val from me to this rx
       h_vec.push_back(h);
-      printf("h: (%.2f, %.2f)\n", h.real(), h.imag());
+      //printf("h: (%.2f, %.2f)\n", h.real(), h.imag());
   }
 
   InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
   unsigned int n_inno_pkts = inno_pkts.size();
 
-  printf("smart_selection_local start, #inno_pkts: %d\n", n_inno_pkts); fflush(stdout);
+  //printf("smart_selection_local start, #inno_pkts: %d\n", n_inno_pkts); fflush(stdout);
   int num_carriers = d_data_carriers.size();
 
   // to cap the max iterations //
@@ -5436,7 +5444,7 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
  
      iter++;
      if(good || iter == max_iter) {
-       printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
+       //printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
 
        if(iter == max_iter) {
 	  for(int k = 0; k < d_batch_size; k++) 
@@ -5449,10 +5457,12 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
      }
   }
 
+#if 0
   printf("smart_selection_local cv: \n"); fflush(stdout);
   for(int k = 0; k < n_inno_pkts; k++) {
      printf("(%f, %f) \n", coeffs[k].real(), coeffs[k].imag()); fflush(stdout);
   }
+#endif
 }
 
 #if 0
@@ -5578,7 +5588,7 @@ inline void
 digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo *others_coeffs, FlowInfo *flowInfo) {
   InnovativePktInfoVector inno_pkts = flowInfo->innovative_pkts;
   unsigned int n_inno_pkts = inno_pkts.size();
-  printf("smart_selection_global start\n"); fflush(stdout);
+  //printf("smart_selection_global start\n"); fflush(stdout);
 
   NodeIds rx_ids;
   get_nextHop_rx(rx_ids); 
@@ -5589,7 +5599,7 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
       NodeId rx_id = rx_ids[i];
       gr_complex h = predictH(d_id, rx_id, flowInfo->flowId);         //h-val from me to this rx
       h_vec.push_back(h);
-      printf("h: (%.2f, %.2f)\n", h.real(), h.imag());
+      //printf("h: (%.2f, %.2f)\n", h.real(), h.imag());
   }
 
   int num_carriers = d_data_carriers.size();
@@ -5643,22 +5653,24 @@ digital_ofdm_frame_sink::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
 
      iter++;
      if(good || iter == max_iter) {
-        printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
+        //printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
         for(int k = 0; k < n_inno_pkts; k++)
            my_coeffs[k] = best_coeff[k];
         break;
      }
   } // end while
 
+#if 0
   printf("smart_selection_global cv: \n"); fflush(stdout);
   for(int k = 0; k < n_inno_pkts; k++) {
      printf("(%f, %f) \n", my_coeffs[k].real(), my_coeffs[k].imag()); fflush(stdout);
   }
+#endif
 }
 
 inline void
 digital_ofdm_frame_sink::chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs) {
-  printf("chooseCV_H -- \n"); fflush(stdout);
+  //printf("chooseCV_H -- \n"); fflush(stdout);
   assert(d_batch_size <= 2);
   int flowId = flowInfo->flowId; assert(d_flow == flowId);
  
@@ -5680,7 +5692,7 @@ digital_ofdm_frame_sink::chooseCV_H(FlowInfo *flowInfo, gr_complex *coeffs) {
      get_coeffs_from_lead(lead_coeffs);
      smart_selection_global(coeffs, lead_coeffs, flowInfo);
   }
-  printf("chooseCV_H done -- \n"); fflush(stdout);
+  //printf("chooseCV_H done -- \n"); fflush(stdout);
 }
 
 inline HInfo*
@@ -5742,6 +5754,31 @@ digital_ofdm_frame_sink::prepare_H_coding() {
    populateEthernetAddress();   
    EthInfoMap::iterator it;
 
+   /* create 1 tx socket to send the coeffs over, if lead sender */
+   if(d_fwd_index == 1) {
+      it = d_ethInfoMap.find(d_id);
+      assert(it != d_ethInfoMap.end());
+      EthInfo *ethInfo = (EthInfo*) it->second;
+      vector<unsigned int> conn_socks;
+      open_server_sock(ethInfo->port + 50, conn_socks, 1);              // only 1 client needs to be connected
+      d_coeff_tx_sock = conn_socks[0];
+   }
+   /* else open 1 rx socket to receive from the lead sender */
+   else if (d_fwd_index == 2) {
+      NodeId co_id = get_coFwd();
+      it = d_ethInfoMap.find(co_id);
+      assert(it != d_ethInfoMap.end());
+      EthInfo *ethInfo = (EthInfo*) it->second;
+      d_coeff_rx_sock = open_client_sock(ethInfo->port+50, ethInfo->addr, true);
+
+      /* set a timeout on this - if it expires, then I'll go by myself */
+      struct timeval tv;
+      tv.tv_sec = 0;
+      tv.tv_usec = 8e5;
+      assert(setsockopt(d_coeff_rx_sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,sizeof(struct timeval))==0);
+   }
+
+
    printf("prepare_H_coding, num_flows: %d\n", d_num_flows); fflush(stdout);
    // to accomodate bidirectional flows. We just need to open sockets in one direction (as before), 
    // the same sockets can then be used in either direction //
@@ -5784,6 +5821,7 @@ digital_ofdm_frame_sink::prepare_H_coding() {
 
    printf("opened H sockets for exchanging H information!\n"); fflush(stdout);
 
+#if 0
    /* create 1 tx socket to send the coeffs over, if lead sender */
    if(d_fwd_index == 1) {
       it = d_ethInfoMap.find(d_id);
@@ -5808,6 +5846,7 @@ digital_ofdm_frame_sink::prepare_H_coding() {
       assert(setsockopt(d_coeff_rx_sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,sizeof(struct timeval))==0);
 
    }
+#endif
 
    for(int i=0; i<d_num_flows; i++)
      initHInfoMap(i);
@@ -5827,7 +5866,7 @@ digital_ofdm_frame_sink::updateHInfo(HKey hkey, HInfo _hInfo, int flowId, bool u
    if(update_slope) {
       // discard if a repetitive report //
       if(_hInfo.pkt_num == hInfo->pkt_num) {
-	  printf("updateHInfo discarded, pkt_num: %d\n", hInfo->pkt_num); fflush(stdout);
+	  //printf("updateHInfo discarded, pkt_num: %d\n", hInfo->pkt_num); fflush(stdout);
           return;
       }
 
@@ -5846,9 +5885,9 @@ digital_ofdm_frame_sink::updateHInfo(HKey hkey, HInfo _hInfo, int flowId, bool u
 	 double rate = 1.0/decimation;
 	 double time_per_sample = 1 / 100000000.0 * (int)(1/rate);
 	 uint64_t interval_samples = total_time/time_per_sample;
-	 std::cout<<"time/sample: "<<time_per_sample<<" samples: "<<interval_samples<<" total time: "<<total_time<<endl;
+	 //std::cout<<"time/sample: "<<time_per_sample<<" samples: "<<interval_samples<<" total time: "<<total_time<<endl;
 
-	 printf(" -- old_angle: %.2f, new_angle: %.2f\n", old_angle, new_angle); fflush(stdout);
+	 //printf(" -- old_angle: %.2f, new_angle: %.2f\n", old_angle, new_angle); fflush(stdout);
          if(new_angle < old_angle) {
             new_angle = new_angle + 2*M_PI;
          }
@@ -5860,12 +5899,14 @@ digital_ofdm_frame_sink::updateHInfo(HKey hkey, HInfo _hInfo, int flowId, bool u
          else
             hInfo->slope = slope;
 
-         printf("-- interval_samples: %d\n", interval_samples); fflush(stdout);
+         //printf("-- interval_samples: %d\n", interval_samples); fflush(stdout);
       }
    }
 
+#if 0
    printf("updateHInfo - (%c, %c) flowId: %d, pkt_num: %d, old_pkt: %d, slope: %f, old_angle: %.2f, new_angle: %.2f, timing_off: %f \n", 
 		hkey.first, hkey.second, flowId, _hInfo.pkt_num, hInfo->pkt_num, hInfo->slope, old_angle, arg(_hInfo.h_value), _hInfo.timing_slope); fflush(stdout);
+#endif
 
    // now update the hInfo //
    hInfo->pkt_num = _hInfo.pkt_num;
@@ -5966,8 +6007,7 @@ digital_ofdm_frame_sink::check_HInfo_rx_sock(int rx_sock, int flowId) {
                updateHInfo(hkey, *hInfo, flowId, true);
                free(hInfo);
             }
-	    else 
-	       printf("ignore check_HInfo_rx, d_id: %c, id: %d\n", d_id, id); fflush(stdout);
+	    //else printf("ignore check_HInfo_rx, d_id: %c, id: %d\n", d_id, id); fflush(stdout);
 
 	    n_extracted++;
 	    
@@ -5986,7 +6026,7 @@ digital_ofdm_frame_sink::check_HInfo_rx_sock(int rx_sock, int flowId) {
       assert(offset == buf_size);
    }
 
-   printf("check_HInfo_rx, nextracted: %d\n", n_extracted); fflush(stdout);
+   //printf("check_HInfo_rx, nextracted: %d\n", n_extracted); fflush(stdout);
    free(_buf);
 } 
 
@@ -6006,7 +6046,7 @@ digital_ofdm_frame_sink::txHInfo() {
    NodeIds tx_ids = clink->srcIds;
    assert(tx_ids.size() == num_clients);
 
-   printf("txHInfo to num_clients: %d, buf_size: %d\n", num_clients, buf_size); fflush(stdout);
+   //printf("txHInfo to num_clients: %d, buf_size: %d\n", num_clients, buf_size); fflush(stdout);
 
    // build the payload
    NodeIds::iterator it = tx_ids.begin();
@@ -6027,15 +6067,14 @@ digital_ofdm_frame_sink::txHInfo() {
        memcpy(_buf+offset, hInfo, sizeof(HInfo));
        offset += sizeof(HInfo);
        it++;
-       printf(" -- HInfo details: pkt: %d, val: (%.2f, %.2f)\n", 
-			hInfo->pkt_num, hInfo->h_value.real(), hInfo->h_value.imag()); fflush(stdout);
+       //printf(" -- HInfo details: pkt: %d, val: (%.2f, %.2f)\n", hInfo->pkt_num, hInfo->h_value.real(), hInfo->h_value.imag()); fflush(stdout);
    }
 
    // send msgs
    vector<unsigned int>::iterator _it = d_h_tx_socks[d_flow].begin();
    while(_it != d_h_tx_socks[d_flow].end()) {
    	int bytes_sent = send(*_it, _buf, buf_size, 0);
-        printf("HInfo sent, bytes_sent: %d, errno: %d\n", bytes_sent, errno); fflush(stdout);
+        //printf("HInfo sent, bytes_sent: %d, errno: %d\n", bytes_sent, errno); fflush(stdout);
 	_it++;
    }
 
@@ -6049,7 +6088,7 @@ digital_ofdm_frame_sink::txHInfo() {
 #endif
 
    free(_buf);
-   printf("txHInfo done to num_clients: %d--- \n", d_h_tx_socks[d_flow].size()); fflush(stdout);
+   //printf("txHInfo done to num_clients: %d--- \n", d_h_tx_socks[d_flow].size()); fflush(stdout);
 }
 
 inline void

@@ -176,7 +176,9 @@ digital_ofdm_frame_acquisition::correlate(const gr_complex *symbol, int zeros_on
   d_coarse_freq = index - zeros_on_left;
   int d_old = d_coarse_freq;
   d_coarse_freq = 0; //hack apurv++
-  printf("old: %d, new: %d\n", d_old, d_coarse_freq); fflush(stdout);
+  if(d_old != 0 || d_coarse_freq != 0) {
+     printf("old: %d, new: %d\n", d_old, d_coarse_freq); fflush(stdout);
+  }
 }
 
 void

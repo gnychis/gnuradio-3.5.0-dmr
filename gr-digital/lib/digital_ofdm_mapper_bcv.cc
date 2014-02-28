@@ -236,7 +236,7 @@ digital_ofdm_mapper_bcv::work(int noutput_items,
       d_default = false;
     }
     else if(d_msg[0]->type() == DATA_TYPE) {
-      printf("ofdm_mapper: sending DATA, type: %d, HEADERBYTELEN: %d, msglen: %d\n", d_msg[0]->type(), HEADERBYTELEN, d_msg[0]->length()); fflush(stdout);
+      //printf("ofdm_mapper: sending DATA, type: %d, HEADERBYTELEN: %d, msglen: %d\n", d_msg[0]->type(), HEADERBYTELEN, d_msg[0]->length()); fflush(stdout);
       d_ack = false;
       d_data = true;
       d_default = false;
@@ -620,7 +620,7 @@ digital_ofdm_mapper_bcv::work_source(int noutput_items,
   if(d_pending_flag == 1 && d_perm==1) {
      gr_message_sptr d_permMsg = d_permq->delete_head();
      d_permMsg.reset();
-     printf("permission received..\n"); fflush(stdout);
+     //printf("permission received..\n"); fflush(stdout);
   }
 #endif
 
@@ -1434,6 +1434,7 @@ digital_ofdm_mapper_bcv::makeHeader()
    d_header.factor = getNormalizationFactor() * sqrt(d_header.nsenders);
 
    d_last_pkt_time = d_out_pkt_time;
+#if 0
    printf("Using code vectors for batch: %d, pkt: %d, len: %d: ", d_batch_to_send, d_pkt_num, d_packetlen); fflush(stdout);
    for(unsigned int k = 0; k < d_batch_size; k++) {
       COEFF coeff = d_header.coeffs[k];
@@ -1441,6 +1442,7 @@ digital_ofdm_mapper_bcv::makeHeader()
       float phase = ((float) coeff.phase)/SCALE_FACTOR_PHASE;
       printf("(A: %f, P: %f) ", amp, phase);
    }
+#endif
 
    for(int i = 0; i < PADDING_SIZE; i++)
 	d_header.pad[i] = 0; 
@@ -1455,7 +1457,7 @@ digital_ofdm_mapper_bcv::makeHeader()
    memcpy(d_header_bytes+HEADERDATALEN, &calc_crc, sizeof(int));		// copy header crc
 
    memcpy(d_header_bytes+HEADERDATALEN+sizeof(int), d_header.pad, PADDING_SIZE);
-   printf("len: %d, crc: %u\n", d_packetlen, calc_crc);
+   //printf("len: %d, crc: %u\n", d_packetlen, calc_crc);
 
    //debugHeader();  
    whiten();
@@ -2114,7 +2116,7 @@ digital_ofdm_mapper_bcv::get_coeffs_from_lead(CoeffInfo *coeffs)
 
    int nbytes = recv(d_coeff_rx_sock, _buf, buf_size, MSG_PEEK);
   
-   printf("buf_size: %d, nbytes: %d, sizeof(CoeffInfo): %d\n", buf_size, nbytes, sizeof(CoeffInfo)); fflush(stdout);
+   //printf("buf_size: %d, nbytes: %d, sizeof(CoeffInfo): %d\n", buf_size, nbytes, sizeof(CoeffInfo)); fflush(stdout);
    int offset = 0;
    if(nbytes > 0) {
       while(1) {
@@ -2129,14 +2131,14 @@ digital_ofdm_mapper_bcv::get_coeffs_from_lead(CoeffInfo *coeffs)
    }
 
    assert(offset != 0);
-   printf("get_coeffs_from_lead end -- offset: %d\n", offset); fflush(stdout);
+   //printf("get_coeffs_from_lead end -- offset: %d\n", offset); fflush(stdout);
    free(_buf);
 }
 
 inline void
 digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *coeffInfo) {
   int num_carriers = d_data_carriers.size();
-  printf("smart_selection_local start\n"); fflush(stdout);
+  //printf("smart_selection_local start\n"); fflush(stdout);
 
   // get the predicted value of h for each of the receivers //
   NodeIds rx_ids;
@@ -2193,14 +2195,14 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
 
      iter++;
      if(good || iter == max_iter) {
-        printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
+        //printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
         for(int k = 0; k < d_batch_size; k++)
            coeffs[k] = best_coeff[k];
         break;
      }
   } // while
 
-  if(d_batch_size == 2) {
+  if(d_batch_size == 2 && 0) {
      printf("smart selection local -- coeffs1 (%.2f, %.2f) coeffs2 (%.2f, %.2f) red1 (%.2f, %.2f) red2 (%.2f, %.2f)\n",
                                   coeffs[0].real(), coeffs[0].imag(), coeffs[1].real(), coeffs[1].imag(),
                                   reduced_coeffs[0].real(), reduced_coeffs[0].imag(), reduced_coeffs[1].real(), reduced_coeffs[1].imag());
@@ -2291,7 +2293,7 @@ digital_ofdm_mapper_bcv::smart_selection_local(gr_complex *coeffs, CoeffInfo *co
 /* more exhaustive now, since it accounts for co-ordinating transmitters, multiple rx (if any) */
 inline void
 digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo *others_coeffs) {
-  printf("smart_selection_global start\n"); fflush(stdout);
+  //printf("smart_selection_global start\n"); fflush(stdout);
 
   NodeIds rx_ids;
   get_nextHop_rx(rx_ids);
@@ -2443,7 +2445,7 @@ digital_ofdm_mapper_bcv::smart_selection_global(gr_complex *my_coeffs, CoeffInfo
 
 inline void
 digital_ofdm_mapper_bcv::chooseCV_H(gr_complex *coeffs) {
-  printf("chooseCV_H -- \n"); fflush(stdout);
+  //printf("chooseCV_H -- \n"); fflush(stdout);
   assert(d_batch_size == 2);
 
   // first check if any outstanding HInfo available //
@@ -2759,7 +2761,7 @@ digital_ofdm_mapper_bcv::updateHObsQMap() {
 */
 inline void
 digital_ofdm_mapper_bcv::check_HInfo_rx_sock(int rx_sock) {
-   printf("check_HInfo_rx_sock start\n"); fflush(stdout);
+   //printf("check_HInfo_rx_sock start\n"); fflush(stdout);
    int buf_size = sizeof(HInfo) + (sizeof(NodeId) * 2);                // extra 2 bytes for the sender's+rx id
    char *_buf = (char*) malloc(buf_size);
    memset(_buf, 0, buf_size);
@@ -2773,7 +2775,7 @@ digital_ofdm_mapper_bcv::check_HInfo_rx_sock(int rx_sock) {
       while(1) {
          nbytes = recv(rx_sock, _buf+offset, buf_size-offset, 0);
 	 if(nbytes > 0) offset += nbytes;
-	 printf("nbytes: %d, offset: %d\n", nbytes, offset); fflush(stdout);
+	 //printf("nbytes: %d, offset: %d\n", nbytes, offset); fflush(stdout);
          if(offset == buf_size) {
 
             rxId[n_extracted] = _buf[0];                               // copy the sender's id
@@ -2794,11 +2796,11 @@ digital_ofdm_mapper_bcv::check_HInfo_rx_sock(int rx_sock) {
 
             if(n_extracted == 1) {
               // see if there's another packet - I'll try and get only one more, rest later //
-	      printf("n_extracted: %d\n", n_extracted); fflush(stdout);
+	      //printf("n_extracted: %d\n", n_extracted); fflush(stdout);
               memset(_buf, 0, buf_size);
               nbytes = recv(rx_sock, _buf, buf_size, MSG_PEEK);
               if(nbytes > 0) {
-		 printf("another packet rx, nbytes: %d\n", nbytes); fflush(stdout);
+		 //printf("another packet rx, nbytes: %d\n", nbytes); fflush(stdout);
                  offset = 0;
                  continue;
               }
@@ -2815,7 +2817,7 @@ digital_ofdm_mapper_bcv::check_HInfo_rx_sock(int rx_sock) {
    int waiting = nbytes/buf_size;
 
 
-   printf("check_HInfo_rx, nextracted: %d, remaining: %d\n", n_extracted, waiting); fflush(stdout);
+   //printf("check_HInfo_rx, nextracted: %d, remaining: %d\n", n_extracted, waiting); fflush(stdout);
    free(_buf);
 }
 

@@ -25,7 +25,7 @@ from numpy import fft
 from gnuradio import gr
 
 class ofdm_sync_pn(gr.hier_block2):
-    def __init__(self, fft_length, cp_length, kstime, threshold, logging=False):
+    def __init__(self, fft_length, cp_length, kstime, threshold, threshold_type, threshold_gap, logging=False):
         """
         OFDM synchronization using PN Correlation:
         T. M. Schmidl and D. C. Cox, "Robust Frequency and Timing
@@ -110,7 +110,7 @@ class ofdm_sync_pn(gr.hier_block2):
 	      self.slice = gr.threshold_ff(self.threshold_factor, self.threshold_factor, 0, fft_length)
 	   else:
 	      #thresholds = [self.threshold_factor, 9e-5]
-	      self.slice = gr.threshold_ff(threshold, threshold, 0, fft_length, 0)
+	      self.slice = gr.threshold_ff(threshold, threshold, 0, fft_length, threshold_type, threshold_gap)
 
 	   self.connect(self.input, self.crosscorr_filter, self.corrmag, self.slice, self.f2b)
 

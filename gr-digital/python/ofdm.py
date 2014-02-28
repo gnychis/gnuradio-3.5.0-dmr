@@ -552,6 +552,10 @@ class ofdm_demod(gr.hier_block2):
                           help="hop number (for preamble) [default=%default]")
         expert.add_option("","--h-smart", type="intx", default=1,
                          help="enables smart coefficients using H exchange [default=%default]")
+	expert.add_option("","--threshold-type", type="intx", default=0,
+                         help="0: 1-flow, 1: 2-flow, 2: 1-flow-joint, 3: 2-flow-joint [default=%default]")
+	expert.add_option("","--threshold-gap", type="intx", default=360000,
+                         help="expected gap between peaks [default=%default]")
         # apurv++ end #
 
     # Make a static method to call before instantiation
@@ -600,7 +604,7 @@ class _queue_watcher_thread(_threading.Thread):
 	prev_batch = -1
         while self.keep_running:
             msg = self.rcvd_pktq.delete_head()
-	    print "msg.type: ", msg.type(), "\n"
+	    #print "msg.type: ", msg.type(), "\n"
 	    ########## receiver sink #########
 	    if msg.type() == 0:
 		print "here!"

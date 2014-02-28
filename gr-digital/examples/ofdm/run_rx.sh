@@ -14,14 +14,19 @@ tx_ampl=0.35
 dst_id=2
 
 # rx-params
-thresh1=2e-4	# barcelona, olympic
+thresh1=1e-2	# barcelona, olympic
 thresh2=0 #3e-4
 thresh3=0
 thresh4=0
-
 rx_gain=20
 
-cmd="sudo ./benchmark.py -f $freq --src=$src --tx-gain=$tx_gain --tx-amplitude=$tx_ampl -s $size --id=$d_id -m $mod --threshold1=$thresh1 --rx-gain=$rx_gain --dst=$dst_id --flow=$flow --h-smart=$h_smart --threshold2=$thresh2 --threshold3=$thresh3 --threshold4=$thresh4"
+# 0: 1-flow
+# 1: 2-flows
+# 2: 1-flow-joint
+# 3: 2-flows-joint
+threshold_type=0
+
+cmd="sudo ./benchmark.py -f $freq --src=$src --tx-gain=$tx_gain --tx-amplitude=$tx_ampl -s $size --id=$d_id -m $mod --threshold1=$thresh1 --rx-gain=$rx_gain --dst=$dst_id --flow=$flow --h-smart=$h_smart --threshold2=$thresh2 --threshold3=$thresh3 --threshold4=$thresh4 --threshold-type=$threshold_type"
 
 echo $cmd			# print the command
 

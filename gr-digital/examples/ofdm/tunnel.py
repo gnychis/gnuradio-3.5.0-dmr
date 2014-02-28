@@ -138,7 +138,7 @@ class cs_mac(object):
         """
         #print "fwd_callback invoked in tunnel.py"
         if packet.type() == 1:
-           print "<tunnel.py> tx DATA!"
+           #print "<tunnel.py> tx DATA!"
            #time.sleep(0.02)                                               #IFS
            #time.sleep(40)
            self.tb.txpath.send_pkt(packet, 1, False)

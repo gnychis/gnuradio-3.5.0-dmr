@@ -39,13 +39,13 @@ class gr_threshold_ff : public gr_sync_block
 };
 */
 
-gr_threshold_ff_sptr gr_make_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state=0, int fft_length=0, int type=0);
+gr_threshold_ff_sptr gr_make_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state=0, int fft_length=0, int type=0, int gap=0);
 gr_threshold_ff_sptr gr_make_threshold_ff (float lo, float hi, float initial_state=0, int fft_length=0);
 
 class gr_threshold_ff : public gr_sync_block
 {
  private:
-  gr_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type);
+  gr_threshold_ff (const std::vector<float> &lo, const std::vector<float> &hi, float initial_state, int fft_length, int type, int gap);
   gr_threshold_ff (float lo, float hi, float initial_state, int fft_length);
 
  public:
