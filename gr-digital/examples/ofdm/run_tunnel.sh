@@ -10,14 +10,14 @@ mod=qpsk
 # tx-params
 tx_gain=15
 tx_ampl=0.35
-fwd=0
+fwd=1
 hop_tx=0
 
 # 1e-4 : barcelona
 # 8e-5 : olympic
 
 # rx-params
-thresh1=1e-4 
+thresh1=6e-5
 thresh2=6e-5
 thresh3=0
 thresh4=0

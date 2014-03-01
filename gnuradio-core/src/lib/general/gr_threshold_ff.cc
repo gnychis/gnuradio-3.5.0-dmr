@@ -77,7 +77,7 @@ gr_threshold_ff::gr_threshold_ff (const std::vector<float> &lo, const std::vecto
   d_samples_passed = 0;
   d_threshold_index = 0;
   d_prev_peak_index = -1;
-  d_gap = 0;
+  d_gap = 0; d_round = 0;
 
   switch(d_threshold_type) {
     case TWO_FLOW_SINGLE_TRANSMISSION:
@@ -124,15 +124,14 @@ gr_threshold_ff::work (int noutput_items,
   if(d_last_state == 1.0)
      start = 1;
 
+  d_round++;
   for(int i=start; i<noutput_items; i++) {
 
     out[i] = 0.0;
     d_samples_passed++;
 
     if(in[i] > d_hi) {
-      //printf("i: %d, d_last_state: %f, prev_index: %d\n", i, d_last_state, prev_index);
 	/* peak detected */
-      //if(d_last_state == 0.0) {
       if(d_last_state == 0.0 && (d_samples_passed >= d_gap)) {
 	 /* completely new peak */
 	 d_last_state = 1.0;
@@ -144,44 +143,51 @@ gr_threshold_ff::work (int noutput_items,
 	 if((i-prev_index) <= d_fft_length) {
 	    if(in[i] >= d_prev_hi) {
 	       /* new peak is greater than previous one */
-	       //out[i] = 1.0;
-	       //d_last_state = 0.0;
 	       d_prev_hi = in[i];
 	       prev_index = i;
 	    }
 	 }
 	 else {
-	 //else if((prev_index-d_prev_peak_index) >= d_gap) {
+	    printf("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n");
+	    printf("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n"); fflush(stdout);
+	    assert(false);
 	    //assert((i-prev_index) > d_fft_length);
 	    peak_index = prev_index;
-	    //d_agg_peak_index += peak_index;
+	    d_samples_passed -= (i-peak_index);
 	    out[prev_index] = 1.0;					// the prev_index peak was genuine //
-	    prev_index = i;					// now examine the new 'prev_index' //
+	    prev_index = i;						// now examine the new 'prev_index' //
 	    d_prev_hi = in[i];
 	 }
       }
-    }
+    } // if(in[i] > d_hi)
     else {
        if(d_last_state == 1.0 && ((i-prev_index) > d_fft_length)) {
 	    /* reset: not seen any peak close enough to previous */
 	    d_last_state = 0.0;
 	    peak_index = prev_index;
-	    //d_agg_peak_index += peak_index;
 	    out[prev_index] = 1.0;
+	    d_samples_passed -= (i-peak_index);
        }
     }
 
     /* apurv++ hack:, multiple peaks */
-    //if(out[peak_index] == 1.0 && (d_agg_peak_index != d_prev_peak_index)) {
-    if(out[peak_index] == 1.0 && (d_samples_passed >= d_gap)) {
-       //d_prev_peak_index = d_agg_peak_index;
+    if(d_threshold_type > 1 && (d_threshold_index % 2 == 1)) {
+       if(d_samples_passed == 1320) {
+	  printf(" round: %ld, @@@@@@@@@@@@@@@@@@@ fixing the threshold @@@@@@@@@@@@@@@@@ \n", d_round); fflush(stdout);
+	  peak_index = i;
+	  out[peak_index] = 1.0;
+	  d_last_state = 0.0;
+       }
+    }
+
+    if(out[peak_index] == 1.0 && (d_last_state == 0.0) && (d_samples_passed >= d_gap)) {
        switch(d_threshold_type) {
 	  case TWO_FLOW_SINGLE_TRANSMISSION:
 		d_gap = d_peak_gap; //3.6e5;
 		break;
 	  case ONE_FLOW_JOINT_TRANSMISSION:
 		if(d_threshold_index == 0) {
-		   d_gap = 1200;
+		   d_gap = 1200+120;
 		}
 		else {
 		   d_gap = d_peak_gap;
@@ -189,7 +195,7 @@ gr_threshold_ff::work (int noutput_items,
 		break;
 	  case TWO_FLOW_JOINT_TRANSMISSION:
 		if(d_threshold_index == 0 || d_threshold_index == 2) {
-		   d_gap = 1200;
+		   d_gap = 1200+120;
 		}
 		else {
 		   d_gap = d_peak_gap;
@@ -199,22 +205,23 @@ gr_threshold_ff::work (int noutput_items,
 		d_gap = d_peak_gap; 
 		break;
        }
-       printf("using threshold:::::::::::: %f, gap: %d, d_samples_passed: %ld\n", d_hi, d_gap, d_samples_passed); fflush(stdout);
+
+       printf("round: %ld, using threshold:::::::::::: %f, i: %d, peak_index: %d, gap: %d, d_samples_passed: %ld, noutput_items: %d (new_samples_passed: %d)\n", d_round, d_hi, i, peak_index, d_gap, d_samples_passed, noutput_items, (i-peak_index)); fflush(stdout);
        d_threshold_index = (d_threshold_index+1) % d_hi_vec.size();
        d_hi = d_hi_vec[d_threshold_index];
        d_lo = d_lo_vec[d_threshold_index];
-       d_samples_passed = 0;
+       //d_samples_passed = 0;
+       d_samples_passed = (i-peak_index);
     }
     /* apurv++ hack end */
   }
   /* apurv++ end */
 
  
-  if(d_last_state == 1.0) { 
+  if(d_last_state == 1.0) {
+     d_samples_passed -= (noutput_items-prev_index);
      noutput_items = prev_index;
   }
-
-   
 
   return noutput_items;
 }

@@ -67,7 +67,7 @@ class gr_threshold_ff : public gr_sync_block
   unsigned int d_index;
   float d_prev_hi;
   int d_fft_length;
-  int d_peak_gap;
+  int d_peak_gap; long d_round;
 };
 
 #endif

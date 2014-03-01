@@ -5281,6 +5281,7 @@ digital_ofdm_frame_sink::calc_CV_dt(gr_complex cv1, gr_complex cv2) {
 inline NodeId
 digital_ofdm_frame_sink::get_coFwd()
 {
+   assert(d_flow >= 0);
    assert(d_fwd_index >= 1);
    assert(d_outCLinks[d_flow].size() == 1);                     // assume only 1 cofwd for now //
 
@@ -5765,6 +5766,7 @@ digital_ofdm_frame_sink::prepare_H_coding() {
    }
    /* else open 1 rx socket to receive from the lead sender */
    else if (d_fwd_index == 2) {
+      d_flow = 0;
       NodeId co_id = get_coFwd();
       it = d_ethInfoMap.find(co_id);
       assert(it != d_ethInfoMap.end());
