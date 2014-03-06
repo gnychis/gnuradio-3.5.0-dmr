@@ -5173,7 +5173,7 @@ digital_ofdm_frame_sink::open_mimo_sock()
   /* mimo server details */
   const char *src_ip_addr = "128.83.120.84"; //"128.83.143.15";
   int port = 9000;
-  d_mimo_sock = open_client_sock(port, src_ip_addr, false);
+  d_mimo_sock = open_client_sock(port, src_ip_addr, true);
   printf("open_mimo_sock success!\n"); fflush(stdout);
 }
 
@@ -5194,7 +5194,7 @@ digital_ofdm_frame_sink::waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_
   int offset = 12;
   int items = d_data_carriers.size() * pow(double(d_data_sym_position.size()), double(d_batch_size));
   for(unsigned int i = 0; i < d_num_ofdm_symbols; i++) {
-      memcpy(&eth_buf[offset], d_euclid_dist[i], sizeof(float) * items);
+      memcpy(&eth_buf[offset], d_euclid_dist[d_flow][i], sizeof(float) * items);
       offset += (sizeof(float) * items);
   }
   
@@ -5205,7 +5205,7 @@ digital_ofdm_frame_sink::waitForDecisionFromMimo(unsigned char packet[MAX_BATCH_
     printf("mimo: Error: failed to send to MIMO, errno: %d\n", errno);
     assert(false);
   } else
-    printf("mimo: @@@@@@@@@@@@@@@@ sent to MIMO (%d bytes) for batch %d, pkt_num: %d @@@@@@@@@@@@@@@@@@@@\n", bytes_sent, d_active_batch[d_flow], d_pkt_num[d_flow]); fflush(stdout); 
+    printf("mimo: ================ sent to MIMO (%d bytes) for batch %d, pkt_num: %d errno: %d ===================\n", bytes_sent, d_active_batch[d_flow], d_pkt_num[d_flow], errno); fflush(stdout); 
 
 #if 0
   // now wait for the decoded pkt //
@@ -5387,7 +5387,7 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
   int max_iter = 2000, iter = 0;
   gr_complex best_coeff[10];				// arbitrarily high
   assert(n_inno_pkts <= 10);
-  CoeffInfo best_cInfo;
+  CoeffInfo best_cInfo[MAX_RX];
   float max_min_dt = 0.0;
   float threshold = 0.8;
 
@@ -5419,12 +5419,13 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
 	include the channel effect for this rx */
      float dt = 0.0;
      for(int i = 0; i < rx_ids.size(); i++) {
-        cInfo->rx_id = rx_ids[i];
+        cInfo[i].rx_id = rx_ids[i];
+	//printf("cInfo->rxId: %d, rx_id: %c\n", cInfo[i].rx_id, rx_ids[i]); fflush(stdout);
         for(int k = 0; k < d_batch_size; k++) {
-           cInfo->coeffs[k] = reduced_coeffs[k] * h_vec[i];
+           cInfo[i].coeffs[k] = reduced_coeffs[k] * h_vec[i];
         }
 
-        dt += calc_CV_dt(cInfo->coeffs[0], cInfo->coeffs[1]);
+        dt += calc_CV_dt(cInfo[i].coeffs[0], cInfo[i].coeffs[1]);
      }
      dt /= ((float) rx_ids.size());
  
@@ -5434,8 +5435,11 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
      if(!good) {
         if(dt > max_min_dt) {
            max_min_dt = dt;
-           for(int k = 0; k < d_batch_size; k++) 
-	       best_cInfo.coeffs[k] = cInfo->coeffs[k];
+	   for(int i=0; i<rx_ids.size(); i++) {
+              for(int k = 0; k < d_batch_size; k++) {
+	          best_cInfo[i].coeffs[k] = cInfo[i].coeffs[k];
+	      }
+	   }
 
 	   for(int k = 0; k < n_inno_pkts; k++) 
 	       best_coeff[k] = coeffs[k];	
@@ -5448,8 +5452,11 @@ digital_ofdm_frame_sink::smart_selection_local(gr_complex *coeffs, CoeffInfo *cI
        //printf("good: %d, iter: %d, max_min_dt: %f\n", good, iter, max_min_dt); fflush(stdout);
 
        if(iter == max_iter) {
-	  for(int k = 0; k < d_batch_size; k++) 
-	     cInfo->coeffs[k] = best_cInfo.coeffs[k];
+	  for(int i=0; i<rx_ids.size(); i++) {
+	     for(int k = 0; k < d_batch_size; k++) {
+	        cInfo[i].coeffs[k] = best_cInfo[i].coeffs[k];
+	     }
+	  }
 
 	  for(int k = 0; k < n_inno_pkts; k++) 
 	     coeffs[k] = best_coeff[k];

@@ -213,15 +213,16 @@ def main():
 
     # transmits fresh innovative packets, the mapper decides how many packets/batch to send
     # mapper only sends out packets (innovative or not) when this loop permits it to send.
+    num_flows = 1
 
     if(options.src == 1):
       while n < nbytes:
 
-	if((options.flow==0) and (n>0) and (okToTx() == False)):
+	if((options.flow==0) and (n>0) and (okToTx() == False) and (num_flows == 2)):
         #if((okToTx() == False)):
            time.sleep(0.02)
            continue
-	elif((options.flow==1) and (okToTx() == False)):
+	elif((options.flow==1) and (okToTx() == False) and (num_flows == 2)):
 	   time.sleep(0.02)
 	   continue
         else:
@@ -240,6 +241,9 @@ def main():
                  sys.stderr.write('.')
                  pktno += 1
                  num_sent += 1
+
+	   if(num_flows == 1):
+              time.sleep(0.65)
 
            permitTx()
 

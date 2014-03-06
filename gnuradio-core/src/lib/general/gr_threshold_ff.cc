@@ -150,7 +150,7 @@ gr_threshold_ff::work (int noutput_items,
 	 else {
 	    printf("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n");
 	    printf("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n"); fflush(stdout);
-	    assert(false);
+	    //assert(false);
 	    //assert((i-prev_index) > d_fft_length);
 	    peak_index = prev_index;
 	    d_samples_passed -= (i-peak_index);
